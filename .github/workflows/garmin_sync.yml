@@ -1,0 +1,1 @@
+# Daily Garmin data sync cron. Fallback when webhook is missed; runs 6am UTC. See DESIGN.md > GitHub Actions.
