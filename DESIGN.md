@@ -345,8 +345,7 @@ User Input
 → Planner LLM (Sonnet) — decides path + selects tools/timeframes if needed
 → Branch:
     • no tools     → straight to final LLM
-    • SQL needed   → Haiku picks which pre-built SQL func to call → execute → final LLM
-    • tools needed → tool execution (deterministic; some tools may call Haiku internally) → final LLM
+    • tools needed → tool execution (deterministic; some tools call sql_selector internally) → final LLM
 → Final LLM (Sonnet) — coaching response. System prompt = BASE + per-tool snippets for tools that ran.
 → End behaviour + follow-up logic
 → Persist to DB
@@ -395,33 +394,11 @@ Question arrives
     ├── No tools needed
     │   → direct to final LLM
     │
-    ├── SQL / data question
-    │   → Haiku picks which pre-built SQL func to call → execute → final LLM
-    │
-    └── Analytical / multi-source (tools needed)
-        → execute tools (deterministic; some may call Haiku internally) → final LLM
+    └── Tools needed
+        → execute tools in declared order (deterministic)
+        → some tools (get_plan, trend_analysis, query_user_data) call sql_selector internally
+        → final LLM
 ```
-
-### SQL Query Registry
-
-Haiku does not generate SQL. It picks from a fixed registry of pre-built query functions defined in `db/queries.py`. Each entry is `(name, callable, description)`; the description is what Haiku reads to decide which function fits the question.
-
-```python
-# db/queries.py
-from db import activities, daily, sleep, plan
-
-REGISTRY = {
-    "get_recent_runs":         (activities.get_recent,      "Last N runs by date — supports limit + date range"),
-    "get_runs_by_pace":        (activities.get_by_pace,     "Runs filtered by avg pace range"),
-    "get_daily_summary":       (daily.get_for_date,         "Daily summary for a single date"),
-    "get_sleep_for_date":      (sleep.get_for_date,         "Sleep + HRV for a single night"),
-    "get_weekly_mileage":      (activities.weekly_mileage,  "Weekly mileage rollup over a date range"),
-    "get_current_plan_week":   (plan.get_current_week,      "Current training-plan week + completion state"),
-    # ...one entry per callable query
-}
-```
-
-Adding a new query = add a function to the relevant `db/*.py` file + add one line to `REGISTRY`. Haiku sees the new option immediately, no prompt change needed.
 
 ---
 
@@ -511,13 +488,9 @@ User question
     ├── no tools needed
     │   → final LLM (Sonnet) — 2 calls total
     │
-    ├── data/stats question
-    │   → Haiku picks pre-built SQL func from registry
-    │   → execute query
-    │   → final LLM (Sonnet) — 3 calls total
-    │
-    └── analytical / multi-source question
-        → tool execution (deterministic; specific tools may call Haiku internally)
+    └── tools needed
+        → tool execution in declared order (deterministic)
+        → some tools call sql_selector (Haiku) internally to fetch data
         → final LLM (Sonnet) with per-tool snippets in system prompt — 2-3 calls total
 ```
 
@@ -534,9 +507,9 @@ class ToolStep(BaseModel):
     name: str
     args: dict = {}
 
-class ToolPlan(BaseModel):
+class PlannerOutput(BaseModel):
     reasoning: str
-    path: Literal["no_tools", "sql", "tools"]
+    path: Literal["no_tools", "tools"]
     tools: list[ToolStep] = []
 
 # services/coach.py
@@ -546,63 +519,49 @@ def ask(question: str, user_id: str) -> str:
 
     # 2. Pydantic-validate the planner's JSON before using it.
     #    Catches: missing fields, wrong types, invalid path enum, malformed JSON.
-    plan = ToolPlan.model_validate_json(raw)
+    plan = PlannerOutput.model_validate_json(raw)
 
-    # 3. Validate tool names against REGISTRY (Pydantic can't know about runtime registry)
+    # 3. Validate tool names against TOOL_METADATA
     for step in plan.tools:
-        if step.name not in REGISTRY:
+        if step.name not in TOOL_METADATA:
             raise ValueError(f"Unknown tool: {step.name}")
 
     # 4. Branch on path — no LLM-in-the-loop
     if plan.path == "no_tools":
         return final_llm(question)                                  # 2 LLM calls total
 
-    if plan.path == "sql":
-        # Planner identified the SQL path only; Haiku picks the specific query func + args from REGISTRY.
-        # This split keeps the planner's prompt short (high-level paths) and delegates fine-grained
-        # selection to the cheaper model.
-        func_name, args = sql_selector_llm(question, user_id)
-        data = REGISTRY[func_name]["callable"](user_id, **args)
-        return final_llm(question, data)                            # 3 LLM calls total
-
-    if plan.path == "tools":
-        results = []
-        ran_tools = []
-        for step in plan.tools:                                     # deterministic execution in declared order
-            fn = REGISTRY[step.name]["callable"]
-            # Some tools (e.g. web_search, course_details) call Haiku internally to summarise their own output.
-            # That's per-tool, hidden inside the function. coach.py never calls a "content plan" LLM.
-            results.append(fn(user_id, **step.args))
-            ran_tools.append(step.name)
-        return final_llm(question, results, snippets_for=ran_tools) # 2-3 LLM calls total (3 if any tool used Haiku)
+    results = []
+    ran_tools = []
+    for step in plan.tools:                                         # deterministic execution in declared order
+        fn = TOOL_REGISTRY[step.name]
+        # Some tools (e.g. get_plan, trend_analysis) call sql_selector internally.
+        # That's per-tool, hidden inside the function. coach.py never calls sql_selector directly.
+        results.append(fn(user_id, **step.args))
+        ran_tools.append(step.name)
+    return final_llm(question, results, snippets_for=ran_tools)     # 2-3 LLM calls total
 ```
 
 Two-layer validation — **Pydantic** catches structural problems in the LLM's JSON (typos, missing fields, wrong enum); the **REGISTRY check** catches semantic problems (tool name doesn't exist). On any `ValidationError` or `ValueError`, fall back to a direct final-LLM call (per Guardrails: "if all tool names invalid, fallback to direct LLM response").
 
-### Planner Prompt — Auto-Generated From REGISTRY
+### Planner Prompt — Built From TOOL_METADATA
 
-The planner's tool list is generated from `db/queries.py REGISTRY` at app startup, so it stays in sync automatically. Adding a tool = add one line to REGISTRY; the planner sees it on next boot.
+The planner's tool list is built from `TOOL_METADATA` in `services/prompts.py`. Adding a tool = add one entry to `TOOL_METADATA` and wire up the callable in `services/coach.py::TOOL_REGISTRY`.
 
 ```python
+# services/prompts.py
 def build_planner_system() -> str:
-    tool_list = "\n".join(
-        f"- {name}({entry['args']}) — {entry['description']}"
-        for name, entry in REGISTRY.items()
-    )
-    return f"""You are a planning assistant for a running coach app.
-Given a question, decide which tools to call and in what order.
-
+    today = date.today().isoformat()
+    tool_list = "\n".join(f"- {name}: {desc}" for name, desc in TOOL_METADATA.items())
+    return f"""...
 Available tools:
 {tool_list}
-
-Return ONLY JSON:
+Today's date: {today}
+Return ONLY valid JSON:
 {{
   "reasoning": "...",
-  "path": "no_tools" | "sql" | "tools",
-  "tools": [ {{"name": "tool_name", "args": {{...}}}} ]
-}}
-
-Today's date: {{today}}"""
+  "path": "no_tools" | "tools",
+  "tools": [{{"name": "tool_name", "args": {{}}}}]
+}}"""
 ```
 
 ### Why JSON Plan, Not Anthropic's `tool_use` API
@@ -621,7 +580,6 @@ Today's date: {{today}}"""
 | Question type | LLM calls | Breakdown |
 |---|---|---|
 | No tools needed | 2 | Planner (Sonnet) + final (Sonnet) |
-| SQL / data | 3 | Planner (Sonnet) + SQL func selector (Haiku) + final (Sonnet) |
 | Analytical / multi-source | 2-3 | Planner (Sonnet) + final (Sonnet); +1 Haiku if a tool calls one internally (e.g. web search summarisation) |
 
 ### Future: Orchestrator (V2+)

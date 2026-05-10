@@ -1,6 +1,8 @@
 # CLI entry point (V1). Thin wrapper that calls services/coach.py::ask().
 import os
 from dotenv import load_dotenv
+from services.planner import planner
+
 
 load_dotenv()
 
@@ -12,8 +14,7 @@ def main():
         if user_input.lower().strip() in ["exit", "quit", "q", "bye",""]:
             break
 
-        print("Coach not implemnetd yet")
-
+        print(f"Coach: {planner(user_input)}")
 
 if __name__ == "__main__":
     main()
