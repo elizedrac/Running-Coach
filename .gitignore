@@ -203,6 +203,9 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# Garmin session tokens
+.garmin_tokens
+
 # Ruff stuff:
 .ruff_cache/
 
