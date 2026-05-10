@@ -1,4 +1,5 @@
-# Garmin webhook parsing + enrichment (weather, etc.).
+# Garmin data extraction and parsing
+# Run directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
 import os
 from dotenv import load_dotenv
 from garminconnect import Garmin
@@ -10,7 +11,7 @@ from db.health_history import insert_health_history
 # Load environment variables from .env file
 load_dotenv()
 
-DAY_PAUSE = 2  # Seconds to sleep between Garmin API calls to avoid rate limits
+DAY_PAUSE = 2  # Seconds to sleep between Garmin API calls to avoidw rate limits
 CALL_PAUSE = 1  # Seconds to sleep between individual API calls within a day
 
 def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> None:
@@ -171,3 +172,11 @@ def _mps_to_pace(mps) -> str | None:
         return None
     spm = 1609.344 / mps
     return f"{int(spm // 60)}:{int(spm % 60):02d}/mi"
+
+# allow running directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
+if __name__ == "__main__":
+    yesterday = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
+    user_id = os.getenv("USER_ID")
+    if not user_id:
+        raise ValueError("USER_ID env var not set")
+    garmin_sync(user_id, yesterday, yesterday)

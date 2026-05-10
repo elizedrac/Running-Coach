@@ -8,8 +8,7 @@ def main():
     # print(test)
 
     id = "f02a4ceb-0549-4816-ac88-07001be65c70"
-
-    garmin_sync(id, "2026-01-08", "2026-01-09")
+    garmin_sync(id, "2026-08-01", "2026-05-09")
 
 
 if __name__ == "__main__":

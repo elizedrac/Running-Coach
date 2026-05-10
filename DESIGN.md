@@ -99,19 +99,12 @@ runcoach/
 │   └── cache.py                   # Supabase search_cache read/write
 │
 ├── models/
-│   ├── activity.py                # Pydantic model for activity_history rows
-│   ├── health.py                  # Pydantic model for health_history rows
-│   ├── race.py                    # Pydantic model for the user's target race
-│   ├── preferences.py             # Pydantic model for training_preferences
-│   ├── plan.py                    # Pydantic models for training plan + days + intervals
-│   └── planner.py                 # Pydantic model for planner LLM JSON output (ToolPlan)
+│   ├── planner.py                 # Pydantic model for planner LLM JSON output (ToolPlan)
+│   └── finish_time_predictor.json # Serialised XGBoost model (V2)
 │
 ├── knowledge/
 │   ├── training_zones.json        # HR zones, pace zones — static reference
 │   └── race_distances.json        # Standard distances in km — static reference
-│
-├── models/
-│   └── finish_time_predictor.json # Serialised XGBoost model
 │
 ├── tests/
 │   ├── test_deterministic.py      # All deterministic logic (plan constraints etc)
@@ -165,17 +158,18 @@ create table training_preferences (
 ### activity_history (per-activity rows from Garmin)
 ```sql
 create table activity_history (
-    id              uuid default gen_random_uuid() primary key,
-    user_id         uuid references users(id),
-    calendar_date   timestamptz,
-    calories_burned float,
-    activity_type   text,
-    miles           float,
-    avg_hr          float,
-    max_hr          float,
-    total_time      interval,
-    average_pace    text,
-    created_at      timestamptz default now()
+    id                  uuid default gen_random_uuid() primary key,
+    user_id             uuid references users(id),
+    garmin_activity_id  bigint unique,
+    calendar_date       date,
+    calories_burned     float,
+    activity_type       text,
+    miles               float,
+    avg_hr              float,
+    max_hr              float,
+    total_time          interval,
+    average_pace        text,
+    created_at          timestamptz default now()
 );
 ```
 
@@ -295,9 +289,8 @@ Garmin Device
 └── syncs to Garmin Connect
     └── pings webhook (POST to /activities)
         └── FastAPI handler (routes/activities.py)
-            └── Pydantic validation (models/activity.py)
-                └── Enrich with weather (services/weather.py)
-                    └── Insert to Supabase (db/activities.py)
+            └── Enrich with weather (services/weather.py)
+                └── Insert to Supabase (db/activity_history.py)
 
 User Question
 └── POST /ask (routes/ask.py)
@@ -739,10 +732,8 @@ models/
 ## Guardrails & Validation
 
 ### Pydantic Validation
-- All Garmin JSON payloads validated before DB insert
-- Optional fields on most health metrics (not all devices record all fields)
-- Unknown fields stripped, missing optionals default to None
 - **Planner LLM output validated** via `ToolPlan` Pydantic model (`models/planner.py`) before any tool dispatch — catches malformed JSON, missing fields, wrong types, invalid `path` enum
+- Garmin data is not validated with Pydantic — the API shape is stable and helper functions handle type coercion (`_to_int`, `_seconds_to_interval`, `_mps_to_pace`)
 
 ### Deterministic Checks
 - SQL outputs must start with SELECT — raise ValueError otherwise
@@ -793,14 +784,14 @@ Garmin rate limit: 100 req/min. 60s wait on rate limit hit. Up to 3 attempts.
 
 ## External APIs
 
-### Garmin Connect Developer API
+### Garmin Connect (unofficial `garminconnect` library)
 
-- **Auth**: OAuth 2.0
-- **Health API**: daily summaries, sleep, HR, HRV, stress, body battery, SpO2, VO2 max
-- **Activity API**: per-activity data in FIT/GPX format
-- **Rate limit**: 100 requests/minute. 1 request = 1 data type per day. ~20 requests/day for multiple activities
-- **Timestamps**: all UTC. `calendar_date` pre-calculated in local time by Garmin — use this for day-level grouping
-- **Backfill**: up to 2 years (Health API), 5 years (Activity API)
+- **Auth**: email/password login; session tokens saved to `.garmin_tokens` and reused to avoid rate limiting
+- **Health API**: daily summaries, sleep, HR, HRV, stress, VO2 max
+- **Activity API**: per-activity data (distance, pace, HR, duration, type)
+- **Rate limit**: sleep 2s between days, 1s between calls within a day to avoid 429s
+- **Timestamps**: `calendar_date` pre-calculated in local time by Garmin — use this for day-level grouping
+- **Backfill**: supports arbitrary date ranges via `get_activities_by_date` + daily stat calls
 
 ### Open-Meteo
 
@@ -869,7 +860,7 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 
 ### Phase 2 — Data Layer (Week 1, Thu–Fri)
 
-4. **Garmin API extraction** — OAuth setup, Health API + Activity API endpoints, map responses to Pydantic models, populate DB
+4. **Garmin API extraction** — `garminconnect` library, token caching, Health API + Activity API endpoints, upsert to Supabase ✓
 5. **API keys + model call** — `.env` setup, Anthropic client, verify `call_llm()` works end-to-end with retry logic
 
 ### Phase 3 — Core LLM (Weekend 1)
