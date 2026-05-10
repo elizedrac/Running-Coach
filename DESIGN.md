@@ -91,16 +91,18 @@ runcoach/
 ├── db/
 │   ├── client.py                  # create_client() — imported everywhere
 │   ├── queries.py                 # Registry of every callable SQL function (name → callable + description) — Haiku selects from this list
-│   ├── activities.py              # Hardcoded queries for activities
-│   ├── daily.py                   # Hardcoded queries for daily summaries
-│   ├── sleep.py                   # Hardcoded queries for sleep
-│   ├── plan.py                    # Plan read/write queries
+│   ├── activity_history.py        # Hardcoded queries for activity_history
+│   ├── health_history.py          # Hardcoded queries for health_history (merged daily + sleep)
+│   ├── race.py                    # Read/write for the user's target race
+│   ├── preferences.py             # Read/write for training_preferences
+│   ├── plan.py                    # Plan read/write queries (current_plan, plan_days, plan_intervals, plan_history)
 │   └── cache.py                   # Supabase search_cache read/write
 │
 ├── models/
-│   ├── activity.py                # Pydantic model for Garmin activity
-│   ├── daily.py                   # Pydantic model for daily summary
-│   ├── sleep.py                   # Pydantic model for sleep summary
+│   ├── activity.py                # Pydantic model for activity_history rows
+│   ├── health.py                  # Pydantic model for health_history rows
+│   ├── race.py                    # Pydantic model for the user's target race
+│   ├── preferences.py             # Pydantic model for training_preferences
 │   ├── plan.py                    # Pydantic models for training plan + days + intervals
 │   └── planner.py                 # Pydantic model for planner LLM JSON output (ToolPlan)
 │
@@ -134,74 +136,65 @@ create table users (
 );
 ```
 
-### activities
+### race (user's target race — one per user)
 ```sql
-create table activities (
-    id                                  uuid default gen_random_uuid() primary key,
-    user_id                             uuid references users(id),
-    activity_id                         bigint unique,              -- Garmin activity ID
-    activity_name                       text,
-    activity_type                       text,                       -- RUNNING | CYCLING | etc
-    calendar_date                       date,                       -- local date (pre-calculated by Garmin)
-    start_time_in_seconds               bigint,                     -- UTC Unix timestamp
-    start_time_offset_in_seconds        integer,                    -- timezone offset
-    duration_in_seconds                 float,
-    distance_in_meters                  float,
-    average_speed_mps                   float,
-    average_pace_min_per_km             float,
-    active_kilocalories                 integer,
-    average_heart_rate                  integer,
-    max_heart_rate                      integer,
-    average_cadence                     float,
-    total_elevation_gain_meters         float,
-    total_elevation_loss_meters         float,
-    number_of_laps                      integer,
-    device_name                         text,
-    weather                             jsonb,                      -- Open-Meteo response snapshot
-    created_at                          timestamptz default now()
+create table race (
+    id                  uuid default gen_random_uuid() primary key,
+    user_id             uuid references users(id) unique,
+    race_description    text,
+    goal_time           text,
+    race_distance_miles integer,
+    race_date           timestamptz,
+    created_at          timestamptz default now()
 );
 ```
 
-### daily_summaries
+### training_preferences (one per user)
 ```sql
-create table daily_summaries (
-    id                                  uuid default gen_random_uuid() primary key,
-    user_id                             uuid references users(id),
-    calendar_date                       date unique,
-    steps                               integer,
-    distance_in_meters                  float,
-    active_kilocalories                 integer,
-    resting_heart_rate                  integer,
-    average_heart_rate                  integer,
-    max_heart_rate                      integer,
-    average_stress_level                integer,                    -- 0-100
-    max_stress_level                    integer,
-    body_battery                        integer,                    -- 0-100
-    moderate_intensity_minutes          integer,
-    vigorous_intensity_minutes          integer,
-    floors_climbed                      float,
-    created_at                          timestamptz default now()
+create table training_preferences (
+    id              uuid default gen_random_uuid() primary key,
+    user_id         uuid references users(id) unique,
+    days_per_week   integer default 4,
+    preferred_days  text[],                                     -- e.g. {'MON','WED','FRI','SAT'}
+    avg_miles       float,
+    max_miles       float,
+    time_based      boolean default false                       -- false = mile based, true = time based
 );
 ```
 
-### sleep_summaries
+### activity_history (per-activity rows from Garmin)
 ```sql
-create table sleep_summaries (
-    id                              uuid default gen_random_uuid() primary key,
-    user_id                         uuid references users(id),
-    calendar_date                   date unique,                    -- night start date
-    duration_in_seconds             integer,
-    deep_sleep_seconds              integer,
-    light_sleep_seconds             integer,
-    rem_sleep_seconds               integer,
-    awake_seconds                   integer,
-    average_spo2                    float,
-    average_respiration             float,
-    average_stress_level            integer,
-    overall_sleep_score             integer,                        -- 0-100
-    sleep_score_qualifier           text,                           -- EXCELLENT | GOOD | FAIR | POOR
-    average_hrv                     integer,                        -- ms
-    created_at                      timestamptz default now()
+create table activity_history (
+    id              uuid default gen_random_uuid() primary key,
+    user_id         uuid references users(id),
+    calendar_date   timestamptz,
+    calories_burned float,
+    activity_type   text,
+    miles           float,
+    avg_hr          float,
+    max_hr          float,
+    total_time      interval,
+    average_pace    text,
+    created_at      timestamptz default now()
+);
+```
+
+### health_history (one row per day; merges daily + sleep metrics)
+```sql
+create table health_history (
+    id              uuid default gen_random_uuid() primary key,
+    user_id         uuid references users(id),
+    calendar_date   date,
+    stress          integer,
+    active_minutes  float,
+    total_steps     integer,
+    sleep_score     integer,
+    total_sleep     interval,
+    rhr             integer,
+    total_kcal      integer,
+    vo2_max         integer,
+    hrv             integer,
+    created_at      timestamptz default now()
 );
 ```
 
@@ -690,17 +683,17 @@ Predict marathon/half marathon finish time in seconds based on training inputs.
 
 | Feature | Source | Window |
 |---|---|---|
-| Peak weekly mileage | activities | 16 weeks |
-| Average weekly mileage | activities | 16 weeks |
-| Total mileage | activities | 16 weeks |
-| Longest long run | activities | 16 weeks |
-| Average long run | activities | 16 weeks |
-| Average HRV | sleep_summaries | 30 days |
-| Resting HR trend (slope) | daily_summaries | 8 weeks |
-| VO2 max | daily_summaries | latest |
-| Average easy pace | activities | 30 days |
-| Average long run pace | activities | 16 weeks |
-| Training load | activities | 4 weeks |
+| Peak weekly mileage | activity_history | 16 weeks |
+| Average weekly mileage | activity_history | 16 weeks |
+| Total mileage | activity_history | 16 weeks |
+| Longest long run | activity_history | 16 weeks |
+| Average long run | activity_history | 16 weeks |
+| Average HRV | health_history | 30 days |
+| Resting HR trend (slope) | health_history | 8 weeks |
+| VO2 max | health_history | latest |
+| Average easy pace | activity_history | 30 days |
+| Average long run pace | activity_history | 16 weeks |
+| Training load | activity_history | 4 weeks |
 
 ### Model
 
@@ -872,7 +865,7 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 
 1. **Create repo + file structure** — scaffold all directories and empty files as per File Structure above
 2. **Set up Supabase** — create project, connect Python client, store URL/key in `.env`
-3. **Create PostgreSQL tables** — all schemas defined in this document, in dependency order: users → activities → daily_summaries → sleep_summaries → current_plan → plan_history → plan_days → plan_intervals → model_predictions → search_cache
+3. **Create PostgreSQL tables** — all schemas defined in this document, in dependency order: users → race → training_preferences → activity_history → health_history → current_plan → plan_history → plan_days → plan_intervals → model_predictions → search_cache
 
 ### Phase 2 — Data Layer (Week 1, Thu–Fri)
 

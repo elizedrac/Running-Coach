@@ -1,1 +1,1 @@
-# Pydantic model for a Garmin activity payload.
+# Pydantic model for an activity_history row (validated before insert).

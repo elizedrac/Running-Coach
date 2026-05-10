@@ -1,1 +1,11 @@
 # Python dependencies for runcoach.
+python-dotenv
+supabase
+anthropic
+fastapi
+uvicorn[standard]
+pydantic
+cachetools
+xgboost
+requests
+garminconnect
