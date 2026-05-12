@@ -12,7 +12,7 @@ TOOL_REGISTRY = {
 def call_tool(name: str, args: dict, user_id: str):
     fn = TOOL_REGISTRY.get(name)
     if name == "garmin_sync" and "day_iso_start" not in args:
-        date_range = input("Please enter date range in the following format for Garmin sync: (YYYY-MM-DD, YYYY-MM-DD)")
+        date_range = input("Please enter date range in the following format for Garmin sync (YYYY-MM-DD, YYYY-MM-DD): ")
         start_date, end_date = [d.strip() for d in date_range.split(",")]
 
         args["day_iso_start"] = start_date
