@@ -2,7 +2,7 @@
 from datetime import date
 
 TOOL_METADATA = {
-    "garmin_sync":        "Sync latest Garmin activity and health data into the DB. Use if user mentions a recent run that may not be recorded yet.",
+    "garmin_sync":        "Sync latest Garmin activity and health data into the DB. Use if user mentions a recent run that may not be recorded yet or if user wants to update their data.",
     "create_plan":        "Generate a full week-by-week training plan leading to the user's target race date.",
     "get_plan":           "Retrieve the user's current training plan for a given week.",
     "clear_plan":         "Delete the user's active training plan.",
@@ -32,6 +32,7 @@ Today's date: {today}
 
 Args contracts (only include args listed here):
 - get_weather: {{"date": "YYYY-MM-DD"}}  # optional, omit for today
+- garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}} # required start and end date, default to today for end_date if date range is provided. Omit if date range is unclear or not provided-- system will ask. 
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {{
@@ -56,7 +57,7 @@ Return ONLY valid JSON:
 }"""
 
 TOOL_SNIPPETS = {
-    "garmin_sync":        "The user's Garmin data has just been synced. Reference it naturally without saying 'sync'.",
+    "garmin_sync":        "The user's Garmin data has just been synced. Reference it naturally without saying 'sync' and tell them they can now see their latest activities and health metrics for the given date_range.",
     "get_plan":           "When presenting the plan: state the week number, list each day's workout type and target miles. Flag any hard days back-to-back.",
     "create_plan":        "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
     "update_plan":        "Acknowledge what changed and why. If injury severity was high, include a note to consult a medical professional.",

@@ -143,7 +143,7 @@ def _hrv_value(hrv_raw) -> int | None:
 def _stress_value(stress_raw) -> int | None:
     if not isinstance(stress_raw, dict):
         return None
-    return stress_raw.get("stressLevel")
+    return stress_raw.get("avgStressLevel")
 
 def _sleep_main_seconds(sleep_raw) -> int | None:
     if not isinstance(sleep_raw, dict):
@@ -157,7 +157,7 @@ def _sleep_score(sleep_raw) -> int | None:
         return None
     dto = sleep_raw.get("dailySleepDTO", {})
     scores = dto.get("sleepScores", {}) if isinstance(dto, dict) else {}
-    return scores.get("overall") if isinstance(scores, dict) else None
+    return scores.get("overall", {}).get("value") if isinstance(scores, dict) else None
 
 def _seconds_to_interval(seconds) -> str | None:
     if seconds is None:
@@ -175,8 +175,9 @@ def _mps_to_pace(mps) -> str | None:
 
 # allow running directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
 if __name__ == "__main__":
+    today = datetime.utcnow().date().isoformat()
     yesterday = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
     user_id = os.getenv("USER_ID")
     if not user_id:
         raise ValueError("USER_ID env var not set")
-    garmin_sync(user_id, yesterday, yesterday)
+    garmin_sync(user_id, yesterday, today)
