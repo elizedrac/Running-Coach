@@ -1,8 +1,9 @@
 # Final LLM call (Sonnet). Builds system prompt from BASE + per-tool snippets and produces the user-facing coaching response.
 from services.prompts import BASE_COACH, TOOL_SNIPPETS
 from services.llm import call_llm
+from models.planner import PlannerOutput
 
-def final_output(user_query: str, planner_decision: 'PlannerDecision', tool_results: dict = {}):
+def final_output(user_query: str, planner_decision: PlannerOutput, tool_results: dict = {}) -> str:
     system_prompt = BASE_COACH  # static — cacheable
 
     user_prompt = f"User question: {user_query}"

@@ -43,7 +43,7 @@ A personal AI running coach that ingests Garmin health and activity data, stores
 | In-memory cache | cachetools TTLCache | Per-session, no persistence |
 | Hosting (app) | Render or Railway | Simple deploy from GitHub, migrate to AWS later |
 | Hosting (DB) | Supabase cloud | Already cloud-hosted, no migration needed |
-| Weather | Open-Meteo API | Free, no key required, historical + forecast |
+| Weather | WeatherAPI.com | Free tier, API key required, current day + 12-hour forecast |
 | Web search | Anthropic web search tool | Built-in, no extra API key |
 | Race results | Athlinks via web search | Event ID extracted from search results |
 | CI/CD | GitHub Actions | Daily Garmin sync cron |
@@ -441,10 +441,12 @@ Question arrives
 - Common pace formulas for each workout type (easy, tempo, threshold, interval)
 - Knowledge entries define pace ranges per workout type
 
-### 7. Get Weather
+### 7. Get Weather ✓
 - Triggered if user asks about weather or whether to run inside
-- Open-Meteo API — hardcoded location for V1
-- Passed as context with timeframe to final LLM prompt
+- WeatherAPI.com free tier — hardcoded location (`LOCATION` env var) for V1
+- Returns current conditions + next 12 hours (temp, feels like, wind, humidity, chance of rain, condition)
+- Past/future dates beyond today gracefully rejected with explanation
+- Hourly data passed to final LLM; TOOL_SNIPPETS guide the response (best time window, treadmill suggestion, what to wear)
 
 ### 8. Get Race Results
 - Anthropic web search to find Athlinks event ID
@@ -751,13 +753,13 @@ Garmin rate limit: 100 req/min. 60s wait on rate limit hit. Up to 3 attempts.
 - **Timestamps**: `calendar_date` pre-calculated in local time by Garmin — use this for day-level grouping
 - **Backfill**: supports arbitrary date ranges via `get_activities_by_date` + daily stat calls
 
-### Open-Meteo
+### WeatherAPI.com
 
-- **Free**, no API key required
-- **Historical**: back to 1940 — enables weather correlation with past runs
-- **Forecast**: up to 16 days
-- **Fields used**: temperature, apparent temperature, precipitation, wind speed, UV index
-- **Units**: Fahrenheit, mph, inches
+- **Free tier**, API key required (`WEATHER_API_KEY` env var)
+- **Endpoint**: `forecast.json` — returns current + hourly data
+- **Coverage**: current day only (free tier); returns next 12 hours from current time
+- **Fields used**: temp_f, feelslike_f, wind_mph, wind_dir, humidity, chance_of_rain, condition text
+- **Location**: hardcoded via `LOCATION` env var for V1
 
 ### Anthropic Web Search
 
@@ -819,13 +821,13 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 ### Phase 2 — Data Layer (Week 1, Thu–Fri)
 
 4. **Garmin API extraction** — `garminconnect` library, token caching, Health API + Activity API endpoints, upsert to Supabase ✓
-5. **API keys + model call** — `.env` setup, Anthropic client, verify `call_llm()` works end-to-end with retry logic
+5. **API keys + model call** — `.env` setup, Anthropic client, verify `call_llm()` works end-to-end with retry logic ✓
 
 ### Phase 3 — Core LLM (Weekend 1)
 
-6. **CLI implementation** — simple terminal interface to test LLM calls before building UI
-7. **LLM flow implementation** — planner (Sonnet) on every question, SQL function selector (Haiku) reading from query registry, tool routing, prompt snippets system, content plan step
-8. **Tool implementation** — build each tool in Tool Suite section one by one, starting with: Query User Data → Get Plan → Garmin Sync → Get Weather
+6. **CLI implementation** — simple terminal interface to test LLM calls before building UI ✓
+7. **LLM flow implementation** — planner, tool routing, prompt snippets, final LLM call, coach orchestrator ✓
+8. **Tool implementation** — Get Weather ✓ → Garmin Sync → Query User Data → Get Plan → remaining tools
 
 ### Phase 4 — Agent + Output (Week 2, Mon–Tue)
 

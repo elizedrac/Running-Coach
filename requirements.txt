@@ -9,3 +9,4 @@ cachetools
 xgboost
 requests
 garminconnect
+pytest

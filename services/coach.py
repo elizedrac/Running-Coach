@@ -1,8 +1,11 @@
 # Orchestrator. ask(question, user_id): single-shot planner + dispatch (no_tools / sql / tools).
 from services.planner import planner
 from services.final import final_output
+from services.weather import get_weather
 
-TOOL_REGISTRY = {}
+TOOL_REGISTRY = {
+    "get_weather": get_weather,
+}
 
 def call_tool(name: str, args: dict, user_id: str):
     fn = TOOL_REGISTRY.get(name)
@@ -10,11 +13,13 @@ def call_tool(name: str, args: dict, user_id: str):
         return f"Tool '{name}' not yet implemented"
     return fn(user_id, **args)
 
-def orchestrate(user_query, user_id):
+def orchestrate(user_query, user_id) -> str:
     planner_response = planner(user_query)
 
     path = planner_response.path
     tool_results = {}
+
+    print(planner_response.tools)
 
     if path == "tools": 
         for tool in planner_response.tools:

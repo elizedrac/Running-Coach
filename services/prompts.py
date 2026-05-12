@@ -8,7 +8,7 @@ TOOL_METADATA = {
     "clear_plan":         "Delete the user's active training plan.",
     "update_plan":        "Modify the plan due to injury, a skipped workout, or schedule changes.",
     "pacing_calculator":  "Calculate target paces for easy, tempo, threshold, and interval workouts given a goal race time.",
-    "get_weather":        "Get weather forecast for the user's location on a given date.",
+    "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
     "get_race_results":   "Look up the user's finishing time in a specific race via Athlinks.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
     "trend_analysis":     "Analyse trends in mileage, pace, HRV, or sleep over a given period.",
@@ -29,6 +29,9 @@ Available tools (tools path only):
 {tool_list}
 
 Today's date: {today}
+
+Args contracts (only include args listed here):
+- get_weather: {{"date": "YYYY-MM-DD"}}  # optional, omit for today
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {{
@@ -59,7 +62,7 @@ TOOL_SNIPPETS = {
     "update_plan":        "Acknowledge what changed and why. If injury severity was high, include a note to consult a medical professional.",
     "clear_plan":         "Confirm the plan was cleared and ask if the user wants to create a new one.",
     "pacing_calculator":  "Present paces in a clean table: workout type → target pace range. Explain the purpose of each zone briefly.",
-    "get_weather":        "Reference the forecast naturally when advising on the run. Suggest treadmill if conditions are poor.",
+    "get_weather":        "The weather API is only capable of fetching current day weather + 12 hour forecasts. Reference this data naturally when answering the user or advising them if they should run and when the best time is and give reasoning grounded in data (be sure to consider the 'feels like' as well). Suggest treadmill if conditions are poor (ie. too hot/humid (above 75°F), too cold (below 32°F)), or rainy). If they do prefer to go outside, suggest the best time window and what to wear based on the forecast. If they ask for weather data either from the past or more than 12 hours in the future, gracefully explain the limitations of the API and provide advice based on the current conditions.",
     "get_race_results":   "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",
     "get_course_details": "Reference elevation and terrain when discussing pacing strategy. Flag major climbs.",
     "trend_analysis":     "Summarise the trend direction first (improving / declining / stable), then cite the specific numbers.",
