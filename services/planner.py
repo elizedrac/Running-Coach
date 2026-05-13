@@ -7,7 +7,10 @@ def planner(user_query: str) -> PlannerOutput:
     system_prompt = build_planner_system()
     user_query = f"""User question: {user_query}"""
     response = call_llm(system_prompt, user_query)
-    response = response.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
+    response = response.strip()
+    start = response.find("{")
+    end = response.rfind("}") + 1
+    response = response[start:end]
     try:
         plan = PlannerOutput.model_validate_json(response)
         return plan

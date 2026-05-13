@@ -11,6 +11,10 @@ class PlannerOutput(BaseModel):
     path: Literal["no_tools", "tools"]
     tools: list[ToolPlan] = []
 
+# For SQL selector
+class SQLPlan(BaseModel):
+    queries: list[str]
+    
 
 
 

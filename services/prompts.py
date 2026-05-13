@@ -3,6 +3,7 @@ from datetime import date
 
 TOOL_METADATA = {
     "garmin_sync":        "Sync latest Garmin activity and health data into the DB. Use if user mentions a recent run that may not be recorded yet or if user wants to update their data.",
+    "query_data":         "Query the database for the user's health stats or past activities. Use for any question about past data: steps, sleep, HRV, stress, runs, pace, mileage, heart rate, etc.",
     "create_plan":        "Generate a full week-by-week training plan leading to the user's target race date.",
     "get_plan":           "Retrieve the user's current training plan for a given week.",
     "clear_plan":         "Delete the user's active training plan.",
@@ -23,7 +24,7 @@ Given the user's question, decide which path to take and which tools to call.
 
 Paths:
 - no_tools: General coaching advice that does not require any data lookup.
-- tools: Requires one or more of the tools listed below.
+- tools: Requires one or more of the tools listed below. Use query_data for any personal data questions.
 
 Available tools (tools path only):
 {tool_list}
@@ -32,7 +33,8 @@ Today's date: {today}
 
 Args contracts (only include args listed here):
 - get_weather: {{"date": "YYYY-MM-DD"}}  # optional, omit for today
-- garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}} # required start and end date, default to today for end_date if date range is provided. Omit if date range is unclear or not provided-- system will ask. 
+- garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}}  # omit if unclear — system will ask
+- query_data: {{"query_intent": "description of what to fetch", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}}  # default 14 days ago to today if not specified
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {{
@@ -46,15 +48,18 @@ tools must be an empty list [] when path is not "tools"."""
 
 BASE_COACH = """You are an experienced, encouraging running coach. \
 You give specific, actionable advice grounded in the athlete's actual data. \
-Be concise. Never make up data you were not given."""
+Be concise. Never make up data you were not given. \
+Available data fields — health: stress, active_minutes, total_steps, sleep_score, total_sleep, rhr, total_kcal, vo2_max, hrv. \
+Activities: calories_burned, activity_type, miles, avg_hr, max_hr, total_time, average_pace. \
+If the user asks for data not in these fields, respond gracefully that you don't have access to it."""
 
 SQL_SELECTOR_SYSTEM = """You are a query selector for a running coach app.
-Given a user question and the list of available query functions, return the name of the single best function to call and the arguments to pass.
-Return ONLY valid JSON:
+Given a user's query intent and a registry of available query functions, select which queries to run.
+Return ONLY valid JSON — no extra text, no markdown fences:
 {
-  "function": "function_name",
-  "args": {}
-}"""
+  "queries": ["query_function_name"]
+}
+Include multiple entries if the question requires both health and activity data."""
 
 TOOL_SNIPPETS = {
     "garmin_sync":        "The user's Garmin data has just been synced. Reference it naturally without saying 'sync' and tell them they can now see their latest activities and health metrics for the given date_range.",
@@ -67,7 +72,9 @@ TOOL_SNIPPETS = {
     "get_race_results":   "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",
     "get_course_details": "Reference elevation and terrain when discussing pacing strategy. Flag major climbs.",
     "trend_analysis":     "Summarise the trend direction first (improving / declining / stable), then cite the specific numbers.",
+    "query_data":         "Raw query results are being provided, either containing health data or past activities. Use this data to answer the user's question, grounding your advice in specific metrics and trends. If the user query was vague, use the data to make reasonable assumptions about their intent and answer accordingly. Always reference specific data points from the query results to back up your advice."
 }
+
 
 WEB_SEARCH_SUMMARY = """Summarise the following search results in 2-3 concise sentences relevant to the user's question. \
 Omit disclaimers, URLs, and filler text."""

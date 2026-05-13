@@ -70,16 +70,16 @@ runcoach/
 ├── services/
 │   ├── coach.py                   # Orchestrator — ask(question, user_id), single-shot planner + dispatch
 │   ├── llm.py                     # Central call_llm() with retry + caching
-│   ├── planner.py                 # Planner LLM call + ToolPlan validation + REGISTRY-derived prompt
-│   ├── sql_selector.py            # Haiku call that picks SQL func + args from REGISTRY (SQL path only)
-│   ├── final.py                   # Final LLM call (Sonnet). Builds system prompt from BASE + per-tool snippets.
-│   ├── garmin.py                  # Garmin webhook parsing + enrichment
+│   ├── planner.py                 # Planner LLM call + PlannerOutput validation
+│   ├── sql_selector.py            # Haiku call that picks query functions from REGISTRY; called internally by query_data tool
+│   ├── final.py                   # Final LLM call (Sonnet). System prompt = BASE_COACH; per-tool snippets + data in user prompt.
+│   ├── garmin.py                  # Garmin data sync (token-cached auth, upsert to Supabase)
 │   ├── plan.py                    # Training plan creation, update, injury logic
 │   ├── web_search.py              # Anthropic web search wrapper + persistence
-│   ├── weather.py                 # Open-Meteo API wrapper
+│   ├── weather.py                 # WeatherAPI wrapper (current day + 12-hour forecast)
 │   ├── export.py                  # CSV export. Local file in CLI mode, HTTP attachment stream in server mode (V2)
-│   ├── cache.py                   # TTLCache singleton + two-layer cache logic
-│   └── prompts.py                 # All prompt strings in one place: BASE_COACH, PLANNER_SYSTEM, SQL_SELECTOR_SYSTEM, TOOL_SNIPPETS, per-tool Haiku prompts (web search, course summary), compression, follow-up. Single source of truth for prompt engineering.
+│   ├── cache.py                   # TTLCache singleton + range-aware cache logic (get_cached, set_cached)
+│   └── prompts.py                 # All prompt strings: BASE_COACH, build_planner_system(), SQL_SELECTOR_SYSTEM, TOOL_SNIPPETS, TOOL_METADATA. Single source of truth.
 │
 ├── services/ml/
 │   ├── features.py                # Feature extraction from Supabase
@@ -90,13 +90,12 @@ runcoach/
 │
 ├── db/
 │   ├── client.py                  # create_client() — imported everywhere
-│   ├── queries.py                 # Registry of every callable SQL function (name → callable + description) — Haiku selects from this list
-│   ├── activity_history.py        # Hardcoded queries for activity_history
-│   ├── health_history.py          # Hardcoded queries for health_history (merged daily + sleep)
+│   ├── queries.py                 # Empty — REGISTRY lives in services/sql_selector.py
+│   ├── activity_history.py        # insert_activities, get_activities (self-caching via services/cache.py)
+│   ├── health_history.py          # insert_health_history, get_health_history (self-caching via services/cache.py)
 │   ├── race.py                    # Read/write for the user's target race
 │   ├── preferences.py             # Read/write for training_preferences
-│   ├── plan.py                    # Plan read/write queries (current_plan, plan_days, plan_intervals, plan_history)
-│   └── cache.py                   # Supabase search_cache read/write
+│   └── plan.py                    # Plan read/write queries (current_plan, plan_days, plan_intervals, plan_history)
 │
 ├── models/
 │   ├── planner.py                 # Pydantic model for planner LLM JSON output (ToolPlan)
@@ -293,11 +292,11 @@ Garmin Device
                 └── Insert to Supabase (db/activity_history.py)
 
 User Question
-└── POST /ask (routes/ask.py)
+└── CLI / POST /ask
     └── Planner LLM (Sonnet) — decides path + tools
-        ├── No tools needed → final LLM (2 calls)
-        ├── SQL needed      → Haiku picks SQL func + args → execute → final LLM (3 calls)
-        └── Tools needed    → tool execution (deterministic; specific tools may call Haiku internally) → final LLM (2-3 calls)
+        ├── no_tools → final LLM (2 calls)
+        └── tools    → tool execution in declared order → final LLM (2-3 calls)
+                       query_data tool calls Haiku internally to pick SQL func → self-caching DB query
 ```
 
 ---
@@ -592,29 +591,22 @@ An orchestrator only makes sense when there are multiple **separate deployed ser
 
 ## Caching Strategy
 
-### Two-Layer Cache
+### L1 Cache — Range-Aware TTLCache
 
-```
-Request
-├── L1: TTLCache (in-memory, per session)   — instant, free, gone on restart
-│   hit → return immediately
-│   miss ↓
-├── L2: Supabase search_cache               — persistent, across sessions
-│   hit → populate L1 + return
-│   miss ↓
-└── External API / web search
-    → store in both L1 and L2
-```
+DB query results (health, activities) are cached in-memory per session with range awareness:
 
-### TTLCache Configuration
+- Cache keyed by `user_id:query_type` (e.g. `user123:activity_data`)
+- Each entry stores `{start, end, data}` — multiple non-overlapping ranges per user
+- On lookup: find any entry where `entry.start ≤ requested_start` and `entry.end ≥ requested_end`, filter rows to requested range
+- On miss: fetch from DB, append new entry — never overwrites existing entries
+- Self-caching: `get_health_history` and `get_activities` handle cache check/set internally — callers are cache-unaware
+- TTL: 1 hour (`ttl=3600`)
 
-```python
-# services/cache.py — singleton imported everywhere
-from cachetools import TTLCache
-session_cache = TTLCache(maxsize=100, ttl=3600)
-```
+### L2 Cache — Supabase search_cache
 
-### Expiry by Topic
+For web search results, course details, race info. Not yet implemented.
+
+### Expiry by Topic (L2)
 
 | Topic | L2 Expiry |
 |---|---|
@@ -798,7 +790,7 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r requirements.txt
-      - run: python services/garmin.py --sync
+      - run: python -m services.garmin
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
@@ -827,7 +819,7 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 
 6. **CLI implementation** — simple terminal interface to test LLM calls before building UI ✓
 7. **LLM flow implementation** — planner, tool routing, prompt snippets, final LLM call, coach orchestrator ✓
-8. **Tool implementation** — Get Weather ✓ → Garmin Sync → Query User Data → Get Plan → remaining tools
+8. **Tool implementation** — Get Weather ✓ → Query User Data (query_data tool + sql_selector + range-aware cache) ✓ → Garmin Sync ✓ → Get Plan → remaining tools
 
 ### Phase 4 — Agent + Output (Week 2, Mon–Tue)
 
