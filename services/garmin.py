@@ -1,5 +1,6 @@
 # Garmin data extraction and parsing
 # Run directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
+import json
 import os
 from dotenv import load_dotenv
 from garminconnect import Garmin
@@ -14,11 +15,14 @@ load_dotenv()
 DAY_PAUSE = 2  # Seconds to sleep between Garmin API calls to avoidw rate limits
 CALL_PAUSE = 1  # Seconds to sleep between individual API calls within a day
 
-def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> None:
+def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
     result = fetch_garmin_data(day_iso_start, day_iso_end)
     if result is None:
         print("Failed to fetch Garmin data.")
-        return
+        return {
+            "status": "error",
+            "date_range": f"{day_iso_start} to {day_iso_end}",
+        }
 
     activities, stats = result
 
@@ -31,6 +35,13 @@ def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> None:
         insert_health_history([{**s, "user_id": user_id} for s in stats])
     else:
         print("No Garmin health stats to insert.")
+
+    return {
+        "status": "success",
+        "date_range": f"{day_iso_start} to {day_iso_end}",
+        "activities_synced": len(activities),
+        "days_synced": len(stats),
+    }
 
 TOKEN_PATH = ".garmin_tokens"
 
@@ -75,6 +86,8 @@ def get_daily_stats(client: Garmin, day_iso: str) -> dict:
     hrv = _call(client, "get_hrv_data", day_iso)
     sleep(CALL_PAUSE)
     stress = _call(client, "get_stress_data", day_iso)
+    sleep(CALL_PAUSE)
+    vo2_raw = _call(client, "get_training_status", day_iso)
 
     return {
         "calendar_date":  day_iso,
@@ -86,7 +99,7 @@ def get_daily_stats(client: Garmin, day_iso: str) -> dict:
         "stress":         _to_int(_stress_value(stress)),
         "active_minutes": _to_int(_pick(stats, ("activeMinutes", "moderateIntensityMinutes"))),
         "total_kcal":     _to_int(_pick(stats, ("totalKilocalories",))),
-        "vo2_max":        _to_int(_pick(stats, ("vo2Max", "maxVO2"))),
+        "vo2_max":        _to_int(_vo2_max(vo2_raw))
     }
 
 def extract_activities(client: Garmin, day_iso: str) -> list[dict]:
@@ -110,7 +123,8 @@ def _to_int(v) -> int | None:
     if v is None:
         return None
     try:
-        return int(float(v))
+        result = int(float(v))
+        return None if result < 0 else result
     except (ValueError, TypeError):
         return None
 
@@ -138,7 +152,16 @@ def _resting_hr(hr_raw) -> int | None:
 def _hrv_value(hrv_raw) -> int | None:
     if not isinstance(hrv_raw, dict):
         return None
-    return hrv_raw.get("rmssd")
+    
+    summary = hrv_raw.get("hrvSummary", {})
+    return summary.get("lastNightAvg") if isinstance(summary, dict) else None
+
+def _vo2_max(training_status_raw) -> float | None:
+    if not isinstance(training_status_raw, dict):
+        return None
+    vo2 = training_status_raw.get("mostRecentVO2Max", {})
+    generic = vo2.get("generic", {}) if isinstance(vo2, dict) else {}
+    return generic.get("vo2MaxValue") if isinstance(generic, dict) else None
 
 def _stress_value(stress_raw) -> int | None:
     if not isinstance(stress_raw, dict):

@@ -1,5 +1,11 @@
 # All prompt strings in one place. Single source of truth for prompt engineering.
 from datetime import date
+import json
+from pathlib import Path
+
+HEALTH_METRICS_KNOWLEDGE = json.loads(
+    Path(__file__).parent.parent.joinpath("knowledge/health_metrics.json").read_text()
+)
 
 TOOL_METADATA = {
     "garmin_sync":        "Sync latest Garmin activity and health data into the DB. Use if user mentions a recent run that may not be recorded yet or if user wants to update their data.",
@@ -13,6 +19,8 @@ TOOL_METADATA = {
     "get_race_results":   "Look up the user's finishing time in a specific race via Athlinks.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
     "trend_analysis":     "Analyse trends in mileage, pace, HRV, or sleep over a given period.",
+    "compute_body_battery": "Compute the user's current body battery / recovery readiness score from recent sleep, HRV, and stress data.",
+    "compute_load":       "Compute the user's training load (acute, chronic, and ACWR injury risk ratio) from recent activity history.",
 }
 
 def build_planner_system() -> str:
@@ -62,7 +70,7 @@ Return ONLY valid JSON — no extra text, no markdown fences:
 Include multiple entries if the question requires both health and activity data."""
 
 TOOL_SNIPPETS = {
-    "garmin_sync":        "The user's Garmin data has just been synced. Reference it naturally without saying 'sync' and tell them they can now see their latest activities and health metrics for the given date_range.",
+    "garmin_sync":        "The user's Garmin data has just been synced. Reference it naturally without saying 'sync' and tell them they can now see their latest activities and health metrics for the given date_range. If the sync failed, acknowledge that and suggest they try again or check their Garmin connection.",
     "get_plan":           "When presenting the plan: state the week number, list each day's workout type and target miles. Flag any hard days back-to-back.",
     "create_plan":        "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
     "update_plan":        "Acknowledge what changed and why. If injury severity was high, include a note to consult a medical professional.",

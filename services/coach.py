@@ -4,6 +4,7 @@ from services.final import final_output
 from services.weather import get_weather
 from services.garmin import garmin_sync
 from services.sql_selector import execute_query
+from datetime import date, timedelta
 import sys
 
 def _query_data(user_id: str, query_intent: str = "", start_date: str = None, end_date: str = None):
@@ -18,8 +19,17 @@ TOOL_REGISTRY = {
 def call_tool(name: str, args: dict, user_id: str):
     fn = TOOL_REGISTRY.get(name)
     if name == "garmin_sync" and "day_iso_start" not in args:
-        date_range = input("Please enter date range in the following format for Garmin sync (YYYY-MM-DD, YYYY-MM-DD): ")
-        start_date, end_date = [d.strip() for d in date_range.split(",")]
+        start_date = ''
+        end_date = ''
+        while not start_date or not end_date:
+            date_range = input("Please enter date range in the following format for Garmin sync (YYYY-MM-DD, YYYY-MM-DD): ")
+            try:
+                start_date, end_date = [d.strip() for d in date_range.split(",")]
+            except ValueError:
+                choice = input(f"Invalid format. Defaulting to last 7 days. Press Enter to continue or 'r' to retry: ")
+                if choice.lower() != 'r':
+                    start_date = (date.today() - timedelta(days=7)).isoformat()
+                    end_date = date.today().isoformat()
 
         args["day_iso_start"] = start_date
         args["day_iso_end"] = end_date
@@ -40,7 +50,12 @@ def orchestrate(user_query, user_id) -> str:
     tool_results = {}
 
     if path == "tools": 
-        for tool in planner_response.tools:
+        # garmin sync has priority
+        if "garmin_sync" in [tool.name for tool in planner_response.tools]:
+            result = call_tool("garmin_sync", {}, user_id)
+            tool_results["garmin_sync"] = result
+
+        for tool in planner_response.tools if tool.name != "garmin_sync":
             name = tool.name.strip()
             result = call_tool(name, tool.args, user_id)
             tool_results[name] = result

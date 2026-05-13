@@ -1,8 +1,8 @@
 # CLI entry point (V1). Thin wrapper that calls services/coach.py::ask().
 import os
+from db import client
 from dotenv import load_dotenv
 from services.coach import orchestrate
-
 
 load_dotenv()
 
@@ -15,6 +15,8 @@ def main():
             break
 
         print(f"Coach: {orchestrate(user_input, USER_ID)}")
+
+    
 
 if __name__ == "__main__":
     main()

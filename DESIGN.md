@@ -475,6 +475,18 @@ Question arrives
 - XGBoost model (see ML Model section)
 - Not current priority — V2 feature
 
+### 13. Compute Body Battery
+- Compute a recovery readiness score from recent sleep (score, duration), HRV (lastNightAvg + trend), and stress (avg, recent peaks)
+- Returns 0-100 score + qualitative summary (Fresh / Moderate / Drained)
+- Pulls data via existing query_data path — no extra Garmin call needed
+- Not yet implemented
+
+### 14. Compute Training Load
+- Compute acute (7-day) and chronic (28-day) training load from activity_history (volume × intensity proxy)
+- Returns acute, chronic, and ACWR (acute:chronic workload ratio) — flag >1.3 as injury risk
+- Pulls data via existing query_data path — no extra Garmin call needed
+- Not yet implemented
+
 ---
 
 ## LLM Flow
