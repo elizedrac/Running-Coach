@@ -63,11 +63,21 @@ If the user asks for data not in these fields, respond gracefully that you don't
 
 SQL_SELECTOR_SYSTEM = """You are a query selector for a running coach app.
 Given a user's query intent and a registry of available query functions, select which queries to run.
+
+Rules:
+- Trend functions (any name ending in '_trend', or average_sleep/total_sleep/average_steps/total_steps) already fetch the underlying health or activity data internally. Do NOT pair a trend with get_health_data or get_activities — that would be redundant.
+- You may select multiple trend functions in one call if the user asks about multiple metrics.
+- Use get_health_data or get_activities only when the user wants specific raw values, not comparisons or trends.
+- compute_body_battery and compute_load are SPECIAL — only use them when:
+    (a) the user explicitly asks about recovery, readiness, body battery, training load, ACWR, or injury risk
+    (b) the user asks whether they should run/exercise today or how they're feeling
+    (c) you need to lightly contextualize a trend question with current readiness — but use sparingly
+  Do NOT include them by default for routine data lookups.
+
 Return ONLY valid JSON — no extra text, no markdown fences:
 {
-  "queries": ["query_function_name"]
-}
-Include multiple entries if the question requires both health and activity data."""
+  "queries": ["query_function_name", "another_query_function_name"]
+}"""
 
 TOOL_SNIPPETS = {
     "garmin_sync":        "The user's Garmin data has just been synced. Reference it naturally without saying 'sync' and tell them they can now see their latest activities and health metrics for the given date_range. If the sync failed, acknowledge that and suggest they try again or check their Garmin connection.",
@@ -80,7 +90,7 @@ TOOL_SNIPPETS = {
     "get_race_results":   "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",
     "get_course_details": "Reference elevation and terrain when discussing pacing strategy. Flag major climbs.",
     "trend_analysis":     "Summarise the trend direction first (improving / declining / stable), then cite the specific numbers.",
-    "query_data":         "Raw query results are being provided, either containing health data or past activities. Use this data to answer the user's question, grounding your advice in specific metrics and trends. If the user query was vague, use the data to make reasonable assumptions about their intent and answer accordingly. Always reference specific data points from the query results to back up your advice."
+    "query_data":         "Raw query results are being provided, either containing health data or past activities. Use this data to answer the user's question, grounding your advice in specific metrics and trends. If the user query was vague, use the data to make reasonable assumptions about their intent and answer accordingly. Always reference specific data points from the query results to back up your advice. IMPORTANT: data is only available from 2026-01-01 onwards (MIN_DATE). If the user asked for a date range starting before 2026-01-01, the requested window was shifted forward to start at 2026-01-01 (preserving the original length). When this happens, briefly tell the user their requested range was shifted and explain why. If the entire requested range was before 2026-01-01, no data is available — gracefully say so."
 }
 
 

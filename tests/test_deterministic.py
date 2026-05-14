@@ -83,3 +83,212 @@ def test_get_weather_no_date():
         assert "wind_direction" in hour
         assert "humidity" in hour
         assert "chance_of_rain" in hour
+
+
+# ── trend_analysis helper tests ──────────────────────────────────────────────
+from services.trend_analysis import (
+    _pace_to_seconds, _time_to_hours, _avg, _sum, _direction, _windows,
+    miles_trend, pace_trend, hr_trend, total_calories_trend, activity_count_trend,
+    total_time_trend, hrv_trend, rhr_trend, average_sleep, total_sleep,
+    stress_trend, average_steps, total_steps,
+)
+
+
+def test_pace_to_seconds_valid():
+    assert _pace_to_seconds("7:54/mi") == 7 * 60 + 54
+    assert _pace_to_seconds("8:00/mi") == 480
+
+def test_pace_to_seconds_invalid():
+    assert _pace_to_seconds(None) is None
+    assert _pace_to_seconds("") is None
+    assert _pace_to_seconds("garbage") is None
+
+def test_time_to_hours_valid():
+    assert _time_to_hours("01:00:00") == 1.0
+    assert _time_to_hours("00:30:00") == 0.5
+    assert _time_to_hours("02:15:30") == 2 + 15/60 + 30/3600
+
+def test_time_to_hours_invalid():
+    assert _time_to_hours(None) == 0
+    assert _time_to_hours("") == 0
+    assert _time_to_hours("bad") == 0
+
+def test_avg_skips_nones():
+    rows = [{"x": 10}, {"x": None}, {"x": 20}, {}, {"x": 30}]
+    assert _avg(rows, "x") == 20.0
+
+def test_avg_empty_returns_zero():
+    assert _avg([], "x") == 0.0
+    assert _avg([{"x": None}], "x") == 0.0
+
+def test_sum_skips_nones():
+    rows = [{"x": 5}, {"x": None}, {"x": 3}]
+    assert _sum(rows, "x") == 8
+
+def test_direction_stable_within_5pct():
+    assert _direction(100, 102, True) == "stable"
+    assert _direction(100, 98, False) == "stable"
+
+def test_direction_improving():
+    assert _direction(110, 100, True) == "improving"   # higher better, went up
+    assert _direction(90, 100, False) == "improving"   # lower better, went down
+
+def test_direction_declining():
+    assert _direction(90, 100, True) == "declining"
+    assert _direction(110, 100, False) == "declining"
+
+def test_direction_none_when_neutral_or_zero_prev():
+    assert _direction(100, 0, True) is None
+    assert _direction(100, 100, None) is None
+
+
+# ── _windows tests ────────────────────────────────────────────────────────────
+
+def test_windows_valid_range():
+    prev_start, prev_end = _windows("2026-05-01", "2026-05-07")
+    # window shifted back 30 days
+    assert prev_start == "2026-04-01"
+    assert prev_end == "2026-04-07"
+
+def test_windows_too_large_returns_none():
+    prev_start, prev_end = _windows("2026-01-01", "2026-03-15")  # 73 days
+    assert prev_start is None
+    assert prev_end is None
+
+def test_windows_prev_before_min_date_still_returns_dates():
+    # _windows doesn't check MIN_DATE for prev — that's handled downstream by get_activities/get_health_history
+    prev_start, prev_end = _windows("2026-01-05", "2026-01-10")
+    assert prev_start == "2025-12-06"
+    assert prev_end == "2025-12-11"
+
+
+# ── trend function tests (mocked DB) ─────────────────────────────────────────
+
+CURR_ACTIVITIES = [
+    {"calendar_date": "2026-05-01", "miles": 5.0, "calories_burned": 400, "avg_hr": 150, "max_hr": 170, "average_pace": "8:00/mi", "total_time": "00:40:00"},
+    {"calendar_date": "2026-05-03", "miles": 7.0, "calories_burned": 600, "avg_hr": 160, "max_hr": 180, "average_pace": "7:30/mi", "total_time": "00:52:30"},
+]
+PREV_ACTIVITIES = [
+    {"calendar_date": "2026-04-01", "miles": 3.0, "calories_burned": 250, "avg_hr": 150, "max_hr": 170, "average_pace": "8:30/mi", "total_time": "00:25:30"},
+]
+
+CURR_HEALTH = [
+    {"calendar_date": "2026-05-01", "hrv": 60, "rhr": 50, "sleep_score": 85, "stress": 20, "total_steps": 12000, "total_sleep": "08:00:00"},
+    {"calendar_date": "2026-05-02", "hrv": 70, "rhr": 48, "sleep_score": 90, "stress": 15, "total_steps": 15000, "total_sleep": "07:30:00"},
+]
+PREV_HEALTH = [
+    {"calendar_date": "2026-04-01", "hrv": 50, "rhr": 55, "sleep_score": 70, "stress": 30, "total_steps": 10000, "total_sleep": "06:00:00"},
+]
+
+
+@patch("services.trend_analysis.get_activities")
+def test_miles_trend(mock_get):
+    mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
+    result = miles_trend("user1", "2026-05-01", "2026-05-07")
+    assert result["current"] == 12.0
+    assert result["previous"] == 3.0
+    assert result["trend"] == "improving"
+
+@patch("services.trend_analysis.get_activities")
+def test_pace_trend_lower_is_better(mock_get):
+    mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
+    result = pace_trend("user1", "2026-05-01", "2026-05-07")
+    # curr avg: (480 + 450) / 2 = 465, prev avg: 510 → faster, lower = improving
+    assert result["current"] == 465.0
+    assert result["previous"] == 510.0
+    assert result["trend"] == "improving"
+
+@patch("services.trend_analysis.get_activities")
+def test_hr_trend_neutral(mock_get):
+    mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
+    result = hr_trend("user1", "2026-05-01", "2026-05-07")
+    assert result["current"] == 155.0
+    assert result["trend"] is None  # neutral, no direction
+
+@patch("services.trend_analysis.get_activities")
+def test_total_calories_trend(mock_get):
+    mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
+    result = total_calories_trend("user1", "2026-05-01", "2026-05-07")
+    assert result["current"] == 1000.0
+    assert result["previous"] == 250.0
+
+@patch("services.trend_analysis.get_activities")
+def test_activity_count_trend(mock_get):
+    mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
+    result = activity_count_trend("user1", "2026-05-01", "2026-05-07")
+    assert result["current"] == 2
+    assert result["previous"] == 1
+    assert result["trend"] == "improving"
+
+@patch("services.trend_analysis.get_activities")
+def test_total_time_trend(mock_get):
+    mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
+    result = total_time_trend("user1", "2026-05-01", "2026-05-07")
+    # 40 + 52.5 = 92.5 min → 1.541... hours
+    assert round(result["current"], 2) == round(40/60 + 52.5/60, 2)
+
+@patch("services.trend_analysis.get_health_history")
+def test_hrv_trend(mock_get):
+    mock_get.side_effect = [CURR_HEALTH, PREV_HEALTH]
+    result = hrv_trend("user1", "2026-05-01", "2026-05-07")
+    assert result["current"] == 65.0
+    assert result["previous"] == 50.0
+    assert result["trend"] == "improving"
+
+@patch("services.trend_analysis.get_health_history")
+def test_rhr_trend_lower_is_better(mock_get):
+    mock_get.side_effect = [CURR_HEALTH, PREV_HEALTH]
+    result = rhr_trend("user1", "2026-05-01", "2026-05-07")
+    assert result["current"] == 49.0
+    assert result["previous"] == 55.0
+    assert result["trend"] == "improving"   # lower = better, went down
+
+@patch("services.trend_analysis.get_health_history")
+def test_total_sleep_in_hours(mock_get):
+    mock_get.side_effect = [CURR_HEALTH, PREV_HEALTH]
+    result = total_sleep("user1", "2026-05-01", "2026-05-07")
+    assert result["current"] == 7.75   # avg of 8.0 and 7.5
+    assert result["previous"] == 6.0
+
+@patch("services.trend_analysis.get_health_history")
+def test_stress_trend_lower_is_better(mock_get):
+    mock_get.side_effect = [CURR_HEALTH, PREV_HEALTH]
+    result = stress_trend("user1", "2026-05-01", "2026-05-07")
+    assert result["current"] == 17.5
+    assert result["previous"] == 30.0
+    assert result["trend"] == "improving"
+
+
+# ── MIN_DATE clamping tests for get_activities ───────────────────────────────
+
+def test_get_activities_end_before_min_returns_empty():
+    from db.activity_history import get_activities
+    result = get_activities("user1", "2025-12-01", "2025-12-31")
+    assert result == []
+
+@patch("db.activity_history.get_supabase_client")
+def test_get_activities_shifts_window_on_partial_overlap(mock_client):
+    from db.activity_history import get_activities
+    chain = mock_client.return_value
+    chain.table.return_value.select.return_value.eq.return_value.gte.return_value.lte.return_value.execute.return_value.data = []
+
+    # start before MIN_DATE (Dec 15), end after (Jan 15). 31-day window.
+    # Should shift to Jan 1 - Feb 1 (same 31-day window starting at MIN_DATE).
+    get_activities("user2", "2025-12-15", "2026-01-15")
+
+    gte_call = chain.table.return_value.select.return_value.eq.return_value.gte
+    lte_call = gte_call.return_value.lte
+    gte_call.assert_called_with("calendar_date", "2026-01-01")
+    lte_call.assert_called_with("calendar_date", "2026-02-01")
+
+
+# ── trend flow when prev returns empty ───────────────────────────────────────
+
+@patch("services.trend_analysis.get_activities")
+def test_trend_skips_comparison_when_prev_empty(mock_get):
+    # current has data, prev returns empty (e.g. before MIN_DATE)
+    mock_get.side_effect = [CURR_ACTIVITIES, []]
+    result = miles_trend("user1", "2026-05-01", "2026-05-07")
+    assert result["current"] == 12.0
+    assert "previous" not in result
+    assert "trend" not in result

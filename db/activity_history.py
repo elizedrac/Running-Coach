@@ -1,6 +1,10 @@
 # Hardcoded queries for the activity_history table (per-activity rows from Garmin).
+from datetime import datetime
+
 from db.client import get_supabase_client
 from services.cache import get_cached, set_cached
+
+MIN_DATE = "2026-01-01"
 
 def insert_activities(rows: list[dict]) -> None:
     if not rows:
@@ -14,6 +18,17 @@ def insert_activities(rows: list[dict]) -> None:
         print(f"Error inserting activities: {e}")
 
 def get_activities(user_id: str, start_date: str, end_date: str) -> list[dict]:
+    if end_date < MIN_DATE:
+        return []
+    
+    if start_date < MIN_DATE:
+        start_dt = datetime.fromisoformat(start_date).date()
+        end_dt = datetime.fromisoformat(end_date).date()
+        
+        start_date = MIN_DATE
+        delta = end_dt - start_dt
+        end_date = (datetime.fromisoformat(start_date).date() + delta).isoformat()
+
     cached = get_cached(user_id, start_date, end_date, "activity_data")
     if cached is not None:
         print(f"Cache hit for activities")

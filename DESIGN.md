@@ -72,6 +72,7 @@ runcoach/
 │   ├── llm.py                     # Central call_llm() with retry + caching
 │   ├── planner.py                 # Planner LLM call + PlannerOutput validation
 │   ├── sql_selector.py            # Haiku call that picks query functions from REGISTRY; called internally by query_data tool
+│   ├── trend_analysis.py          # 14 per-metric trend functions + compute_body_battery + compute_load
 │   ├── final.py                   # Final LLM call (Sonnet). System prompt = BASE_COACH; per-tool snippets + data in user prompt.
 │   ├── garmin.py                  # Garmin data sync (token-cached auth, upsert to Supabase)
 │   ├── plan.py                    # Training plan creation, update, injury logic
@@ -102,6 +103,7 @@ runcoach/
 │   └── finish_time_predictor.json # Serialised XGBoost model (V2)
 │
 ├── knowledge/
+│   ├── health_metrics.json        # Per-metric descriptions, typical ranges, interpretation (injected into final prompt when health data present)
 │   ├── training_zones.json        # HR zones, pace zones — static reference
 │   └── race_distances.json        # Standard distances in km — static reference
 │
@@ -460,10 +462,13 @@ Question arrives
 - Returns data as plain English with light knowledge context
 - Reroute to Garmin sync form if no data
 
-### 10. Trend Analysis
-- Only called if user specifically asks for trends or comparisons
-- Usually past month comparisons
-- Predefined SQL mapped from natural language
+### 10. Trend Analysis ✓
+- 14 per-metric trend functions in `services/trend_analysis.py` (miles, pace, hr, calories x2, count, time, hrv, rhr, sleep score, sleep hours, stress, steps x2)
+- Each compares current window against the same-length window shifted back 30 days
+- Returns `{metric, current, previous?, trend: "improving"|"declining"|"stable"}` — comparison fields skipped if prev window has no data
+- Registered in `sql_selector.REGISTRY` alongside raw fetchers; Haiku picks one or many based on intent
+- Trend functions internally call the cached `get_activities`/`get_health_history` — no extra DB calls
+- MIN_DATE = `"2026-01-01"` enforced in db layer: if requested start is before MIN_DATE, window shifts forward (preserves length); if entire range is before MIN_DATE, returns `[]`. Final LLM is told to inform the user when shifting occurs.
 
 ### 11. Get Course Details
 - Anthropic web search + planner LLM-generated query
@@ -475,17 +480,16 @@ Question arrives
 - XGBoost model (see ML Model section)
 - Not current priority — V2 feature
 
-### 13. Compute Body Battery
-- Compute a recovery readiness score from recent sleep (score, duration), HRV (lastNightAvg + trend), and stress (avg, recent peaks)
-- Returns 0-100 score + qualitative summary (Fresh / Moderate / Drained)
-- Pulls data via existing query_data path — no extra Garmin call needed
-- Not yet implemented
+### 13. Compute Body Battery ✓
+- Recovery readiness score (0-100) computed from today's sleep hours, yesterday's stress, today's HRV, and the past 24h of activity load
+- Implemented in `services/trend_analysis.py::compute_body_battery(user_id)`
+- Registered in `sql_selector.REGISTRY`; system prompt instructs Haiku to use only when user asks about readiness / how they feel / whether to exercise
 
-### 14. Compute Training Load
-- Compute acute (7-day) and chronic (28-day) training load from activity_history (volume × intensity proxy)
-- Returns acute, chronic, and ACWR (acute:chronic workload ratio) — flag >1.3 as injury risk
-- Pulls data via existing query_data path — no extra Garmin call needed
-- Not yet implemented
+### 14. Compute Training Load ✓
+- Returns `{acute_load, chronic_load, acwr}` — acute=last 7 days, chronic=28-day weekly avg, ACWR=acute/chronic (flag >1.3)
+- Activity load formula: `total_minutes × (avg_hr / max_hr)`
+- Implemented in `services/trend_analysis.py::compute_load(user_id)`
+- Registered in `sql_selector.REGISTRY` alongside body battery; same sparing-use rules
 
 ---
 
@@ -831,7 +835,7 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 
 6. **CLI implementation** — simple terminal interface to test LLM calls before building UI ✓
 7. **LLM flow implementation** — planner, tool routing, prompt snippets, final LLM call, coach orchestrator ✓
-8. **Tool implementation** — Get Weather ✓ → Query User Data (query_data tool + sql_selector + range-aware cache) ✓ → Garmin Sync ✓ → Get Plan → remaining tools
+8. **Tool implementation** — Get Weather ✓ → Query User Data (query_data tool + sql_selector + range-aware cache) ✓ → Garmin Sync ✓ → Trend Analysis ✓ → Body Battery ✓ → Training Load ✓ → Get Plan → remaining tools
 
 ### Phase 4 — Agent + Output (Week 2, Mon–Tue)
 
