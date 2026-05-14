@@ -1,5 +1,9 @@
 # Pacing calculator. Pure math: goal time + distance → training pace zones + GPS-adjusted pace.
 # Uses Jack Daniels-style offsets, relative to equivalent marathon pace (Riegel formula).
+from db.health_history import get_health_history
+from datetime import datetime
+
+TODAY = datetime.now().date().isoformat()
 
 MARATHON_MILES = 26.2188
 
@@ -42,6 +46,14 @@ def _equivalent_marathon_pace(goal_time: str, distance: float) -> float | None:
     marathon_time = mins * (MARATHON_MILES / distance) ** 1.06
     return marathon_time / MARATHON_MILES
 
+def _pace_from_vo2(vo2_max: float, fraction: float = 0.70) -> float | None:
+    """ACSM: VO2 (ml/kg/min) → running pace (min/mi) at given fraction of VO2 max."""
+    target = vo2_max * fraction
+    if target <= 3.5:
+        return None
+    speed_m_per_min = (target - 3.5) / 0.2
+    return 1609 / speed_m_per_min
+
 def get_pacing_zones(goal_time: str, distance: float) -> dict:
     if abs(distance - MARATHON_MILES) < 0.05:
         pace = _get_pace(goal_time, distance)
@@ -61,12 +73,16 @@ def get_pacing_zones(goal_time: str, distance: float) -> dict:
 
 def pacing_calculator(user_id: str, goal_time: str, distance: float) -> dict:
     goal_time = goal_time.strip()
-    
+
     goal_pace = _get_pace(goal_time, distance)
     gps_adjusted_pace = _get_pace(goal_time, distance * 1.025)  # +2.5% for GPS / tangents
+
+    health = get_health_history(user_id, TODAY, TODAY)
+    vo2 = health[0].get("vo2_max") if health else None
 
     return {
         "goal_pace":         _min_to_pace(goal_pace),
         "gps_adjusted_pace": _min_to_pace(gps_adjusted_pace),
+        "current_easy_pace": _min_to_pace(_pace_from_vo2(vo2)) if vo2 else None,
         **get_pacing_zones(goal_time, distance),
     }

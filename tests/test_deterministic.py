@@ -434,3 +434,36 @@ def test_pacing_calculator_full():
     for key in ("goal_pace", "gps_adjusted_pace", "easy_pace", "marathon_pace",
                 "threshold_pace", "interval_pace", "repetition_pace"):
         assert key in result
+
+
+# ── VO2-derived easy pace ────────────────────────────────────────────────────
+
+from services.pacing import _pace_from_vo2
+
+def test_pace_from_vo2_trained_runner():
+    # VO2 max 55, 70% effort → easy pace should be reasonable for a trained runner
+    pace = _pace_from_vo2(55, fraction=0.70)
+    assert 8.5 < pace < 10.0  # roughly 8:30-10:00 min/mi range
+
+def test_pace_from_vo2_elite():
+    pace = _pace_from_vo2(70, fraction=0.70)
+    elite_recreational = _pace_from_vo2(55, fraction=0.70)
+    assert pace < elite_recreational  # higher VO2 = faster easy pace
+
+def test_pace_from_vo2_invalid():
+    # very low VO2 should not produce a valid pace
+    assert _pace_from_vo2(4, fraction=0.70) is None  # target VO2 would be 2.8 < 3.5
+
+@patch("services.pacing.get_health_history")
+def test_pacing_calculator_includes_vo2_easy_pace(mock_health):
+    mock_health.return_value = [{"calendar_date": "2026-05-14", "vo2_max": 55}]
+    result = pacing_calculator("user1", "3:30:00", 26.2188)
+    assert result["current_easy_pace"] is not None
+    # parseable as a pace string
+    assert ":" in result["current_easy_pace"]
+
+@patch("services.pacing.get_health_history")
+def test_pacing_calculator_no_vo2_returns_none(mock_health):
+    mock_health.return_value = []
+    result = pacing_calculator("user1", "3:30:00", 26.2188)
+    assert result["current_easy_pace"] is None

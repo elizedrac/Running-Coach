@@ -18,7 +18,7 @@ TOOL_METADATA = {
     "get_plan":           "Retrieve the user's current training plan for a given week.",
     "clear_plan":         "Delete the user's active training plan.",
     "update_plan":        "Modify the plan due to injury, a skipped workout, or schedule changes.",
-    "pacing_calculator":  "Calculate target paces for easy, tempo, threshold, and interval workouts given a goal race time. Used if the user asks 'what should my pace be for X workout' or 'can you give me a pace chart for my goal time of Y' or for their race pace given a goal time and distance.",
+    "pacing_calculator":  "Calculate target paces for easy, tempo, threshold, interval, and repetition workouts given a goal race time and distance. Use whenever the user asks about training paces, workout paces, or race pace for a goal time/distance — even if they only specify a distance (e.g. 'what's a good easy pace for a half marathon') OR only a goal time without distance. The system will prompt the user for any missing required args, so prefer invoking this tool over giving generic verbal advice.",
     "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
     "get_race_results":   "Look up the user's finishing time in a specific race via Athlinks.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
@@ -91,7 +91,11 @@ TOOL_SNIPPETS = {
     "create_plan":        "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
     "update_plan":        "Acknowledge what changed and why. If injury severity was high, include a note to consult a medical professional.",
     "clear_plan":         "Confirm the plan was cleared and ask if the user wants to create a new one.",
-    "pacing_calculator":  "Present paces in a clean table: workout type → target pace range. Explain the purpose of each zone briefly. Additionally used if user asks for goal pace for a given distance and time and/or upcoming race",
+    "pacing_calculator":  "Present paces in a clean table: workout type → target pace range. Explain the purpose of each zone briefly. Additionally used if user asks for goal pace for a given distance and time and/or upcoming race. \n\n"
+                          "IMPORTANT — interpreting fields:\n"
+                          "- `goal_pace`: pace per mile required to hit the goal time exactly (goal_time / distance).\n"
+                          "- `gps_adjusted_pace`: the pace your WATCH should show during the race to actually hit the goal time. It's faster than goal_pace by ~2.5% because GPS over-measures (you don't run perfect tangents, GPS adds noise). This is a RACE-DAY TACTICAL ADJUSTMENT, NOT a comment on the user's fitness. Do NOT say things like 'your fitness can support a faster pace' — say something like 'aim for ~X:XX/mi on your watch so you actually cross at goal_time'.\n"
+                          "- Zones (easy/marathon/threshold/interval/repetition) are derived from equivalent marathon pace using Daniels-style offsets.",
     "get_weather":        "The weather API is only capable of fetching current day weather + 12 hour forecasts. Reference this data naturally when answering the user or advising them if they should run and when the best time is and give reasoning grounded in data (be sure to consider the 'feels like' as well). Suggest treadmill if conditions are poor (ie. too hot/humid (above 75°F), too cold (below 32°F)), or rainy). If they do prefer to go outside, suggest the best time window and what to wear based on the forecast. If they ask for weather data either from the past or more than 12 hours in the future, gracefully explain the limitations of the API and provide advice based on the current conditions.",
     "get_race_results":   "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",
     "get_course_details": "Reference elevation and terrain when discussing pacing strategy. Flag major climbs.",

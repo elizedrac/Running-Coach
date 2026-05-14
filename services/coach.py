@@ -6,7 +6,14 @@ from services.garmin import garmin_sync
 from services.sql_selector import execute_query
 from services.pacing import _time_to_mins, pacing_calculator
 from datetime import date, timedelta
+from pathlib import Path
+import json
 import sys
+
+
+RACE_DISTANCES_KNOWLEDGE = json.loads(
+    Path(__file__).parent.parent.joinpath("knowledge/race_distances.json").read_text()
+)
 
 def _query_data(user_id: str, query_intent: str = "", start_date: str = None, end_date: str = None, prev_start: str = None, prev_end: str = None):
     return execute_query(user_id, query_intent, start_date or None, end_date or None, prev_start or None, prev_end or None)
@@ -38,6 +45,9 @@ def call_tool(name: str, args: dict, user_id: str):
         args["day_iso_end"] = end_date
 
     if name == "pacing_calculator":
+        if "distance" not in args or not args["distance"]:
+            if "race_type" in args and args["race_type"] in RACE_DISTANCES_KNOWLEDGE:
+                args["distance"] = RACE_DISTANCES_KNOWLEDGE[args["race_type"]]["miles"]
         while "distance" not in args or not args["distance"]:
             raw = input("Please enter the distance in miles of your desired race: ")
             try:
@@ -50,6 +60,8 @@ def call_tool(name: str, args: dict, user_id: str):
                 print("Invalid time format. Try again.")
                 continue
             args["goal_time"] = goal_time
+
+        args.pop("race_type", None)
 
     if not fn:
         return f"Tool '{name}' not yet implemented"
