@@ -1,1 +1,140 @@
-{}
+{
+    "100m": {
+        "meters": 100,
+        "km": 0.1,
+        "miles": 0.062
+    },
+    "200m": {
+        "meters": 200,
+        "km": 0.2,
+        "miles": 0.124
+    },
+    "400m": {
+        "meters": 400,
+        "km": 0.4,
+        "miles": 0.249
+    },
+    "800m": {
+        "meters": 800,
+        "km": 0.8,
+        "miles": 0.497,
+        "aliases": [
+            "half mile",
+            "yasso 800"
+        ]
+    },
+    "1500m": {
+        "meters": 1500,
+        "km": 1.5,
+        "miles": 0.932,
+        "aliases": [
+            "1500",
+            "metric mile"
+        ]
+    },
+    "3k": {
+        "meters": 3000,
+        "km": 3.0,
+        "miles": 1.864,
+        "aliases": [
+            "3000m",
+            "3000"
+        ]
+    },
+    "5k": {
+        "meters": 5000,
+        "km": 5.0,
+        "miles": 3.107,
+        "aliases": [
+            "5000m",
+            "parkrun"
+        ]
+    },
+    "8k": {
+        "meters": 8000,
+        "km": 8.0,
+        "miles": 4.971
+    },
+    "10k": {
+        "meters": 10000,
+        "km": 10.0,
+        "miles": 6.214,
+        "aliases": [
+            "10000m"
+        ]
+    },
+    "12k": {
+        "meters": 12000,
+        "km": 12.0,
+        "miles": 7.456,
+        "aliases": [
+            "bay to breakers",
+            "bloomsday"
+        ]
+    },
+    "15k": {
+        "meters": 15000,
+        "km": 15.0,
+        "miles": 9.321,
+        "aliases": [
+            "boilermaker"
+        ]
+    },
+    "20k": {
+        "meters": 20000,
+        "km": 20.0,
+        "miles": 12.427
+    },
+    "half_marathon": {
+        "meters": 21097,
+        "km": 21.0975,
+        "miles": 13.109,
+        "aliases": [
+            "half",
+            "HM",
+            "13.1"
+        ]
+    },
+    "25k": {
+        "meters": 25000,
+        "km": 25.0,
+        "miles": 15.534
+    },
+    "30k": {
+        "meters": 30000,
+        "km": 30.0,
+        "miles": 18.641
+    },
+    "marathon": {
+        "meters": 42195,
+        "km": 42.195,
+        "miles": 26.219,
+        "aliases": [
+            "full",
+            "26.2",
+            "M",
+            "boston",
+            "nyc",
+            "london",
+            "berlin",
+            "tokyo",
+            "chicago"
+        ]
+    },
+    "50k": {
+        "meters": 50000,
+        "km": 50.0,
+        "miles": 31.069,
+        "aliases": [
+            "ultra"
+        ]
+    },
+    "100k": {
+        "meters": 100000,
+        "km": 100.0,
+        "miles": 62.137,
+        "aliases": [
+            "comrades"
+        ]
+    }
+}

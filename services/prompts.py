@@ -7,6 +7,10 @@ HEALTH_METRICS_KNOWLEDGE = json.loads(
     Path(__file__).parent.parent.joinpath("knowledge/health_metrics.json").read_text()
 )
 
+RACE_DISTANCES_KNOWLEDGE = json.loads(
+    Path(__file__).parent.parent.joinpath("knowledge/race_distances.json").read_text()
+)
+
 TOOL_METADATA = {
     "garmin_sync":        "Sync latest Garmin activity and health data into the DB. Use if user mentions a recent run that may not be recorded yet or if user wants to update their data.",
     "query_data":         "Query the user's data — handles raw values, trend comparisons (improving/declining/stable), training load (ACWR / injury risk), and recovery readiness (body battery). Use for ANY question about steps, sleep, HRV, stress, runs, pace, mileage, HR, body battery, how they're feeling, whether to run, etc. The internal selector picks the right function based on intent.",
@@ -14,7 +18,7 @@ TOOL_METADATA = {
     "get_plan":           "Retrieve the user's current training plan for a given week.",
     "clear_plan":         "Delete the user's active training plan.",
     "update_plan":        "Modify the plan due to injury, a skipped workout, or schedule changes.",
-    "pacing_calculator":  "Calculate target paces for easy, tempo, threshold, and interval workouts given a goal race time.",
+    "pacing_calculator":  "Calculate target paces for easy, tempo, threshold, and interval workouts given a goal race time. Used if the user asks 'what should my pace be for X workout' or 'can you give me a pace chart for my goal time of Y' or for their race pace given a goal time and distance.",
     "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
     "get_race_results":   "Look up the user's finishing time in a specific race via Athlinks.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
@@ -42,6 +46,7 @@ Args contracts (only include args listed here):
 - query_data: {{"query_intent": "description of what to fetch", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "prev_start": "YYYY-MM-DD (optional)", "prev_end": "YYYY-MM-DD (optional)"}}
     # start_date/end_date default to last 14 days if not specified. For trend questions, keep window ≤ 31 days.
     # prev_start/prev_end: ONLY include if the user explicitly specifies a comparison period (e.g. "this week vs last week" → prev_start=today-14, prev_end=today-7). Otherwise the internal selector handles defaults.
+- pacing_calculator: {{"goal_time": "HH:MM:SS or MM:SS", "distance": float (only in miles NOT km), "race_type": "string (optional)"}} if no distance is given, identify from race_type only from one of these options: {", ".join(RACE_DISTANCES_KNOWLEDGE.keys())}. Otherwise, leave blank.
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {{

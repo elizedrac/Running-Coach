@@ -4,6 +4,7 @@ from services.final import final_output
 from services.weather import get_weather
 from services.garmin import garmin_sync
 from services.sql_selector import execute_query
+from services.pacing import pacing_calculator
 from datetime import date, timedelta
 import sys
 
@@ -14,7 +15,8 @@ TOOL_REGISTRY = {
     "get_weather": get_weather,
     "garmin_sync": garmin_sync,
     "query_data":  _query_data,
-    "trend_analysis": _query_data
+    "trend_analysis": _query_data,
+    "pacing"
 }
 
 def call_tool(name: str, args: dict, user_id: str):
@@ -34,6 +36,14 @@ def call_tool(name: str, args: dict, user_id: str):
 
         args["day_iso_start"] = start_date
         args["day_iso_end"] = end_date
+
+    if name == "pacing_calculator":
+        if "distance" not in args or not args["distance"]:
+            distance = input("Please enter the distance in miles of your desired race: ")
+            args["distance"] = float(distance)
+        if "goal_time" not in args or not args["goal_time"]:
+            goal_time = input("Please enter your goal time (HH:MM:SS or MM:SS): ")
+            args["goal_time"] = goal_time
 
     if not fn:
         return f"Tool '{name}' not yet implemented"

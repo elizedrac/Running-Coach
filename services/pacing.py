@@ -1,0 +1,70 @@
+# Pacing calculator. Pure math: goal time + distance → training pace zones + GPS-adjusted pace.
+# Uses Jack Daniels-style offsets, relative to equivalent marathon pace (Riegel formula).
+
+MARATHON_MILES = 26.2188
+
+def _time_to_mins(time_str: str) -> float | None:
+    """Parse 'MM:SS' or 'HH:MM:SS' string into total minutes (float)."""
+    if not time_str:
+        return None
+    try:
+        parts = time_str.split(":")
+        if len(parts) == 1 and int(parts[0]) > 0:
+            return int(parts[0]) / 60
+        if len(parts) == 2:
+            return int(parts[0]) + int(parts[1]) / 60
+        if len(parts) == 3:
+            return int(parts[0]) * 60 + int(parts[1]) + int(parts[2]) / 60
+        return None
+    except ValueError:
+        return None
+
+def _min_to_pace(mins: float | None) -> str | None:
+    """Convert minutes (float) to 'M:SS' display string."""
+    if mins is None:
+        return None
+    m = int(mins)
+    s = int(round((mins - m) * 60))
+    return f"{m}:{s:02d}"
+
+def _get_pace(time_str: str, distance: float) -> float | None:
+    """Return pace as minutes-per-mile (float). None if invalid."""
+    mins = _time_to_mins(time_str)
+    if mins is None or distance <= 0:
+        return None
+    return mins / distance
+
+def _equivalent_marathon_pace(goal_time: str, distance: float) -> float | None:
+    """Riegel: T2 = T1 * (D2/D1)^1.06. Returns equivalent marathon pace (min/mi)."""
+    mins = _time_to_mins(goal_time)
+    if mins is None or distance <= 0:
+        return None
+    marathon_time = mins * (MARATHON_MILES / distance) ** 1.06
+    return marathon_time / MARATHON_MILES
+
+def get_pacing_zones(goal_time: str, distance: float) -> dict:
+    if abs(distance - MARATHON_MILES) < 0.05:
+        pace = _get_pace(goal_time, distance)
+    else:
+        pace = _equivalent_marathon_pace(goal_time, distance)
+
+    if pace is None:
+        return {}
+
+    return {
+        "easy_pace":       _min_to_pace(pace + 1.5),
+        "marathon_pace":   _min_to_pace(pace),
+        "threshold_pace":  _min_to_pace(pace - 0.25),
+        "interval_pace":   _min_to_pace(pace - 1.0),
+        "repetition_pace": _min_to_pace(pace - 1.5),
+    }
+
+def pacing_calculator(user_id: str, goal_time: str, distance: float) -> dict:
+    goal_pace = _get_pace(goal_time, distance)
+    gps_adjusted_pace = _get_pace(goal_time, distance * 1.025)  # +2.5% for GPS / tangents
+
+    return {
+        "goal_pace":         _min_to_pace(goal_pace),
+        "gps_adjusted_pace": _min_to_pace(gps_adjusted_pace),
+        **get_pacing_zones(goal_time, distance),
+    }
