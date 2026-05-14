@@ -1,0 +1,65 @@
+{
+    "hrv": {
+        "name": "Heart Rate Variability (lastNightAvg)",
+        "unit": "ms",
+        "description": "Variation between heartbeats. Higher values indicate better autonomic balance, recovery, and aerobic fitness.",
+        "typical_ranges": "Adult resting: 20-80 ms. Trained runners: 50-100+. Elite endurance athletes: 100+.",
+        "interpretation": "Trends matter more than absolute values. A sudden drop of 10+ ms vs personal baseline can signal accumulated fatigue, illness, or overtraining. Steady upward trend indicates adaptation."
+    },
+    "rhr": {
+        "name": "Resting Heart Rate",
+        "unit": "bpm",
+        "description": "Heart rate at rest. Lower values indicate stronger cardiovascular fitness.",
+        "typical_ranges": "General adult: 60-100. Recreational runners: 55-70. Trained runners: 40-55. Elite endurance: 35-45.",
+        "interpretation": "Sudden spike of 5+ bpm above personal baseline can signal illness, dehydration, or overtraining. Gradual decline indicates improving fitness."
+    },
+    "sleep_score": {
+        "name": "Sleep Score",
+        "unit": "0-100",
+        "description": "Composite quality score from Garmin combining sleep duration, deep/REM/light percentages, restlessness, and overnight stress.",
+        "typical_ranges": "80-100 excellent, 60-79 good, 40-59 fair, below 40 poor.",
+        "interpretation": "A single poor night is normal, but two or more consecutive sub-60 scores warrant easier training. Strong recovery requires consistently 70+."
+    },
+    "total_sleep": {
+        "name": "Total Sleep Duration",
+        "unit": "HH:MM:SS",
+        "description": "Total time asleep (excludes time awake in bed).",
+        "typical_ranges": "Adult target: 7-9 hours. Athletes in heavy training: 8-10 hours.",
+        "interpretation": "Consistent sub-7-hour nights compromise recovery, glycogen replenishment, and cognitive function. Quality matters as much as quantity."
+    },
+    "stress": {
+        "name": "Stress Level (daily average)",
+        "unit": "0-100",
+        "description": "HRV-derived continuous stress score. Reflects physiological load (training + life stress combined).",
+        "typical_ranges": "0-25 rest, 26-50 low, 51-75 medium, 76-100 high.",
+        "interpretation": "Sustained averages above 50 may indicate insufficient recovery. Elevated stress paired with low HRV strongly signals overreaching."
+    },
+    "vo2_max": {
+        "name": "VO2 Max",
+        "unit": "ml/kg/min",
+        "description": "Estimated maximum oxygen uptake during exercise. The primary ceiling for aerobic performance.",
+        "typical_ranges": "Recreational runner: 35-50. Competitive amateur: 50-65. Elite endurance: 65-85+.",
+        "interpretation": "Improves with consistent aerobic and high-intensity training. Updates from Garmin occur after structured outdoor runs with HR data. A 1-2 point increase per 6-12 weeks is realistic for trained athletes."
+    },
+    "total_steps": {
+        "name": "Total Daily Steps",
+        "unit": "count",
+        "description": "All steps recorded during the day, including non-running movement.",
+        "typical_ranges": "General health target: 10,000+. Active runners often log 12,000-18,000 on training days.",
+        "interpretation": "Useful as a non-running activity proxy. Drops on rest days are expected; consistent low totals can signal sedentary behaviour or illness."
+    },
+    "active_minutes": {
+        "name": "Active Minutes",
+        "unit": "minutes",
+        "description": "Time spent in moderate or vigorous intensity activity.",
+        "typical_ranges": "WHO target: 150 min/week moderate or 75 min/week vigorous.",
+        "interpretation": "Tracks adherence to baseline activity guidelines. Running days will dominate this metric for trained athletes."
+    },
+    "total_kcal": {
+        "name": "Total Daily Calories",
+        "unit": "kcal",
+        "description": "Estimated total energy expenditure (BMR + activity).",
+        "typical_ranges": "Sedentary adult: 1500-2200. Active runner: 2200-3500. Heavy training days: 3500+.",
+        "interpretation": "Useful for nutrition planning. Days with long runs or hard workouts should see significant spikes vs baseline."
+    }
+}
