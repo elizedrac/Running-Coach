@@ -52,13 +52,15 @@ def orchestrate(user_query, user_id) -> str:
     if path == "tools": 
         # garmin sync has priority
         if "garmin_sync" in [tool.name for tool in planner_response.tools]:
-            result = call_tool("garmin_sync", {}, user_id)
+            tool = next(tool for tool in planner_response.tools if tool.name == "garmin_sync")
+            result = call_tool("garmin_sync", tool.args, user_id)
             tool_results["garmin_sync"] = result
 
-        for tool in planner_response.tools if tool.name != "garmin_sync":
-            name = tool.name.strip()
-            result = call_tool(name, tool.args, user_id)
-            tool_results[name] = result
+        for tool in planner_response.tools:
+            if tool.name != "garmin_sync":
+                name = tool.name.strip()
+                result = call_tool(name, tool.args, user_id)
+                tool_results[name] = result
     if debug:
         print("Tool results:", tool_results, file=sys.stderr)
     
