@@ -7,13 +7,14 @@ from services.sql_selector import execute_query
 from datetime import date, timedelta
 import sys
 
-def _query_data(user_id: str, query_intent: str = "", start_date: str = None, end_date: str = None):
-    return execute_query(user_id, query_intent, start_date or None, end_date or None)
+def _query_data(user_id: str, query_intent: str = "", start_date: str = None, end_date: str = None, prev_start: str = None, prev_end: str = None):
+    return execute_query(user_id, query_intent, start_date or None, end_date or None, prev_start or None, prev_end or None)
 
 TOOL_REGISTRY = {
     "get_weather": get_weather,
     "garmin_sync": garmin_sync,
     "query_data":  _query_data,
+    "trend_analysis": _query_data
 }
 
 def call_tool(name: str, args: dict, user_id: str):

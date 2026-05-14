@@ -1,4 +1,5 @@
 # Hardcoded queries for the health_history table (one row per day; merges daily + sleep metrics).
+import sys
 from datetime import datetime
 
 from db.client import get_supabase_client
@@ -30,7 +31,8 @@ def get_health_history(user_id: str, start_date: str, end_date: str) -> list[dic
 
     cached = get_cached(user_id, start_date, end_date, "health_data")
     if cached is not None:
-        print(f"Cache hit for health history")
+        if "--debug" in sys.argv:
+            print(f"[cache hit] health {start_date} to {end_date}", file=sys.stderr)
         return cached
 
     client = get_supabase_client()

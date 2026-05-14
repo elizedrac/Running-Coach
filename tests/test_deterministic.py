@@ -155,11 +155,60 @@ def test_windows_too_large_returns_none():
     assert prev_start is None
     assert prev_end is None
 
-def test_windows_prev_before_min_date_still_returns_dates():
-    # _windows doesn't check MIN_DATE for prev — that's handled downstream by get_activities/get_health_history
+def test_windows_drops_prev_when_shift_would_overlap_current():
+    # Current Jan 5-10 (5-day window). Default prev = Dec 6-Jan 1.
+    # DB would clamp prev to (Jan 1, Jan 1 + 5 days) = (Jan 1, Jan 6).
+    # That overlaps current Jan 5-10 → comparison should be dropped.
     prev_start, prev_end = _windows("2026-01-05", "2026-01-10")
-    assert prev_start == "2025-12-06"
-    assert prev_end == "2025-12-11"
+    assert prev_start is None
+    assert prev_end is None
+
+def test_windows_keeps_prev_when_no_clamp_needed():
+    # Current Mar 1-7. Default prev Jan 30-Feb 5 (all valid, no clamp).
+    prev_start, prev_end = _windows("2026-03-01", "2026-03-07")
+    assert prev_start == "2026-01-30"
+    assert prev_end == "2026-02-05"
+
+
+# ── _windows with explicit prev args ─────────────────────────────────────────
+
+def test_windows_explicit_prev_used_when_valid():
+    # Explicit prev (within MIN_DATE) → returned as-is, no 30-day shift
+    prev_start, prev_end = _windows("2026-05-07", "2026-05-13", prev_start="2026-04-30", prev_end="2026-05-06")
+    assert prev_start == "2026-04-30"
+    assert prev_end == "2026-05-06"
+
+def test_windows_explicit_prev_falls_back_when_before_min_date():
+    # Explicit prev starts before MIN_DATE → fall back to default 30-day shift
+    prev_start, prev_end = _windows("2026-02-01", "2026-02-07", prev_start="2025-12-01", prev_end="2025-12-07")
+    # Default shift: start - 30 = Jan 2, end - 30 = Jan 8
+    assert prev_start == "2026-01-02"
+    assert prev_end == "2026-01-08"
+
+
+# ── trend function with explicit prev args ───────────────────────────────────
+
+@patch("services.trend_analysis.get_activities")
+def test_miles_trend_with_explicit_prev(mock_get):
+    # explicit prev window → those exact dates queried, no 30-day shift
+    mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
+    result = miles_trend("user1", "2026-05-07", "2026-05-13", prev_start="2026-04-30", prev_end="2026-05-06")
+    assert result["current"] == 12.0
+    assert result["previous"] == 3.0
+    # verify the explicit prev dates were used for the second query call
+    second_call_args = mock_get.call_args_list[1].args
+    assert second_call_args[1] == "2026-04-30"
+    assert second_call_args[2] == "2026-05-06"
+
+@patch("services.trend_analysis.get_activities")
+def test_miles_trend_explicit_prev_below_min_falls_back(mock_get):
+    mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
+    # explicit prev before MIN_DATE → falls back to default (30 days back)
+    miles_trend("user1", "2026-02-01", "2026-02-07", prev_start="2025-12-01", prev_end="2025-12-07")
+    # second call should use default-shifted dates, not the explicit ones
+    second_call_args = mock_get.call_args_list[1].args
+    assert second_call_args[1] == "2026-01-02"
+    assert second_call_args[2] == "2026-01-08"
 
 
 # ── trend function tests (mocked DB) ─────────────────────────────────────────
@@ -292,3 +341,33 @@ def test_trend_skips_comparison_when_prev_empty(mock_get):
     assert result["current"] == 12.0
     assert "previous" not in result
     assert "trend" not in result
+
+
+# ── sql_selector enforcement ─────────────────────────────────────────────────
+
+@patch("services.sql_selector.get_activities")
+@patch("services.sql_selector.select_queries")
+def test_sql_selector_drops_raw_fetcher_when_paired_with_trend(mock_select, mock_get_activities):
+    from services.sql_selector import execute_query
+    # Haiku returns both a raw fetcher and a trend → raw fetcher should be dropped
+    mock_select.return_value = '{"queries": ["get_activities", "miles_trend"]}'
+
+    with patch("services.trend_analysis.get_activities", return_value=CURR_ACTIVITIES):
+        result = execute_query("user1", "any intent", "2026-05-01", "2026-05-07")
+
+    # get_activities (raw fetcher) was NOT executed at sql_selector level
+    mock_get_activities.assert_not_called()
+    # miles_trend output present, no activity_data key
+    assert "miles_trend" in result
+    assert "activity_data" not in result
+
+@patch("services.sql_selector.get_activities")
+@patch("services.sql_selector.select_queries")
+def test_sql_selector_keeps_raw_fetcher_alone(mock_select, mock_get_activities):
+    from services.sql_selector import execute_query
+    mock_select.return_value = '{"queries": ["get_activities"]}'
+    mock_get_activities.return_value = []
+
+    result = execute_query("user1", "any intent", "2026-05-01", "2026-05-07")
+    mock_get_activities.assert_called_once()
+    assert "activity_data" in result

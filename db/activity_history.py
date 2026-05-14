@@ -1,4 +1,5 @@
 # Hardcoded queries for the activity_history table (per-activity rows from Garmin).
+import sys
 from datetime import datetime
 
 from db.client import get_supabase_client
@@ -31,7 +32,8 @@ def get_activities(user_id: str, start_date: str, end_date: str) -> list[dict]:
 
     cached = get_cached(user_id, start_date, end_date, "activity_data")
     if cached is not None:
-        print(f"Cache hit for activities")
+        if "--debug" in sys.argv:
+            print(f"[cache hit] activities {start_date} to {end_date}", file=sys.stderr)
         return cached
 
     try:

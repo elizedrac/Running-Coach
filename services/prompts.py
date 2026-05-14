@@ -9,7 +9,7 @@ HEALTH_METRICS_KNOWLEDGE = json.loads(
 
 TOOL_METADATA = {
     "garmin_sync":        "Sync latest Garmin activity and health data into the DB. Use if user mentions a recent run that may not be recorded yet or if user wants to update their data.",
-    "query_data":         "Query the database for the user's health stats or past activities. Use for any question about past data: steps, sleep, HRV, stress, runs, pace, mileage, heart rate, etc.",
+    "query_data":         "Query the user's data — handles raw values, trend comparisons (improving/declining/stable), training load (ACWR / injury risk), and recovery readiness (body battery). Use for ANY question about steps, sleep, HRV, stress, runs, pace, mileage, HR, body battery, how they're feeling, whether to run, etc. The internal selector picks the right function based on intent.",
     "create_plan":        "Generate a full week-by-week training plan leading to the user's target race date.",
     "get_plan":           "Retrieve the user's current training plan for a given week.",
     "clear_plan":         "Delete the user's active training plan.",
@@ -18,9 +18,6 @@ TOOL_METADATA = {
     "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
     "get_race_results":   "Look up the user's finishing time in a specific race via Athlinks.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
-    "trend_analysis":     "Analyse trends in mileage, pace, HRV, or sleep over a given period.",
-    "compute_body_battery": "Compute the user's current body battery / recovery readiness score from recent sleep, HRV, and stress data.",
-    "compute_load":       "Compute the user's training load (acute, chronic, and ACWR injury risk ratio) from recent activity history.",
 }
 
 def build_planner_system() -> str:
@@ -42,7 +39,9 @@ Today's date: {today}
 Args contracts (only include args listed here):
 - get_weather: {{"date": "YYYY-MM-DD"}}  # optional, omit for today
 - garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}}  # omit if unclear — system will ask
-- query_data: {{"query_intent": "description of what to fetch", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}}  # default 14 days ago to today if not specified
+- query_data: {{"query_intent": "description of what to fetch", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "prev_start": "YYYY-MM-DD (optional)", "prev_end": "YYYY-MM-DD (optional)"}}
+    # start_date/end_date default to last 14 days if not specified. For trend questions, keep window ≤ 31 days.
+    # prev_start/prev_end: ONLY include if the user explicitly specifies a comparison period (e.g. "this week vs last week" → prev_start=today-14, prev_end=today-7). Otherwise the internal selector handles defaults.
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {{
@@ -64,15 +63,17 @@ If the user asks for data not in these fields, respond gracefully that you don't
 SQL_SELECTOR_SYSTEM = """You are a query selector for a running coach app.
 Given a user's query intent and a registry of available query functions, select which queries to run.
 
-Rules:
-- Trend functions (any name ending in '_trend', or average_sleep/total_sleep/average_steps/total_steps) already fetch the underlying health or activity data internally. Do NOT pair a trend with get_health_data or get_activities — that would be redundant.
-- You may select multiple trend functions in one call if the user asks about multiple metrics.
-- Use get_health_data or get_activities only when the user wants specific raw values, not comparisons or trends.
-- compute_body_battery and compute_load are SPECIAL — only use them when:
+Rules (HARD constraints — violating these breaks the system):
+1. NEVER include get_activities or get_health_data in the SAME response as ANY trend function. Trend functions fetch the underlying data internally. Pairing them is FORBIDDEN.
+   - WRONG: ["miles_trend", "get_activities"]  ← do not do this
+   - RIGHT: ["miles_trend"]
+2. If the user asks for trends, comparisons, "improving/declining", or "how has X changed" — pick only trend function(s).
+3. If the user asks for specific raw values (e.g. "what was my HRV yesterday", "show me my runs from May 1-7") — pick get_health_data or get_activities, NOT trends.
+4. You MAY pick multiple trend functions in one response if the user asks about multiple metrics.
+5. compute_body_battery and compute_load are SPECIAL — pick them ONLY when:
     (a) the user explicitly asks about recovery, readiness, body battery, training load, ACWR, or injury risk
     (b) the user asks whether they should run/exercise today or how they're feeling
-    (c) you need to lightly contextualize a trend question with current readiness — but use sparingly
-  Do NOT include them by default for routine data lookups.
+   Do NOT include them for routine data lookups.
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {
@@ -89,8 +90,11 @@ TOOL_SNIPPETS = {
     "get_weather":        "The weather API is only capable of fetching current day weather + 12 hour forecasts. Reference this data naturally when answering the user or advising them if they should run and when the best time is and give reasoning grounded in data (be sure to consider the 'feels like' as well). Suggest treadmill if conditions are poor (ie. too hot/humid (above 75°F), too cold (below 32°F)), or rainy). If they do prefer to go outside, suggest the best time window and what to wear based on the forecast. If they ask for weather data either from the past or more than 12 hours in the future, gracefully explain the limitations of the API and provide advice based on the current conditions.",
     "get_race_results":   "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",
     "get_course_details": "Reference elevation and terrain when discussing pacing strategy. Flag major climbs.",
-    "trend_analysis":     "Summarise the trend direction first (improving / declining / stable), then cite the specific numbers.",
-    "query_data":         "Raw query results are being provided, either containing health data or past activities. Use this data to answer the user's question, grounding your advice in specific metrics and trends. If the user query was vague, use the data to make reasonable assumptions about their intent and answer accordingly. Always reference specific data points from the query results to back up your advice. IMPORTANT: data is only available from 2026-01-01 onwards (MIN_DATE). If the user asked for a date range starting before 2026-01-01, the requested window was shifted forward to start at 2026-01-01 (preserving the original length). When this happens, briefly tell the user their requested range was shifted and explain why. If the entire requested range was before 2026-01-01, no data is available — gracefully say so."
+    "query_data":         "Query results are provided — could be raw health/activity rows, trend comparisons (current vs previous window), training load (ACWR), or recovery readiness (body battery). Always ground your response in specific data points. \n\n"
+                          "TIMEFRAMES: NEVER use vague words like 'this period' or 'last period'. Always name the timeframe explicitly using the actual dates or natural labels: 'this week (May 7-13)' vs 'the same week last month (Apr 7-13)', 'last 14 days' vs 'the 14 days before', etc. If the comparison window was 30 days back, say 'compared to the same X-day window 30 days earlier'. If the user explicitly asked for week-over-week, say 'this week vs last week' with dates.\n\n"
+                          "TRENDS: If a trend is present, lead with the direction (improving / declining / stable), then cite the numbers, then give 1-2 actionable insights.\n\n"
+                          "MISSING COMPARISON: If a trend result has ONLY a 'current' field (no 'previous' or 'trend' keys), it means no valid comparison window exists (typically because the prior period would be before MIN_DATE 2026-01-01). Say something like 'I don't have enough prior data to detect a trend' — do NOT say it's a single data point (the current value is still an average over the requested window). State the current value with the date range it covers.\n\n"
+                          "MIN_DATE: Data is only available from 2026-01-01 onwards. If the user asked for a date range starting before that, the window was shifted forward to start at 2026-01-01 (preserving its length). When that happens, briefly tell the user their requested range was shifted and why. If the entire requested range was before 2026-01-01, gracefully say no data is available."
 }
 
 

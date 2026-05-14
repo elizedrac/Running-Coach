@@ -9,6 +9,7 @@ from services.trend_analysis import (
     compute_body_battery, compute_load,
 )
 from datetime import datetime, timedelta
+import sys
 from services.llm import call_llm
 from services.prompts import SQL_SELECTOR_SYSTEM
 from models.planner import SQLPlan
@@ -59,12 +60,19 @@ Query descriptions: {REGISTRY}"""
     end = response.rfind("}") + 1
     return response[start:end]
 
-def execute_query(user_id, query_intent: str, start_date: str = None, end_date: str = None):
+def execute_query(user_id, query_intent: str, start_date: str = None, end_date: str = None, prev_start=None, prev_end=None):
     start_date = start_date or TWO_WEEKS_AGO
     end_date = end_date or TODAY
 
     raw = select_queries(query_intent)
     response = SQLPlan.model_validate_json(raw)
+
+    # Enforce: if any trend function was picked, drop raw fetchers (they're redundant)
+    if any(q not in ("get_activities", "get_health_data") for q in response.queries):
+        response.queries = [q for q in response.queries if q not in ("get_activities", "get_health_data")]
+
+    if "--debug" in sys.argv:
+        print(f"[sql_selector] picked: {response.queries}", file=sys.stderr)
 
     trend_fns = {
         "miles_trend": miles_trend,
@@ -97,7 +105,7 @@ def execute_query(user_id, query_intent: str, start_date: str = None, end_date: 
             }
         elif query in trend_fns:
             query_outputs[query] = {
-                "data": trend_fns[query](user_id, start_date, end_date),
+                "data": trend_fns[query](user_id, start_date, end_date, prev_start, prev_end),
                 "description": REGISTRY[query]["description"],
             }
         elif query == "compute_body_battery":
