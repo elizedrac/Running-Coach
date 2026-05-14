@@ -4,7 +4,7 @@ from services.final import final_output
 from services.weather import get_weather
 from services.garmin import garmin_sync
 from services.sql_selector import execute_query
-from services.pacing import pacing_calculator
+from services.pacing import _time_to_mins, pacing_calculator
 from datetime import date, timedelta
 import sys
 
@@ -16,7 +16,7 @@ TOOL_REGISTRY = {
     "garmin_sync": garmin_sync,
     "query_data":  _query_data,
     "trend_analysis": _query_data,
-    "pacing"
+    "pacing_calculator": pacing_calculator,
 }
 
 def call_tool(name: str, args: dict, user_id: str):
@@ -38,11 +38,17 @@ def call_tool(name: str, args: dict, user_id: str):
         args["day_iso_end"] = end_date
 
     if name == "pacing_calculator":
-        if "distance" not in args or not args["distance"]:
-            distance = input("Please enter the distance in miles of your desired race: ")
-            args["distance"] = float(distance)
-        if "goal_time" not in args or not args["goal_time"]:
+        while "distance" not in args or not args["distance"]:
+            raw = input("Please enter the distance in miles of your desired race: ")
+            try:
+                args["distance"] = float(raw)
+            except ValueError:
+                print("Invalid number. Try again.")
+        while "goal_time" not in args or not args["goal_time"]:
             goal_time = input("Please enter your goal time (HH:MM:SS or MM:SS): ")
+            if _time_to_mins(goal_time.strip()) is None:
+                print("Invalid time format. Try again.")
+                continue
             args["goal_time"] = goal_time
 
     if not fn:

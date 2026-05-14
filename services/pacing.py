@@ -60,6 +60,8 @@ def get_pacing_zones(goal_time: str, distance: float) -> dict:
     }
 
 def pacing_calculator(user_id: str, goal_time: str, distance: float) -> dict:
+    goal_time = goal_time.strip()
+    
     goal_pace = _get_pace(goal_time, distance)
     gps_adjusted_pace = _get_pace(goal_time, distance * 1.025)  # +2.5% for GPS / tangents
 

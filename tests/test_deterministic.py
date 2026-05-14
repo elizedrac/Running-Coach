@@ -371,3 +371,66 @@ def test_sql_selector_keeps_raw_fetcher_alone(mock_select, mock_get_activities):
     result = execute_query("user1", "any intent", "2026-05-01", "2026-05-07")
     mock_get_activities.assert_called_once()
     assert "activity_data" in result
+
+
+# ── pacing tests ─────────────────────────────────────────────────────────────
+from services.pacing import (
+    _time_to_mins, _min_to_pace, _get_pace, _equivalent_marathon_pace,
+    get_pacing_zones, pacing_calculator,
+)
+
+def test_time_to_mins_mm_ss():
+    assert _time_to_mins("8:00") == 8.0
+    assert _time_to_mins("7:30") == 7.5
+
+def test_time_to_mins_hh_mm_ss():
+    assert _time_to_mins("3:30:00") == 210.0
+    assert _time_to_mins("1:00:30") == 60.5
+
+def test_time_to_mins_seconds_only():
+    assert _time_to_mins("30") == 0.5
+    assert _time_to_mins("60") == 1.0
+
+def test_time_to_mins_invalid():
+    assert _time_to_mins("") is None
+    assert _time_to_mins("abc") is None
+    assert _time_to_mins(None) is None
+
+def test_min_to_pace():
+    assert _min_to_pace(8.0) == "8:00"
+    assert _min_to_pace(7.5) == "7:30"
+    assert _min_to_pace(None) is None
+
+def test_get_pace_marathon():
+    pace = _get_pace("3:30:00", 26.2)
+    assert round(pace, 2) == round(210/26.2, 2)
+
+def test_get_pace_invalid():
+    assert _get_pace("bad", 26.2) is None
+    assert _get_pace("3:30:00", 0) is None
+    assert _get_pace("3:30:00", -5) is None
+
+def test_equivalent_marathon_pace_from_5k():
+    pace = _equivalent_marathon_pace("20:00", 3.107)
+    assert 7.0 < pace < 7.5
+
+def test_pacing_zones_marathon():
+    zones = get_pacing_zones("3:30:00", 26.2188)
+    assert zones["marathon_pace"] == "8:01"
+    assert zones["easy_pace"] == "9:31"
+    assert zones["threshold_pace"] == "7:46"
+    assert zones["interval_pace"] == "7:01"
+    assert zones["repetition_pace"] == "6:31"
+
+def test_pacing_zones_5k_uses_equivalency():
+    zones = get_pacing_zones("20:00", 3.107)
+    assert zones["easy_pace"].startswith("8:")
+
+def test_pacing_zones_invalid_input():
+    assert get_pacing_zones("bad", 26.2) == {}
+
+def test_pacing_calculator_full():
+    result = pacing_calculator("user1", "3:30:00", 26.2188)
+    for key in ("goal_pace", "gps_adjusted_pace", "easy_pace", "marathon_pace",
+                "threshold_pace", "interval_pace", "repetition_pace"):
+        assert key in result
