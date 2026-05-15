@@ -50,6 +50,13 @@ def _embedd_chunks(chunks):
 def _compute_similarity(vec1, vec2):
     return sum(a * b for a, b in zip(vec1, vec2))
 
+def _word_overlap(a: str, b: str) -> float:
+    import re
+    wa = set(re.sub(r"[^a-z0-9 ]", "", a.lower()).split())
+    wb = set(re.sub(r"[^a-z0-9 ]", "", b.lower()).split())
+    union = wa | wb
+    return len(wa & wb) / len(union) if union else 0.0
+
 def find_relevant_chunks(location: str, race: str, query: str):
     chunks = _load_chunks()
     candidates = [c for c in chunks
@@ -57,6 +64,13 @@ def find_relevant_chunks(location: str, race: str, query: str):
                   and c.get("race", "").lower() == race.lower()]
     if not candidates:
         return None
+
+    # Skip embedding when query closely matches a cached chunk query by word overlap
+    for c in candidates:
+        if _word_overlap(query, c.get("query", "")) >= 0.7:
+            if "--debug" in sys.argv:
+                print(f"[course_details] word-overlap hit: '{c['query']}'", file=sys.stderr)
+            return {"query": c["query"], "details": c["details"]}
 
     _embedd_chunks(candidates)
     embedded_query = voyage_client.embed([query], model="voyage-3-lite").embeddings[0]

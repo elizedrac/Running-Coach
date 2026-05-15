@@ -10,8 +10,8 @@ client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 def web_search(user_id: str, query: str) -> str:
     """Run Anthropic web search tool and cache results in search_cache."""
     response = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2048,
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
         tools=[{"type": "web_search_20250305", "name": "web_search"}],
         messages=[{"role": "user", "content": query}],
     )
