@@ -44,7 +44,7 @@ Args contracts (only include args listed here):
 - get_weather: {{"date": "YYYY-MM-DD"}}  # optional, omit for today
 - garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}}  # omit if unclear — system will ask
 - query_data: {{"query_intent": "description of what to fetch", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "prev_start": "YYYY-MM-DD (optional)", "prev_end": "YYYY-MM-DD (optional)"}}
-- get_course_details: {{"query": "race name and specific aspect the user is asking about (e.g. 'Boston Marathon elevation profile')"}}  # use for any question about a specific race course
+- get_course_details: {{"location": "city/place FULLY spelled out (e.g. 'New York City' NOT 'NYC', 'Philadelphia' NOT 'Philly')", "race": "race type FULLY spelled out (e.g. 'marathon', 'half marathon', '10k') NOT abbreviations", "query": "specific aspect the user is asking about (e.g. 'elevation profile')"}}  # use for any question about a specific race course
     # start_date/end_date default to last 14 days if not specified. For trend questions, keep window ≤ 31 days.
     # prev_start/prev_end: ONLY include if the user explicitly specifies a comparison period (e.g. "this week vs last week" → prev_start=today-14, prev_end=today-7). Otherwise the internal selector handles defaults.
 - pacing_calculator: {{"goal_time": "HH:MM:SS or MM:SS", "distance": float (only in miles NOT km), "race_type": "string (optional)"}} if no distance is given, identify from race_type only from one of these options: {", ".join(RACE_DISTANCES_KNOWLEDGE.keys())}. Otherwise, leave blank.

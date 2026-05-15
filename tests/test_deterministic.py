@@ -488,13 +488,11 @@ def test_compute_similarity_opposite_vectors():
 def test_find_relevant_chunks_above_threshold(mock_vo, mock_load):
     mock_vo.embed.return_value.embeddings = [[1.0, 0.0]]
     mock_load.return_value = [
-        {"query": "Boston elevation", "details": "Heartbreak Hill is at mile 21", "embedding": [1.0, 0.0]}
+        {"location": "boston", "race": "marathon", "query": "Boston elevation",
+         "details": "Heartbreak Hill is at mile 21", "embedding": [1.0, 0.0]}
     ]
-    # patch CHUNKS_FILE.exists() to True
-    with patch("services.course_details.CHUNKS_FILE") as mock_file:
-        mock_file.exists.return_value = True
-        result = find_relevant_chunks("Boston elevation")
-    assert result == "Heartbreak Hill is at mile 21"
+    result = find_relevant_chunks("Boston", "marathon", "Boston elevation")
+    assert result["details"] == "Heartbreak Hill is at mile 21"
 
 @patch("services.course_details._load_chunks")
 @patch("services.course_details.voyage_client")
@@ -502,17 +500,62 @@ def test_find_relevant_chunks_below_threshold(mock_vo, mock_load):
     mock_vo.embed.return_value.embeddings = [[1.0, 0.0]]
     # chunk embedding is orthogonal → similarity = 0 → below threshold
     mock_load.return_value = [
-        {"query": "weather", "details": "Cold in April", "embedding": [0.0, 1.0]}
+        {"location": "boston", "race": "marathon", "query": "weather",
+         "details": "Cold in April", "embedding": [0.0, 1.0]}
     ]
-    with patch("services.course_details.CHUNKS_FILE") as mock_file:
-        mock_file.exists.return_value = True
-        result = find_relevant_chunks("Boston elevation")
+    result = find_relevant_chunks("Boston", "marathon", "Boston elevation")
     assert result is None
 
 @patch("services.course_details._load_chunks")
 def test_find_relevant_chunks_empty_store(mock_load):
     mock_load.return_value = []
-    with patch("services.course_details.CHUNKS_FILE") as mock_file:
-        mock_file.exists.return_value = True
-        result = find_relevant_chunks("anything")
+    result = find_relevant_chunks("Boston", "marathon", "anything")
+    assert result is None
+
+@patch("services.course_details._load_chunks")
+@patch("services.course_details.voyage_client")
+def test_find_relevant_chunks_filters_by_location(mock_vo, mock_load):
+    mock_vo.embed.return_value.embeddings = [[1.0, 0.0]]
+    mock_load.return_value = [
+        {"location": "new york city", "race": "marathon", "query": "elevation",
+         "details": "NYC Marathon hills", "embedding": [1.0, 0.0]},
+        {"location": "boston", "race": "marathon", "query": "elevation",
+         "details": "Boston Marathon hills", "embedding": [1.0, 0.0]},
+    ]
+    result = find_relevant_chunks("Boston", "marathon", "elevation")
+    assert result["details"] == "Boston Marathon hills"
+
+@patch("services.course_details._load_chunks")
+@patch("services.course_details.voyage_client")
+def test_find_relevant_chunks_filters_marathon_vs_half(mock_vo, mock_load):
+    mock_vo.embed.return_value.embeddings = [[1.0, 0.0]]
+    mock_load.return_value = [
+        {"location": "new york city", "race": "marathon", "query": "elevation",
+         "details": "NYC full", "embedding": [1.0, 0.0]},
+        {"location": "new york city", "race": "half marathon", "query": "elevation",
+         "details": "NYC half", "embedding": [1.0, 0.0]},
+    ]
+    result = find_relevant_chunks("New York City", "half marathon", "elevation")
+    assert result["details"] == "NYC half"
+
+@patch("services.course_details._load_chunks")
+@patch("services.course_details.voyage_client")
+def test_find_relevant_chunks_case_insensitive(mock_vo, mock_load):
+    mock_vo.embed.return_value.embeddings = [[1.0, 0.0]]
+    mock_load.return_value = [
+        {"location": "new york city", "race": "marathon", "query": "elevation",
+         "details": "found", "embedding": [1.0, 0.0]},
+    ]
+    result = find_relevant_chunks("NEW YORK CITY", "MARATHON", "elevation")
+    assert result["details"] == "found"
+
+@patch("services.course_details._load_chunks")
+@patch("services.course_details.voyage_client")
+def test_find_relevant_chunks_no_matching_location_returns_none(mock_vo, mock_load):
+    mock_vo.embed.return_value.embeddings = [[1.0, 0.0]]
+    mock_load.return_value = [
+        {"location": "boston", "race": "marathon", "query": "elevation",
+         "details": "...", "embedding": [1.0, 0.0]},
+    ]
+    result = find_relevant_chunks("Chicago", "marathon", "elevation")
     assert result is None

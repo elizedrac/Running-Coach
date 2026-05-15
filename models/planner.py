@@ -16,6 +16,8 @@ class SQLPlan(BaseModel):
     queries: list[str]
 
 class CourseDetailsPlan(BaseModel):
+    location: str
+    race: str
     query: str
     details: str
     

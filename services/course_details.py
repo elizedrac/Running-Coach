@@ -50,32 +50,40 @@ def _embedd_chunks(chunks):
 def _compute_similarity(vec1, vec2):
     return sum(a * b for a, b in zip(vec1, vec2))
 
-def find_relevant_chunks(query):
+def find_relevant_chunks(location: str, race: str, query: str):
+    chunks = _load_chunks()
+    candidates = [c for c in chunks
+                  if c.get("location", "").lower() == location.lower()
+                  and c.get("race", "").lower() == race.lower()]
+    if not candidates:
+        return None
+
+    _embedd_chunks(candidates)
     embedded_query = voyage_client.embed([query], model="voyage-3-lite").embeddings[0]
+    similarities = np.array([_compute_similarity(embedded_query, c["embedding"]) for c in candidates if "embedding" in c])
 
-    if CHUNKS_FILE.exists():
-        chunks = _load_chunks()
-        _embedd_chunks(chunks)
-        embedded_chunks = [chunk['embedding'] for chunk in chunks if "embedding" in chunk]
+    if len(similarities) > 0:
+        best_idx = int(np.argmax(similarities))
+        if "--debug" in sys.argv:
+            print(f"[course_details] top match score: {similarities[best_idx]:.3f} | chunk query: {candidates[best_idx]['query']}", file=sys.stderr)
+        if similarities[best_idx] > THRESHOLD_SIMILARITY:
+            return {"query": candidates[best_idx]["query"], "details": candidates[best_idx]["details"]}
+    return None
 
-        similarities = [_compute_similarity(embedded_query, chunk_embedding) for chunk_embedding in embedded_chunks]
-        similarities = np.array(similarities)
-
-        if len(similarities) > 0:
-            best_idx = int(np.argmax(similarities))
-            if "--debug" in sys.argv:
-                print(f"[course_details] top match score: {similarities[best_idx]:.3f} | chunk query: {chunks[best_idx]['query']}", file=sys.stderr)
-            if similarities[best_idx] > THRESHOLD_SIMILARITY:
-                return {"query": chunks[best_idx]["query"], "details": chunks[best_idx]["details"]}
-            
-def _add_course_chunk(query: str, details: str) -> None:
+def _add_course_chunk(location: str, race: str, query: str, details: str) -> None:
     chunks = _load_chunks()
     embedded_query = voyage_client.embed([query], model="voyage-3-lite").embeddings[0]
-    chunks.append({"query": query, "details": details, "embedding": embedded_query})
+    chunks.append({
+        "location": location,
+        "race": race,
+        "query": query,
+        "details": details,
+        "embedding": embedded_query,
+    })
     CHUNKS_FILE.write_text(json.dumps({"courses": chunks}, indent=2))
 
-def get_course_details(user_id: str, query: str):
-    relevant = find_relevant_chunks(query)
+def get_course_details(user_id: str, location: str, race: str, query: str):
+    relevant = find_relevant_chunks(location, race, query)
     if relevant:
         if "--debug" in sys.argv:
             print("Found relevant course chunk with query:", relevant["query"])
@@ -83,7 +91,9 @@ def get_course_details(user_id: str, query: str):
     
     results = web_search(user_id, query)
 
-    prompt = f"""Extract key details about this running race course and return as JSON with two fields:
+    prompt = f"""Extract key details about this running race course and return as JSON with FOUR fields:
+- "location": city/place fully spelled out (e.g. "New York City" NOT "NYC", "Philadelphia" NOT "Philly")
+- "race": race type fully spelled out (e.g. "marathon", "half marathon", "10k") NOT abbreviations
 - "query": a short semantic label summarising what the user asked (used for search)
 - "details": a 3-5 sentence summary covering elevation, terrain/surface, notable sections, and race-day logistics
 
@@ -93,7 +103,7 @@ Course description:
 Original user query: {query}
 
 Return ONLY valid JSON, no extra text:
-{{"query": "...", "details": "..."}}"""
+{{"location": "...", "race": "...", "query": "...", "details": "..."}}"""
 
     response = call_llm(system_prompt="You are a JSON-only assistant. Return valid JSON, nothing else.", user_prompt=prompt,
         model="claude-haiku-4-5-20251001").strip()
@@ -104,7 +114,7 @@ Return ONLY valid JSON, no extra text:
     response = response[start:end]
     try:
         response = CourseDetailsPlan.model_validate_json(response)
-        _add_course_chunk(response.query, response.details)
+        _add_course_chunk(response.location, response.race, response.query, response.details)
         return {"query": response.query, "details": response.details}
    
     except Exception as e:
