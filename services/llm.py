@@ -13,7 +13,7 @@ MAX_RETRIES = 3
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
 
 
-def call_llm(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL, max_tokens: int = 1024) -> str:
+def call_llm(system_prompt: str, user_prompt: str = None, model: str = DEFAULT_MODEL, max_tokens: int = 1024) -> str:
     for attempt in range(MAX_RETRIES):
         try:
             message = client.messages.create(

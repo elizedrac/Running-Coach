@@ -5,6 +5,7 @@ from services.weather import get_weather
 from services.garmin import garmin_sync
 from services.sql_selector import execute_query
 from services.pacing import _time_to_mins, pacing_calculator
+from services.course_details import get_course_details
 from datetime import date, timedelta
 from pathlib import Path
 import json
@@ -24,6 +25,7 @@ TOOL_REGISTRY = {
     "query_data":  _query_data,
     "trend_analysis": _query_data,
     "pacing_calculator": pacing_calculator,
+    "get_course_details": get_course_details,
 }
 
 def call_tool(name: str, args: dict, user_id: str):

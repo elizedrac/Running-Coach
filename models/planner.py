@@ -14,6 +14,10 @@ class PlannerOutput(BaseModel):
 # For SQL selector
 class SQLPlan(BaseModel):
     queries: list[str]
+
+class CourseDetailsPlan(BaseModel):
+    query: str
+    details: str
     
 
 

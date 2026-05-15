@@ -467,3 +467,52 @@ def test_pacing_calculator_no_vo2_returns_none(mock_health):
     mock_health.return_value = []
     result = pacing_calculator("user1", "3:30:00", 26.2188)
     assert result["current_easy_pace"] is None
+
+
+# ── course_details RAG tests ─────────────────────────────────────────────────
+
+from services.course_details import _compute_similarity, find_relevant_chunks
+
+def test_compute_similarity_identical_vectors():
+    vec = [1.0, 0.0, 0.0]
+    assert _compute_similarity(vec, vec) == 1.0
+
+def test_compute_similarity_orthogonal_vectors():
+    assert _compute_similarity([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]) == 0.0
+
+def test_compute_similarity_opposite_vectors():
+    assert _compute_similarity([1.0, 0.0], [-1.0, 0.0]) == -1.0
+
+@patch("services.course_details._load_chunks")
+@patch("services.course_details.voyage_client")
+def test_find_relevant_chunks_above_threshold(mock_vo, mock_load):
+    mock_vo.embed.return_value.embeddings = [[1.0, 0.0]]
+    mock_load.return_value = [
+        {"query": "Boston elevation", "details": "Heartbreak Hill is at mile 21", "embedding": [1.0, 0.0]}
+    ]
+    # patch CHUNKS_FILE.exists() to True
+    with patch("services.course_details.CHUNKS_FILE") as mock_file:
+        mock_file.exists.return_value = True
+        result = find_relevant_chunks("Boston elevation")
+    assert result == "Heartbreak Hill is at mile 21"
+
+@patch("services.course_details._load_chunks")
+@patch("services.course_details.voyage_client")
+def test_find_relevant_chunks_below_threshold(mock_vo, mock_load):
+    mock_vo.embed.return_value.embeddings = [[1.0, 0.0]]
+    # chunk embedding is orthogonal → similarity = 0 → below threshold
+    mock_load.return_value = [
+        {"query": "weather", "details": "Cold in April", "embedding": [0.0, 1.0]}
+    ]
+    with patch("services.course_details.CHUNKS_FILE") as mock_file:
+        mock_file.exists.return_value = True
+        result = find_relevant_chunks("Boston elevation")
+    assert result is None
+
+@patch("services.course_details._load_chunks")
+def test_find_relevant_chunks_empty_store(mock_load):
+    mock_load.return_value = []
+    with patch("services.course_details.CHUNKS_FILE") as mock_file:
+        mock_file.exists.return_value = True
+        result = find_relevant_chunks("anything")
+    assert result is None
