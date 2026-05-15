@@ -3,8 +3,6 @@
 from db.health_history import get_health_history
 from datetime import datetime
 
-TODAY = datetime.now().date().isoformat()
-
 MARATHON_MILES = 26.2188
 
 def _time_to_mins(time_str: str) -> float | None:
@@ -77,7 +75,8 @@ def pacing_calculator(user_id: str, goal_time: str, distance: float) -> dict:
     goal_pace = _get_pace(goal_time, distance)
     gps_adjusted_pace = _get_pace(goal_time, distance * 1.025)  # +2.5% for GPS / tangents
 
-    health = get_health_history(user_id, TODAY, TODAY)
+    today = datetime.now().date().isoformat()
+    health = get_health_history(user_id, today, today)
     vo2 = health[0].get("vo2_max") if health else None
 
     return {

@@ -14,8 +14,23 @@ from services.llm import call_llm
 from services.prompts import SQL_SELECTOR_SYSTEM
 from models.planner import SQLPlan
 
-TODAY = datetime.now().date().isoformat()
-TWO_WEEKS_AGO = (datetime.now().date() - timedelta(days=14)).isoformat()
+
+TREND_FNS = {
+    "miles_trend": miles_trend,
+    "pace_trend": pace_trend,
+    "hr_trend": hr_trend,
+    "total_calories_trend": total_calories_trend,
+    "avg_calories_trend": avg_calories_trend,
+    "activity_count_trend": activity_count_trend,
+    "total_time_trend": total_time_trend,
+    "hrv_trend": hrv_trend,
+    "rhr_trend": rhr_trend,
+    "average_sleep": average_sleep,
+    "total_sleep": total_sleep,
+    "stress_trend": stress_trend,
+    "average_steps": average_steps,
+    "total_steps": total_steps,
+}
 
 REGISTRY = {
     "get_health_data": {
@@ -52,7 +67,8 @@ Query descriptions: {REGISTRY}"""
     response = call_llm(
         system_prompt=SQL_SELECTOR_SYSTEM,
         user_prompt=USER_QUERY,
-        model="claude-haiku-4-5-20251001"
+        model="claude-haiku-4-5-20251001",
+        cache_system=True,
     )
 
     response = response.strip()
@@ -61,8 +77,9 @@ Query descriptions: {REGISTRY}"""
     return response[start:end]
 
 def execute_query(user_id, query_intent: str, start_date: str = None, end_date: str = None, prev_start=None, prev_end=None):
-    start_date = start_date or TWO_WEEKS_AGO
-    end_date = end_date or TODAY
+    today = datetime.now().date()
+    start_date = start_date or (today - timedelta(days=14)).isoformat()
+    end_date = end_date or today.isoformat()
 
     raw = select_queries(query_intent)
     response = SQLPlan.model_validate_json(raw)
@@ -73,23 +90,6 @@ def execute_query(user_id, query_intent: str, start_date: str = None, end_date: 
 
     if "--debug" in sys.argv:
         print(f"[sql_selector] picked: {response.queries}", file=sys.stderr)
-
-    trend_fns = {
-        "miles_trend": miles_trend,
-        "pace_trend": pace_trend,
-        "hr_trend": hr_trend,
-        "total_calories_trend": total_calories_trend,
-        "avg_calories_trend": avg_calories_trend,
-        "activity_count_trend": activity_count_trend,
-        "total_time_trend": total_time_trend,
-        "hrv_trend": hrv_trend,
-        "rhr_trend": rhr_trend,
-        "average_sleep": average_sleep,
-        "total_sleep": total_sleep,
-        "stress_trend": stress_trend,
-        "average_steps": average_steps,
-        "total_steps": total_steps,
-    }
 
     query_outputs = {}
     for query in response.queries:
@@ -103,9 +103,9 @@ def execute_query(user_id, query_intent: str, start_date: str = None, end_date: 
                 "data": get_activities(user_id, start_date, end_date),
                 "description": REGISTRY["get_activities"]["description"],
             }
-        elif query in trend_fns:
+        elif query in TREND_FNS:
             query_outputs[query] = {
-                "data": trend_fns[query](user_id, start_date, end_date, prev_start, prev_end),
+                "data": TREND_FNS[query](user_id, start_date, end_date, prev_start, prev_end),
                 "description": REGISTRY[query]["description"],
             }
         elif query == "compute_body_battery":

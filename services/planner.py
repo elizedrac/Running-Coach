@@ -1,4 +1,5 @@
 # Planner LLM call (Sonnet) + ToolPlan validation + REGISTRY-derived prompt.
+import sys
 from services.prompts import build_planner_system
 from models.planner import PlannerOutput
 from services.llm import call_llm
@@ -16,5 +17,5 @@ def planner(user_query: str) -> PlannerOutput:
         return plan
     except Exception as e:
         print("Error parsing planner output:", e)
-        print("Raw response was:", response)
+        if "--debug" in sys.argv: print("Raw response was:", response)
         raise

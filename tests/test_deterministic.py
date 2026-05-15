@@ -1,6 +1,6 @@
 # Tests for all deterministic logic: plan constraints, injury severity mapping, REGISTRY validation, etc.
-from unittest.mock import patch
-from datetime import date as dt_date
+from unittest.mock import patch, MagicMock
+from datetime import date as dt_date, datetime, timedelta
 from services.cache import session_cache, get_cached, set_cached
 from services.weather import get_weather
 
@@ -43,46 +43,52 @@ def test_cache_separate_query_types():
 
 # ── get_weather tests ─────────────────────────────────────────────────────────
 
-def test_get_weather_valid_date1():
+_FAKE_WEATHER_API_RESPONSE = {
+    "forecast": {
+        "forecastday": [{
+            "hour": [
+                {
+                    "time": f"2026-05-15 {h:02d}:00",
+                    "temp_f": 68.0, "feelslike_f": 66.0,
+                    "wind_mph": 8.0, "wind_dir": "NW",
+                    "humidity": 55, "chance_of_rain": 10,
+                }
+                for h in range(24)
+            ]
+        }]
+    }
+}
+
+_MOCK_WEATHER_RESP = MagicMock()
+_MOCK_WEATHER_RESP.json.return_value = _FAKE_WEATHER_API_RESPONSE
+
+WEATHER_KEYS = {"temperature", "feels_like", "wind_speed", "wind_direction", "humidity", "chance_of_rain"}
+
+@patch("services.weather.requests.get", return_value=_MOCK_WEATHER_RESP)
+def test_get_weather_valid_date_string(mock_get):
     result = get_weather("test_user", date="today")
     assert isinstance(result, list)
     assert len(result) <= 12
-    for hour in result:
-        assert "temperature" in hour
-        assert "feels_like" in hour
-        assert "wind_speed" in hour
-        assert "wind_direction" in hour
-        assert "humidity" in hour
-        assert "chance_of_rain" in hour
+    assert all(WEATHER_KEYS <= set(h) for h in result)
 
-def test_get_weather_valid_date2():
+@patch("services.weather.requests.get", return_value=_MOCK_WEATHER_RESP)
+def test_get_weather_valid_date_iso(mock_get):
     result = get_weather("test_user", date=dt_date.today().isoformat())
     assert isinstance(result, list)
     assert len(result) <= 12
-    for hour in result:
-        assert "temperature" in hour
-        assert "feels_like" in hour
-        assert "wind_speed" in hour
-        assert "wind_direction" in hour
-        assert "humidity" in hour
-        assert "chance_of_rain" in hour
+    assert all(WEATHER_KEYS <= set(h) for h in result)
+
+@patch("services.weather.requests.get", return_value=_MOCK_WEATHER_RESP)
+def test_get_weather_no_date(mock_get):
+    result = get_weather("test_user")
+    assert isinstance(result, list)
+    assert len(result) <= 12
+    assert all(WEATHER_KEYS <= set(h) for h in result)
 
 def test_get_weather_invalid_date():
     result = get_weather("test_user", date="2023-01-01")
     assert isinstance(result, str)
     assert "not supported in this version" in result
-
-def test_get_weather_no_date():
-    result = get_weather("test_user")
-    assert isinstance(result, list)
-    assert len(result) <= 12
-    for hour in result:
-        assert "temperature" in hour
-        assert "feels_like" in hour
-        assert "wind_speed" in hour
-        assert "wind_direction" in hour
-        assert "humidity" in hour
-        assert "chance_of_rain" in hour
 
 
 # ── trend_analysis helper tests ──────────────────────────────────────────────
@@ -559,3 +565,120 @@ def test_find_relevant_chunks_no_matching_location_returns_none(mock_vo, mock_lo
     ]
     result = find_relevant_chunks("Chicago", "marathon", "elevation")
     assert result is None
+
+
+# ── compute_body_battery tests ───────────────────────────────────────────────
+
+from services.trend_analysis import compute_body_battery, compute_load
+
+@patch("services.trend_analysis.get_activities")
+@patch("services.trend_analysis.hrv_trend")
+@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis.get_health_history")
+def test_body_battery_good_recovery(mock_health, mock_stress, mock_hrv, mock_activities):
+    mock_health.return_value = [{"total_sleep": "08:00:00"}]  # optimal sleep
+    mock_stress.return_value = {"current": 20}                # low stress, no adjustment
+    mock_hrv.return_value = {"current": 85}                   # high HRV → +5
+    mock_activities.return_value = []
+    result = compute_body_battery("user1")
+    # 100 - 10 (sleep 6-8h) + 5 (hrv > 80) = 95
+    assert result["body_battery"] == 95
+    assert result["sleep_hours"] == 8.0
+    assert result["num_activities"] == 0
+
+@patch("services.trend_analysis.get_activities")
+@patch("services.trend_analysis.hrv_trend")
+@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis.get_health_history")
+def test_body_battery_poor_recovery(mock_health, mock_stress, mock_hrv, mock_activities):
+    mock_health.return_value = [{"total_sleep": "05:00:00"}]  # poor sleep → -25
+    mock_stress.return_value = {"current": 80}                # high stress → -20
+    mock_hrv.return_value = {"current": 40}                   # low HRV → -15
+    mock_activities.return_value = []
+    result = compute_body_battery("user1")
+    # 100 - 25 - 20 - 15 = 40
+    assert result["body_battery"] == 40
+
+@patch("services.trend_analysis.get_activities")
+@patch("services.trend_analysis.hrv_trend")
+@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis.get_health_history")
+def test_body_battery_missing_data_no_penalty(mock_health, mock_stress, mock_hrv, mock_activities):
+    mock_health.return_value = []          # no health data → sleep_hours = 0
+    mock_stress.return_value = {"current": 0}   # no stress data
+    mock_hrv.return_value = {"current": 0}      # no HRV data
+    mock_activities.return_value = []
+    result = compute_body_battery("user1")
+    # missing data should not penalise — battery stays at 100
+    assert result["body_battery"] == 100
+
+@patch("services.trend_analysis.get_activities")
+@patch("services.trend_analysis.hrv_trend")
+@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis.get_health_history")
+def test_body_battery_activity_deduction(mock_health, mock_stress, mock_hrv, mock_activities):
+    mock_health.return_value = [{"total_sleep": "08:00:00"}]
+    mock_stress.return_value = {"current": 20}
+    mock_hrv.return_value = {"current": 85}
+    # moderate intensity run: avg_hr 150 > 140 → intensity = 60min * 0.3 = 18
+    mock_activities.return_value = [{"total_time": "01:00:00", "avg_hr": 150}]
+    result = compute_body_battery("user1")
+    # 100 - 10 + 5 - 18 = 77
+    assert result["body_battery"] == 77
+    assert result["num_activities"] == 1
+
+@patch("services.trend_analysis.get_activities")
+@patch("services.trend_analysis.hrv_trend")
+@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis.get_health_history")
+def test_body_battery_returns_expected_keys(mock_health, mock_stress, mock_hrv, mock_activities):
+    mock_health.return_value = []
+    mock_stress.return_value = {"current": 0}
+    mock_hrv.return_value = {"current": 0}
+    mock_activities.return_value = []
+    result = compute_body_battery("user1")
+    assert {"body_battery", "sleep_hours", "stress", "hrv", "num_activities"} <= set(result)
+
+
+# ── compute_load tests ───────────────────────────────────────────────────────
+
+@patch("services.trend_analysis.get_activities")
+def test_compute_load_no_activities(mock_get):
+    mock_get.return_value = []
+    result = compute_load("user1")
+    assert result["acute_load"] == 0
+    assert result["chronic_load"] == 0
+    assert result["acwr"] is None
+
+@patch("services.trend_analysis.get_activities")
+def test_compute_load_returns_expected_keys(mock_get):
+    mock_get.return_value = []
+    result = compute_load("user1")
+    assert {"acute_load", "chronic_load", "acwr"} <= set(result)
+
+@patch("services.trend_analysis.get_activities")
+def test_compute_load_with_recent_activity(mock_get):
+    today = datetime.today().date()
+    recent = (today - timedelta(days=3)).isoformat()
+    old = (today - timedelta(days=20)).isoformat()
+    mock_get.return_value = [
+        {"calendar_date": recent, "total_time": "01:00:00", "avg_hr": 150, "max_hr": 180},
+        {"calendar_date": old,    "total_time": "01:00:00", "avg_hr": 150, "max_hr": 180},
+    ]
+    result = compute_load("user1")
+    assert result["acute_load"] > 0
+    assert result["chronic_load"] > 0
+    assert result["acwr"] is not None
+
+@patch("services.trend_analysis.get_activities")
+def test_compute_load_high_acwr_when_spike(mock_get):
+    today = datetime.today().date()
+    # 4 hard sessions in last 7 days, nothing before → very high ACWR
+    recent = [(today - timedelta(days=i)).isoformat() for i in range(1, 5)]
+    mock_get.return_value = [
+        {"calendar_date": d, "total_time": "01:00:00", "avg_hr": 165, "max_hr": 180}
+        for d in recent
+    ]
+    result = compute_load("user1")
+    assert result["acwr"] is not None
+    assert result["acwr"] > 1.3  # above injury-risk threshold

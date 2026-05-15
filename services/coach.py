@@ -80,18 +80,22 @@ def orchestrate(user_query, user_id) -> str:
     path = planner_response.path
     tool_results = {}
 
-    if path == "tools": 
+    if path == "tools":
         # garmin sync has priority
         if "garmin_sync" in [tool.name for tool in planner_response.tools]:
             tool = next(tool for tool in planner_response.tools if tool.name == "garmin_sync")
-            result = call_tool("garmin_sync", tool.args, user_id)
-            tool_results["garmin_sync"] = result
+            try:
+                tool_results["garmin_sync"] = call_tool("garmin_sync", tool.args, user_id)
+            except Exception as e:
+                tool_results["garmin_sync"] = f"Error running garmin_sync: {e}"
 
         for tool in planner_response.tools:
             if tool.name != "garmin_sync":
                 name = tool.name.strip()
-                result = call_tool(name, tool.args, user_id)
-                tool_results[name] = result
+                try:
+                    tool_results[name] = call_tool(name, tool.args, user_id)
+                except Exception as e:
+                    tool_results[name] = f"Error running {name}: {e}"
     if debug:
         print("Tool results:", tool_results, file=sys.stderr)
     

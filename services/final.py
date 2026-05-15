@@ -3,27 +3,30 @@ from services.prompts import BASE_COACH, TOOL_SNIPPETS, HEALTH_METRICS_KNOWLEDGE
 from services.llm import call_llm
 from models.planner import PlannerOutput
 
-def final_output(user_query: str, planner_decision: PlannerOutput, tool_results: dict = {}) -> str:
+def final_output(user_query: str, planner_decision: PlannerOutput, tool_results: dict = None) -> str:
+    tool_results = tool_results or {}
     system_prompt = BASE_COACH  # static — cacheable
 
     user_prompt = f"User question: {user_query}"
 
     if planner_decision.path == "tools":
-        for tool in planner_decision.tools:
-            snippet = TOOL_SNIPPETS.get(tool.name, "")
-            result = tool_results.get(tool.name, "")
-            if snippet or result:
-                user_prompt += f"\n\n[{tool.name}]"
-                if snippet:
-                    user_prompt += f"\nGuidance: {snippet}"
-                if result:
-                    user_prompt += f"\nData: {result}"
+        knowledge = ""
+        tools = planner_decision.tools
+        for tool in tools:
+                snippet = TOOL_SNIPPETS.get(tool.name, "")
+                result = tool_results.get(tool.name, "")
+                if snippet or result:
+                    user_prompt += f"\n\n[{tool.name}]"
+                    if snippet:
+                        user_prompt += f"\nGuidance: {snippet}"
+                    if result:
+                        user_prompt += f"\nData: {result}"
+                
+                if (tool.name == "query_data" or tool.name == "trend_analysis") and not knowledge: # treated as mutually exclusive
+                    knowledge = f"\n\n[health_data_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
+            
+                
+        user_prompt += knowledge
 
-        query_result = tool_results.get("query_data") or {}
-        if isinstance(query_result, dict) and query_result.get("health_data"):
-            user_prompt += f"\n\n[health_data_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
-        elif "trend_analysis" in planner_decision.tools:
-            user_prompt += f"\n\n[health_metrics_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
-
-    response = call_llm(system_prompt, user_prompt)
+    response = call_llm(system_prompt, user_prompt, cache_system=True)
     return response.strip()

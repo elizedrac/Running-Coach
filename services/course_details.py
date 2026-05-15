@@ -37,15 +37,15 @@ def _load_chunks():
         _file_hash = None
         return _cached_chunks
     
-def _embedd_chunks(chunks):
-    unembedded = [chunk for chunk in chunks if "embedding" not in chunk]
+def _embed_chunks(all_chunks, candidates):
+    unembedded = [chunk for chunk in candidates if "embedding" not in chunk]
     if not unembedded:
         return
-    
+
     embeddings = voyage_client.embed([chunk["query"] for chunk in unembedded], model="voyage-3-lite").embeddings
     for chunk, embedding in zip(unembedded, embeddings):
         chunk["embedding"] = embedding
-    CHUNKS_FILE.write_text(json.dumps({"courses": chunks}, indent=2))
+    CHUNKS_FILE.write_text(json.dumps({"courses": all_chunks}, indent=2))
 
 def _compute_similarity(vec1, vec2):
     return sum(a * b for a, b in zip(vec1, vec2))
@@ -72,7 +72,7 @@ def find_relevant_chunks(location: str, race: str, query: str):
                 print(f"[course_details] word-overlap hit: '{c['query']}'", file=sys.stderr)
             return {"query": c["query"], "details": c["details"]}
 
-    _embedd_chunks(candidates)
+    _embed_chunks(chunks, candidates)
     embedded_query = voyage_client.embed([query], model="voyage-3-lite").embeddings[0]
     similarities = np.array([_compute_similarity(embedded_query, c["embedding"]) for c in candidates if "embedding" in c])
 
@@ -120,7 +120,7 @@ Return ONLY valid JSON, no extra text:
 {{"location": "...", "race": "...", "query": "...", "details": "..."}}"""
 
     response = call_llm(system_prompt="You are a JSON-only assistant. Return valid JSON, nothing else.", user_prompt=prompt,
-        model="claude-haiku-4-5-20251001").strip()
+        model="claude-haiku-4-5-20251001", cache_system=True).strip()
     
     response = response.strip()
     start = response.find("{")
@@ -132,8 +132,8 @@ Return ONLY valid JSON, no extra text:
         return {"query": response.query, "details": response.details}
    
     except Exception as e:
-        print("Error parsing planner output:", e)
-        print("Raw response was:", response)
+        print("Error parsing course details output:", e)
+        if "--debug" in sys.argv: print("Raw response was:", response)
         raise    
 
 

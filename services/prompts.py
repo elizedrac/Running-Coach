@@ -105,12 +105,9 @@ TOOL_SNIPPETS = {
                           "TIMEFRAMES: NEVER use vague words like 'this period' or 'last period'. Always name the timeframe explicitly using the actual dates or natural labels: 'this week (May 7-13)' vs 'the same week last month (Apr 7-13)', 'last 14 days' vs 'the 14 days before', etc. If the comparison window was 30 days back, say 'compared to the same X-day window 30 days earlier'. If the user explicitly asked for week-over-week, say 'this week vs last week' with dates.\n\n"
                           "TRENDS: If a trend is present, lead with the direction (improving / declining / stable), then cite the numbers, then give 1-2 actionable insights.\n\n"
                           "MISSING COMPARISON: If a trend result has ONLY a 'current' field (no 'previous' or 'trend' keys), it means no valid comparison window exists (typically because the prior period would be before MIN_DATE 2026-01-01). Say something like 'I don't have enough prior data to detect a trend' — do NOT say it's a single data point (the current value is still an average over the requested window). State the current value with the date range it covers.\n\n"
-                          "MIN_DATE: Data is only available from 2026-01-01 onwards. If the user asked for a date range starting before that, the window was shifted forward to start at 2026-01-01 (preserving its length). When that happens, briefly tell the user their requested range was shifted and why. If the entire requested range was before 2026-01-01, gracefully say no data is available."
+                          "MIN_DATE: Data is only available from 2026-01-01 onwards. If the user asked for a date range starting before that, the window was shifted forward to start at 2026-01-01 (preserving its length). When that happens, briefly tell the user their requested range was shifted and why. If the entire requested range was before 2026-01-01, gracefully say no data is available.\n"
+                          "COMPUTE_BODY_BATTERY: if body battery computation is included and body_battery is close to or exactly 100, also check the component values (sleep_hours, hrv, stress). If all are 0 or missing, it is likely that Garmin hasn't synced yet. Explain this to the user and ask if they want to resync yesterday-today data."
 }
-
-
-WEB_SEARCH_SUMMARY = """Summarise the following search results in 2-3 concise sentences relevant to the user's question. \
-Omit disclaimers, URLs, and filler text."""
 
 COMPRESSION = """Summarise the conversation so far into a compact context block. \
 Preserve: the user's current training plan, race goal, recent injuries or concerns, and any decisions made. \

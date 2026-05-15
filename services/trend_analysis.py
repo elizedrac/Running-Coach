@@ -3,9 +3,6 @@ from datetime import datetime, timedelta
 from db.activity_history import get_activities
 from db.health_history import get_health_history
 
-TODAY = datetime.today().date()
-TODAY_STR = TODAY.isoformat()
-
 MIN_DATE = "2026-01-01"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
@@ -246,41 +243,57 @@ def activity_load(total_time: float, avg_hr: float, max_hr: float) -> float:
         return 0
     return total_time * (avg_hr / max_hr)
 
-def compute_body_battery(user_id: str) -> float:
-    yesterday_str = (TODAY - timedelta(days=1)).isoformat()
+def compute_body_battery(user_id: str) -> dict:
+    today = datetime.today().date()
+    today_str = today.isoformat()
+    yesterday_str = (today - timedelta(days=1)).isoformat()
     battery = 100.0
 
-    sleep_hours = _avg(get_health_history(user_id, TODAY_STR, TODAY_STR), "total_sleep", _time_to_hours)
-    if sleep_hours >= 6 and sleep_hours <= 8:
-        battery -= 10
-    elif sleep_hours < 6:
-        battery -= 25
+    sleep_hours = _avg(get_health_history(user_id, today_str, today_str), "total_sleep", _time_to_hours)
+    if sleep_hours and sleep_hours != 0:
+        if sleep_hours >= 6 and sleep_hours <= 8:
+            battery -= 10
+        elif sleep_hours < 6:
+            battery -= 25
 
     stress = stress_trend(user_id, yesterday_str, yesterday_str)["current"]
-    if stress > 75:
-        battery -= 20
-    elif stress > 50:
-        battery -= 10
-    elif stress < 15:
-        battery += 5
+    if stress and stress > 0:
+        if stress > 75:
+            battery -= 20
+        elif stress > 50:
+            battery -= 10
+        elif stress < 15:
+            battery += 5
 
-    hrv = hrv_trend(user_id, TODAY_STR, TODAY_STR)["current"]
-    if hrv > 80:
-        battery += 5
-    elif hrv < 50:
-        battery -= 15
+    hrv = hrv_trend(user_id, today_str, today_str)["current"]
+    if hrv and hrv != 0:
+        if hrv > 80:
+            battery += 5
+        elif hrv < 50:
+            battery -= 15
 
-    for activity in get_activities(user_id, yesterday_str, TODAY_STR):
+    activities = get_activities(user_id, yesterday_str, today_str)
+    for activity in activities:
         battery -= _activity_intensity(_time_to_hours(activity.get("total_time")) * 60, activity.get("avg_hr"))
 
-    return max(0, min(100, battery))
+    body_battery = max(0, min(100, battery))
+
+    return {
+        "body_battery": body_battery,
+        "sleep_hours": sleep_hours,
+        "stress": stress,
+        "hrv": hrv,
+        "num_activities": len(activities)
+    }
 
 # add knowledge maybe?
 def compute_load(user_id: str) -> dict:
-    twenty_eight_days_ago = (TODAY - timedelta(days=28)).isoformat()
-    activities = get_activities(user_id, twenty_eight_days_ago, TODAY_STR)
+    today = datetime.today().date()
+    today_str = today.isoformat()
+    twenty_eight_days_ago = (today - timedelta(days=28)).isoformat()
+    activities = get_activities(user_id, twenty_eight_days_ago, today_str)
 
-    seven_days_ago = (TODAY - timedelta(days=7)).isoformat()
+    seven_days_ago = (today - timedelta(days=7)).isoformat()
     acute = [a for a in activities if a.get("calendar_date", "")[:10] >= seven_days_ago]
     acute_time = _sum(acute, "total_time", _time_to_hours) * 60
     acute_load = activity_load(acute_time, _avg(acute, "avg_hr"), _avg(acute, "max_hr"))

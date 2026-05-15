@@ -1,11 +1,11 @@
-# Supabase client factory. create_client() imported everywhere that touches the DB.
+# Supabase client singleton. Instantiated once at import time.
 import os
 from supabase import create_client
 from dotenv import load_dotenv
 
 load_dotenv()
 
+_client = create_client(os.getenv("SUPABASE_URL"), os.getenv("SUPABASE_KEY"))
+
 def get_supabase_client():
-    url = os.getenv("SUPABASE_URL")
-    key = os.getenv("SUPABASE_KEY")
-    return create_client(url, key)
+    return _client

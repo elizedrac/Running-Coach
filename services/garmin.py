@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 from garminconnect import Garmin
 from datetime import datetime, timedelta
 from time import sleep
+import sys
 from db.activity_history import insert_activities
 from db.health_history import insert_health_history
 
@@ -29,12 +30,12 @@ def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
     if activities:
         insert_activities([{**a, "user_id": user_id} for a in activities])
     else:
-        print("No Garmin activities to insert.")
+        if "--debug" in sys.argv: print("No Garmin activities to insert.")
 
     if stats:
         insert_health_history([{**s, "user_id": user_id} for s in stats])
     else:
-        print("No Garmin health stats to insert.")
+        if "--debug" in sys.argv: print("No Garmin health stats to insert.")
 
     return {
         "status": "success",
@@ -64,7 +65,7 @@ def fetch_garmin_data(day_iso_start: str, day_iso_end: str) -> tuple[list[dict],
         client = _get_client()
         
         while day_iso_start <= day_iso_end:
-            print(f"Fetching Garmin data for {day_iso_start}...")
+            if "--debug" in sys.argv: print(f"Fetching Garmin data for {day_iso_start}...")
             all_stats.append(get_daily_stats(client, day_iso_start))
             all_activities.extend(extract_activities(client, day_iso_start))
             day_iso_start = (datetime.fromisoformat(day_iso_start) + timedelta(days=1)).date().isoformat()
@@ -198,8 +199,8 @@ def _mps_to_pace(mps) -> str | None:
 
 # allow running directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
 if __name__ == "__main__":
-    today = datetime.utcnow().date().isoformat()
-    yesterday = (datetime.utcnow() - timedelta(days=1)).date().isoformat()
+    today = datetime.now().date().isoformat()
+    yesterday = (datetime.now() - timedelta(days=1)).date().isoformat()
     user_id = os.getenv("USER_ID")
     if not user_id:
         raise ValueError("USER_ID env var not set")
