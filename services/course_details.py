@@ -1,15 +1,16 @@
 import hashlib
-from models.planner import CourseDetailsPlan 
 import json
-from services.llm import call_llm
+import os
+import re
+import sys
+import numpy as np
 import voyageai
 from pathlib import Path
-from services.web_search import web_search
 from dotenv import load_dotenv
+from models.planner import CourseDetailsPlan
+from services.llm import call_llm
 from services.prompts import COURSE_DETAILS
-import numpy as np
-import os
-import sys
+from services.web_search import web_search
 
 _cached_chunks = None
 _file_hash = None
@@ -52,7 +53,6 @@ def _compute_similarity(vec1, vec2):
     return sum(a * b for a, b in zip(vec1, vec2))
 
 def _word_overlap(a: str, b: str) -> float:
-    import re
     wa = set(re.sub(r"[^a-z0-9 ]", "", a.lower()).split())
     wb = set(re.sub(r"[^a-z0-9 ]", "", b.lower()).split())
     union = wa | wb

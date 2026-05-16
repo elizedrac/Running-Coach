@@ -111,8 +111,12 @@ TOOL_SNIPPETS = {
 
 COMPRESSION = """You are in charge of compressing conversation memory every five turns between a running coach system and user. You will be provided with the current compressed memory and most recent 5 turns. Extract all important details: any current injuries, pains, or physical concerns mentioned; any race goals mentioned or asked about; fitness baselines established (easy pace, VO2 max, weekly mileage); any user decisions made about training plan, adjustments, or desired training context; any important data insights discussed. Discard pleasantries and greetings, Garmin sync confirmations, weather queries, repeated information, and superseded info. Return only plain text — no JSON, no markdown, no headers. Be concise."""
 
-FOLLOW_UP = """Based on the coaching response above, suggest one short follow-up question the user might want to ask next. \
-Keep it under 12 words."""
+FOLLOW_UP = """You are a JSON-only assistant for follow-up question generation for a running coach agent. The agent's abilities include syncing Garmin data, extracting health and activity data, assisting on training plans and race strategies, and general running questions. Based on the most recent conversation ending, suggest 3 short follow-up questions the user might want to ask next. \
+Keep each under 12 words. Return ONLY valid JSON in this format:
+{{"follow_ups": ["question 1", "question 2", "question 3"]}}"""
+
+END_DETECTION = """You are a JSON-only assistant for conversation end detection for a running coach agent. Based on the most recent conversation, determine if the user is likely done asking questions for now and ready to end the conversation. Return ONLY valid JSON in this format:
+{{"end_conversation": true}}  # or false"""
 
 COURSE_DETAILS="""You are a JSON-only assistant. Return valid JSON, nothing else. Extract key details about this running race course and return as JSON with FOUR fields:
 - "location": city/place fully spelled out (e.g. "New York City" NOT "NYC", "Philadelphia" NOT "Philly")
