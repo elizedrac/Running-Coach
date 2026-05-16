@@ -104,8 +104,8 @@ runcoach/
 │
 ├── knowledge/
 │   ├── health_metrics.json        # Per-metric descriptions, typical ranges, interpretation (injected into final prompt when health data present)
-│   ├── training_zones.json        # HR zones, pace zones — static reference
-│   └── race_distances.json        # Standard distances in km — static reference
+│   ├── race_distances.json        # Standard distances in miles — used by pacing_calculator for race_type autofill
+│   └── course_chunks.json         # RAG store for race course details — embeddings inline, keyed by location + race
 │
 ├── tests/
 │   ├── test_deterministic.py      # All deterministic logic (plan constraints etc)
@@ -358,8 +358,8 @@ User Input
 
 ```python
 # services/llm.py
-def call_llm(system: str, user: str, max_tokens: int = 1000,
-             max_retries: int = 3) -> str
+def call_llm(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL,
+             max_tokens: int = 1024, cache_system: bool = False) -> str
 ```
 
 **Single prompts file** — all prompt strings live in `services/prompts.py`. Per-tool snippets are appended to the final LLM's system prompt based on which tools ran:
@@ -385,7 +385,7 @@ COMPRESSION = "..."                  # memory compression
 FOLLOW_UP = "..."                    # follow-up question generation
 ```
 
-**Prompt caching** — enabled on all system prompts via `cache_control: ephemeral`. Applied to large race context chunks too, not just system prompts. Minimum 1024 tokens for cache eligibility.
+**Prompt caching** — implemented via `cache_system=True` flag on `call_llm()`. Enabled on all static system prompts: `BASE_COACH` (final LLM), `SQL_SELECTOR_SYSTEM` (Haiku), and the course details extraction prompt. The planner system prompt is dynamic (injects today's date) and is not cached. Minimum 1024 tokens for cache eligibility.
 
 ### Routing Logic
 
@@ -481,7 +481,8 @@ Question arrives
 - Not current priority — V2 feature
 
 ### 13. Compute Body Battery ✓
-- Recovery readiness score (0-100) computed from today's sleep hours, yesterday's stress, today's HRV, and the past 24h of activity load
+- Recovery readiness score computed from today's sleep hours, yesterday's stress, today's HRV, and the past 24h of activity load
+- Returns `{body_battery: float (0-100), sleep_hours: float, stress: int, hrv: int, num_activities: int}` — component values included so the LLM can caveat if inputs are missing (e.g. Garmin not yet synced today)
 - Implemented in `services/trend_analysis.py::compute_body_battery(user_id)`
 - Registered in `sql_selector.REGISTRY`; system prompt instructs Haiku to use only when user asks about readiness / how they feel / whether to exercise
 
@@ -804,7 +805,7 @@ jobs:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4
         with:
-          python-version: '3.11'
+          python-version: '3.14'  # matches local dev environment
       - run: pip install -r requirements.txt
       - run: python -m services.garmin
         env:

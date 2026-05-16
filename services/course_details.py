@@ -6,6 +6,7 @@ import voyageai
 from pathlib import Path
 from services.web_search import web_search
 from dotenv import load_dotenv
+from services.prompts import COURSE_DETAILS
 import numpy as np
 import os
 import sys
@@ -105,22 +106,17 @@ def get_course_details(user_id: str, location: str, race: str, query: str):
     
     results = web_search(user_id, query)
 
-    prompt = f"""Extract key details about this running race course and return as JSON with FOUR fields:
-- "location": city/place fully spelled out (e.g. "New York City" NOT "NYC", "Philadelphia" NOT "Philly")
-- "race": race type fully spelled out (e.g. "marathon", "half marathon", "10k") NOT abbreviations
-- "query": a short semantic label summarising what the user asked (used for search)
-- "details": a 3-5 sentence summary covering elevation, terrain/surface, notable sections, and race-day logistics
+    prompt = f"""
+    Course description:
+    {results}
 
-Course description:
-{results}
+    Original user query: {query}
 
-Original user query: {query}
+    Return ONLY valid JSON, no extra text:
+    {{"location": "...", "race": "...", "query": "...", "details": "..."}}"""
 
-Return ONLY valid JSON, no extra text:
-{{"location": "...", "race": "...", "query": "...", "details": "..."}}"""
-
-    response = call_llm(system_prompt="You are a JSON-only assistant. Return valid JSON, nothing else.", user_prompt=prompt,
-        model="claude-haiku-4-5-20251001", cache_system=True).strip()
+    response = call_llm(system_prompt=COURSE_DETAILS, user_prompt=prompt,
+        model="claude-haiku-4-5-20251001", cache_system=True)
     
     response = response.strip()
     start = response.find("{")
@@ -130,7 +126,7 @@ Return ONLY valid JSON, no extra text:
         response = CourseDetailsPlan.model_validate_json(response)
         _add_course_chunk(response.location, response.race, response.query, response.details)
         return {"query": response.query, "details": response.details}
-   
+
     except Exception as e:
         print("Error parsing course details output:", e)
         if "--debug" in sys.argv: print("Raw response was:", response)

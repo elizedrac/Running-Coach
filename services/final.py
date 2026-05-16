@@ -13,17 +13,17 @@ def final_output(user_query: str, planner_decision: PlannerOutput, tool_results:
         knowledge = ""
         tools = planner_decision.tools
         for tool in tools:
-                snippet = TOOL_SNIPPETS.get(tool.name, "")
-                result = tool_results.get(tool.name, "")
-                if snippet or result:
-                    user_prompt += f"\n\n[{tool.name}]"
-                    if snippet:
-                        user_prompt += f"\nGuidance: {snippet}"
-                    if result:
-                        user_prompt += f"\nData: {result}"
-                
-                if (tool.name == "query_data" or tool.name == "trend_analysis") and not knowledge: # treated as mutually exclusive
-                    knowledge = f"\n\n[health_data_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
+            snippet = TOOL_SNIPPETS.get(tool.name, "")
+            result = tool_results.get(tool.name, "")
+            if snippet or result:
+                user_prompt += f"\n\n[{tool.name}]"
+                if snippet:
+                    user_prompt += f"\nGuidance: {snippet}"
+                if result:
+                    user_prompt += f"\nData: {result}"
+
+            if (tool.name == "query_data" or tool.name == "trend_analysis") and not knowledge:
+                knowledge = f"\n\n[health_data_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
             
                 
         user_prompt += knowledge

@@ -6,8 +6,10 @@ from services.garmin import garmin_sync
 from services.sql_selector import execute_query
 from services.pacing import _time_to_mins, pacing_calculator
 from services.course_details import get_course_details
+from services.memory import compress_history
 from datetime import date, timedelta
 from pathlib import Path
+from models.planner import History
 import json
 import sys
 
@@ -15,6 +17,8 @@ import sys
 RACE_DISTANCES_KNOWLEDGE = json.loads(
     Path(__file__).parent.parent.joinpath("knowledge/race_distances.json").read_text()
 )
+
+_hist = History()
 
 def _query_data(user_id: str, query_intent: str = "", start_date: str = None, end_date: str = None, prev_start: str = None, prev_end: str = None):
     return execute_query(user_id, query_intent, start_date or None, end_date or None, prev_start or None, prev_end or None)
@@ -71,8 +75,13 @@ def call_tool(name: str, args: dict, user_id: str):
 
 def orchestrate(user_query, user_id) -> str:
     debug = "--debug" in sys.argv
-
-    planner_response = planner(user_query)
+    
+    recent_context = "\n".join(f"{m['role']}: {m['content']}" for m in _hist.recent[-4:])
+    planner_prompt = f"User query: {user_query}"
+    if _hist.summary or recent_context:
+        context = f"{_hist.summary}\n{recent_context}".strip()
+        planner_prompt += f"\n\n[Conversation context]\n{context}"
+    planner_response = planner(planner_prompt)
 
     if debug:
         print("Planner response:", planner_response.model_dump_json(), file=sys.stderr)
@@ -98,8 +107,23 @@ def orchestrate(user_query, user_id) -> str:
                     tool_results[name] = f"Error running {name}: {e}"
     if debug:
         print("Tool results:", tool_results, file=sys.stderr)
+
+    recent_turns = "\n".join(f"{m['role']}: {m['content']}" for m in _hist.recent)
+    full_history = "\n".join(p for p in [_hist.summary, recent_turns] if p)
+
+    prompt = f"Original user query: {user_query}, convo history: {full_history}"
     
-    final_response = final_output(user_query, planner_response, tool_results)
+    final_response = final_output(prompt, planner_response, tool_results)
+
+    _hist.recent.append({"role": "user", "content": user_query})
+    _hist.recent.append({"role": "assistant", "content": final_response})
+
+    _hist.turn_count += 1
+
+    if _hist.turn_count % 5 == 0:
+        _hist.summary = compress_history(full_history)
+        _hist.recent = _hist.recent[-2:]
+
 
     return final_response
         

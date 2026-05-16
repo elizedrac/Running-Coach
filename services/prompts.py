@@ -109,9 +109,13 @@ TOOL_SNIPPETS = {
                           "COMPUTE_BODY_BATTERY: if body battery computation is included and body_battery is close to or exactly 100, also check the component values (sleep_hours, hrv, stress). If all are 0 or missing, it is likely that Garmin hasn't synced yet. Explain this to the user and ask if they want to resync yesterday-today data."
 }
 
-COMPRESSION = """Summarise the conversation so far into a compact context block. \
-Preserve: the user's current training plan, race goal, recent injuries or concerns, and any decisions made. \
-Discard: pleasantries, repeated questions, superseded information."""
+COMPRESSION = """You are in charge of compressing conversation memory every five turns between a running coach system and user. You will be provided with the current compressed memory and most recent 5 turns. Extract all important details: any current injuries, pains, or physical concerns mentioned; any race goals mentioned or asked about; fitness baselines established (easy pace, VO2 max, weekly mileage); any user decisions made about training plan, adjustments, or desired training context; any important data insights discussed. Discard pleasantries and greetings, Garmin sync confirmations, weather queries, repeated information, and superseded info. Return only plain text — no JSON, no markdown, no headers. Be concise."""
 
 FOLLOW_UP = """Based on the coaching response above, suggest one short follow-up question the user might want to ask next. \
 Keep it under 12 words."""
+
+COURSE_DETAILS="""You are a JSON-only assistant. Return valid JSON, nothing else. Extract key details about this running race course and return as JSON with FOUR fields:
+- "location": city/place fully spelled out (e.g. "New York City" NOT "NYC", "Philadelphia" NOT "Philly")
+- "race": race type fully spelled out (e.g. "marathon", "half marathon", "10k") NOT abbreviations
+- "query": a short semantic label summarising what the user asked (used for search)
+- "details": a 3-5 sentence summary covering elevation, terrain/surface, notable sections, and race-day logistics"""
