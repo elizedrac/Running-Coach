@@ -567,6 +567,123 @@ def test_find_relevant_chunks_no_matching_location_returns_none(mock_vo, mock_lo
     assert result is None
 
 
+# ── History dataclass tests ──────────────────────────────────────────────────
+
+from models.planner import History
+
+def test_history_defaults():
+    h = History()
+    assert h.summary == ""
+    assert h.recent == []
+    assert h.turn_count == 0
+
+def test_history_recent_independent_per_instance():
+    h1 = History()
+    h2 = History()
+    h1.recent.append({"role": "user", "content": "hello"})
+    assert h2.recent == []
+
+def test_history_fields_mutable():
+    h = History()
+    h.summary = "User is training for Boston marathon"
+    h.turn_count = 3
+    h.recent.append({"role": "user", "content": "what pace?"})
+    assert h.summary == "User is training for Boston marathon"
+    assert h.turn_count == 3
+    assert len(h.recent) == 1
+
+
+# ── compress_history tests ───────────────────────────────────────────────────
+
+from services.memory import compress_history
+
+@patch("services.memory.call_llm")
+def test_compress_history_returns_summary(mock_llm):
+    mock_llm.return_value = "User is training for Boston. Goal: sub-3:30."
+    result = compress_history("User: what's my easy pace?\nassistant: Around 9:30/mi.")
+    assert result == "User is training for Boston. Goal: sub-3:30."
+    mock_llm.assert_called_once()
+
+@patch("services.memory.call_llm")
+def test_compress_history_fallback_on_empty(mock_llm):
+    mock_llm.return_value = ""
+    history_str = "User: how am I doing?\nassistant: Great progress."
+    result = compress_history(history_str)
+    assert result == history_str
+
+@patch("services.memory.call_llm")
+def test_compress_history_uses_haiku(mock_llm):
+    mock_llm.return_value = "some summary"
+    compress_history("some history")
+    assert mock_llm.call_args.kwargs.get("model") == "claude-haiku-4-5-20251001"
+
+@patch("services.memory.call_llm")
+def test_compress_history_caps_tokens(mock_llm):
+    mock_llm.return_value = "summary"
+    compress_history("history")
+    assert mock_llm.call_args.kwargs.get("max_tokens") == 400
+
+
+# ── history cycling in orchestrate ───────────────────────────────────────────
+
+from services.coach import _hist
+
+def _reset_hist():
+    _hist.summary = ""
+    _hist.recent = []
+    _hist.turn_count = 0
+
+def test_history_appends_after_turn():
+    _reset_hist()
+    with patch("services.coach.planner") as mock_planner, \
+         patch("services.coach.final_output") as mock_final:
+        from models.planner import PlannerOutput
+        mock_planner.return_value = PlannerOutput(reasoning="", path="no_tools", tools=[])
+        mock_final.return_value = "Easy runs build your aerobic base."
+        from services.coach import orchestrate
+        orchestrate("what is an easy run?", "user1")
+
+    assert len(_hist.recent) == 2
+    assert _hist.recent[0] == {"role": "user", "content": "what is an easy run?"}
+    assert _hist.recent[1] == {"role": "assistant", "content": "Easy runs build your aerobic base."}
+    assert _hist.turn_count == 1
+
+@patch("services.memory.call_llm")
+def test_compression_fires_at_turn_5(mock_llm):
+    mock_llm.return_value = "compressed summary"
+    _reset_hist()
+    with patch("services.coach.planner") as mock_planner, \
+         patch("services.coach.final_output") as mock_final:
+        from models.planner import PlannerOutput
+        mock_planner.return_value = PlannerOutput(reasoning="", path="no_tools", tools=[])
+        mock_final.return_value = "response"
+        from services.coach import orchestrate
+        for _ in range(5):
+            orchestrate("question", "user1")
+
+    assert mock_llm.called
+    assert _hist.summary == "compressed summary"
+    assert len(_hist.recent) == 2          # exactly 1 turn kept after compression
+    assert _hist.recent[0]["role"] == "user"
+    assert _hist.recent[1]["role"] == "assistant"
+
+@patch("services.memory.call_llm")
+def test_compression_does_not_fire_before_turn_5(mock_llm):
+    mock_llm.return_value = "compressed summary"
+    _reset_hist()
+    with patch("services.coach.planner") as mock_planner, \
+         patch("services.coach.final_output") as mock_final:
+        from models.planner import PlannerOutput
+        mock_planner.return_value = PlannerOutput(reasoning="", path="no_tools", tools=[])
+        mock_final.return_value = "response"
+        from services.coach import orchestrate
+        for _ in range(4):
+            orchestrate("question", "user1")
+
+    assert not mock_llm.called
+    assert _hist.summary == ""
+
+
 # ── compute_body_battery tests ───────────────────────────────────────────────
 
 from services.trend_analysis import compute_body_battery, compute_load

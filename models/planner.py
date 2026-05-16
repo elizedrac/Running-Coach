@@ -1,4 +1,4 @@
-# Pydantic ToolPlan model for validating planner LLM JSON output (path, tools, args).
+# Pydantic ToolPlan model for validating LLM JSON outputs as well as storing data classes.
 from pydantic import BaseModel
 from typing import Literal
 from dataclasses import dataclass, field
