@@ -14,8 +14,11 @@ def main():
         if user_input.lower().strip() in ["exit", "quit", "q", "bye",""]:
             break
 
-        print(f"Coach: {orchestrate(user_input, USER_ID)}")
-
+        response = orchestrate(user_input, USER_ID)
+        if "It seems like you want to end the conversation." in response:
+            break
+             
+        print(f"Coach: {response}")
     
 
 if __name__ == "__main__":

@@ -115,7 +115,7 @@ def orchestrate(user_query, user_id) -> str:
     if debug:
         print("Tool results:", tool_results, file=sys.stderr)
 
-    recent_turns = "\n".join(f"{m['role']}: {m['content']}" for m in _hist.recent)
+    recent_turns = "\n".join(f"{m['role']}: {m['content']}" for m in _hist.recent[-4:])
     full_history = "\n".join(p for p in [_hist.summary, recent_turns] if p)
 
     prompt = f"Original user query: {user_query}, convo history: {full_history}"
