@@ -799,3 +799,44 @@ def test_compute_load_high_acwr_when_spike(mock_get):
     result = compute_load("user1")
     assert result["acwr"] is not None
     assert result["acwr"] > 1.3  # above injury-risk threshold
+
+
+# ── end behavior tests ───────────────────────────────────────────────────────
+
+from services.end import is_end_message, detect_end
+
+def test_is_end_exact_phrase():
+    assert is_end_message("that's all") is True
+    assert is_end_message("no thanks") is True
+    assert is_end_message("all good") is True
+
+def test_is_end_single_word():
+    assert is_end_message("thanks") is True
+    assert is_end_message("bye") is True
+    assert is_end_message("nope") is True
+
+def test_is_end_with_punctuation():
+    assert is_end_message("thanks!") is True
+    assert is_end_message("bye.") is True
+
+def test_is_end_case_insensitive():
+    assert is_end_message("THANKS") is True
+    assert is_end_message("Bye") is True
+
+def test_is_end_normal_messages():
+    assert is_end_message("how was my run yesterday") is False
+    assert is_end_message("what paces for a 3:30 marathon") is False
+    assert is_end_message("show me my mileage this week") is False
+
+@patch("services.end.call_llm")
+def test_detect_end_skips_llm_when_not_end(mock_llm):
+    result = detect_end("how was my run yesterday", [])
+    assert result is False
+    mock_llm.assert_not_called()
+
+@patch("services.end.call_llm")
+def test_detect_end_calls_llm_when_end_word_detected(mock_llm):
+    mock_llm.return_value = '{"end_conversation": true}'
+    result = detect_end("thanks!", [])
+    assert result is True
+    mock_llm.assert_called_once()

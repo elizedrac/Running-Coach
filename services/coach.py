@@ -7,6 +7,7 @@ from services.sql_selector import execute_query
 from services.pacing import _time_to_mins, pacing_calculator
 from services.course_details import get_course_details
 from services.memory import compress_history
+from services.end import detect_end
 from datetime import date, timedelta
 from pathlib import Path
 from models.planner import History
@@ -75,6 +76,12 @@ def call_tool(name: str, args: dict, user_id: str):
 
 def orchestrate(user_query, user_id) -> str:
     debug = "--debug" in sys.argv
+
+    if detect_end(user_query, _hist.recent):
+        final_response = "It seems like you want to end the conversation. If that's the case, it was great chatting with you! If not, feel free to ask me anything else."
+        _hist.recent.append({"role": "user", "content": user_query})
+        _hist.recent.append({"role": "assistant", "content": final_response})
+        return final_response
     
     recent_context = "\n".join(f"{m['role']}: {m['content']}" for m in _hist.recent[-4:])
     planner_prompt = f"User query: {user_query}"

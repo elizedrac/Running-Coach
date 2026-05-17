@@ -727,10 +727,19 @@ models/
 
 ## Memory & Compression
 
-- Compression triggered every **5 turns**
-- Lightweight Haiku call summarises conversation to predefined max tokens
-- Stored entries preserved as exceptions: user current state, active plan context
-- Timeframe and timezone context re-injected after compression
+- Compression triggered every **5 turns** via `services/memory.py::compress_history` (Haiku call, max 400 tokens)
+- `History` dataclass in `models/planner.py` stores: `summary` (compressed), `recent` (last N turns as `{role, content}` dicts), `turn_count`
+- After compression: `recent` trimmed to last 2 turns, `summary` updated. Module-level singleton in `coach.py` — per-session, resets on restart.
+- Recent context (last 4 turns) + summary injected into planner prompt so it has conversation awareness
+- Full history passed to final LLM call for response coherence
+- `COMPRESSION` system prompt uses `cache_system=True` for Anthropic prompt caching
+
+## End Behavior & Follow-up
+
+- `services/end.py::is_end_message` — keyword check (exact phrase + substring) on user input. END_WORDS: bye, thanks, thank you, that's all, no thanks, nope, all good, ok.
+- `detect_end(query, recent)` — if keyword match, calls Haiku with `END_DETECTION` prompt to confirm intent. Returns `bool` via `EndBehaviorClassification` Pydantic model.
+- If `detect_end` returns True, `orchestrate` short-circuits before planner call and returns a graceful closing message.
+- `generate_followups(query, recent)` — Haiku call using `FOLLOW_UP` prompt. Generates 3 suggested follow-up questions. Reserved for UI phase (not called from CLI).
 
 ---
 
@@ -836,12 +845,12 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 
 6. **CLI implementation** — simple terminal interface to test LLM calls before building UI ✓
 7. **LLM flow implementation** — planner, tool routing, prompt snippets, final LLM call, coach orchestrator ✓
-8. **Tool implementation** — Get Weather ✓ → Query User Data (query_data tool + sql_selector + range-aware cache) ✓ → Garmin Sync ✓ → Trend Analysis ✓ → Body Battery ✓ → Training Load ✓ → Get Plan → remaining tools
+8. **Tool implementation** — Get Weather ✓ → Query User Data ✓ → Garmin Sync ✓ → Trend Analysis ✓ → Body Battery ✓ → Training Load ✓ → Pacing Calculator ✓ → Get Course Details ✓ → Get Race Results → Plan tools
 
 ### Phase 4 — Agent + Output (Week 2, Mon–Tue)
 
-9. **Final call + end behaviour + follow-ups** — final Sonnet call, keyword-based follow-up detection, Haiku follow-up generation
-10. **Remaining tools** — Plan Creation → Update Plan → Clear Plan → Get Race Results → Trend Analysis → Get Course Details → Pacing Calculator
+9. **Final call + end behaviour + follow-ups** ✓ — keyword detection + Haiku confirmation for end behavior; follow-up generation stubbed for UI phase; conversation history + compression every 5 turns
+10. **Remaining tools** — Plan Creation → Update Plan → Clear Plan → Get Race Results
 11. **Server side** — FastAPI routes wired up, webhook handler live, Render/Railway deploy
 
 ### Phase 5 — Frontend (Weekend 2)

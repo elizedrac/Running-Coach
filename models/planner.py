@@ -21,12 +21,16 @@ class CourseDetailsPlan(BaseModel):
     race: str
     query: str
     details: str
+
+class EndBehaviorClassification(BaseModel):
+    end_conversation: bool
     
 @dataclass    
 class History:
     summary: str = ""
     recent: list[dict] = field(default_factory=list)
     turn_count: int = 0
+
 
 
 
