@@ -82,7 +82,8 @@ Available data fields — health: stress, active_minutes, total_steps, sleep_sco
 Activities: calories_burned, activity_type, miles, avg_hr, max_hr, total_time, average_pace. \
 Sleep data is keyed to the wake date, not the night it started — so last night's sleep appears under today's date. When discussing sleep, always reference it as "last night's sleep" regardless of which date it's stored under. \
 If the user asks for data not in these fields, respond gracefully that you don't have access to it. \
-If you suggest or trigger a Garmin sync, note that it may take some time depending on the date range being synced. Also mention that the user can sync independently at any time using the Garmin Sync button at the top of the page, separate from this chat."""
+If you suggest or trigger a Garmin sync, note that it may take some time depending on the date range being synced. Also mention that the user can sync independently at any time using the Garmin Sync button at the top of the page, separate from this chat. \
+AVOID REPETITION: You have access to the conversation history. If a metric (e.g. training load, ACWR, body battery) was already explained in detail in a prior message, do not re-explain it — briefly reference it instead (e.g. 'as we covered, your ACWR is 1.4'). Only provide full detail on a metric the first time it appears in the conversation."""
 
 SQL_SELECTOR_SYSTEM = """You are a query selector for a running coach app.
 Given a user's query intent and a registry of available query functions, select which queries to run.
@@ -116,7 +117,13 @@ TOOL_SNIPPETS = {
                           "IMPORTANT — interpreting fields:\n"
                           "- `goal_pace`: pace per mile required to hit the goal time exactly (goal_time / distance).\n"
                           "- `gps_adjusted_pace`: the pace your WATCH should show during the race to actually hit the goal time. It's faster than goal_pace by ~2.5% because GPS over-measures (you don't run perfect tangents, GPS adds noise). This is a RACE-DAY TACTICAL ADJUSTMENT, NOT a comment on the user's fitness. Do NOT say things like 'your fitness can support a faster pace' — say something like 'aim for ~X:XX/mi on your watch so you actually cross at goal_time'.\n"
-                          "- Zones (easy/marathon/threshold/interval/repetition) are derived from equivalent marathon pace using Daniels-style offsets.\n"
+                          "- Zones are derived from equivalent marathon pace using Daniels-style offsets:\n"
+                          "  • easy: marathon pace + 1:30/mi — conversational, aerobic base building\n"
+                          "  • aerobic: marathon pace + 0:45/mi — general aerobic, comfortably hard, bulk of mid-week miles\n"
+                          "  • marathon: race goal pace\n"
+                          "  • threshold: marathon pace - 0:15/mi — lactate threshold, comfortably hard for 20-40 min\n"
+                          "  • interval: marathon pace - 1:00/mi — VO2 max work, 800m-1200m reps with equal jog recovery\n"
+                          "  • repetition: marathon pace - 1:30/mi — speed/economy, 200m-400m with full rest\n"
                           "- `current_easy_pace`: easy pace derived from the user's CURRENT VO2 max (~70% effort, ACSM formula). Compare to the goal-derived `easy_pace`: if they're close (within ~30s), the goal is well-matched to current fitness; if goal `easy_pace` is much slower than current_easy_pace, the goal is conservative; if goal `easy_pace` is much faster than current_easy_pace, the goal is aggressive and may not be realistic. Mention this comparison when relevant (e.g. user asks 'is this realistic?' or you spot a notable mismatch). May be null if no VO2 data available.",
     "get_weather":        "The weather API is only capable of fetching current day weather + 12 hour forecasts. Reference this data naturally when answering the user or advising them if they should run and when the best time is and give reasoning grounded in data (be sure to consider the 'feels like' as well). Suggest treadmill if conditions are poor (ie. too hot/humid (above 75°F), too cold (below 32°F)), or rainy). If they do prefer to go outside, suggest the best time window and what to wear based on the forecast. If they ask for weather data either from the past or more than 12 hours in the future, gracefully explain the limitations of the API and provide advice based on the current conditions.",
     "get_race_results":   "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",

@@ -36,7 +36,8 @@ def _get_pace(time_str: str, distance: float) -> float | None:
         return None
     return mins / distance
 
-def _equivalent_marathon_pace(goal_time: str, distance: float) -> float | None:
+# use this when implementing plan for yasso 800 speed (marathon time in minutes * 2 pace)
+def equivalent_marathon_pace(goal_time: str, distance: float) -> float | None:
     """Riegel: T2 = T1 * (D2/D1)^1.06. Returns equivalent marathon pace (min/mi)."""
     mins = _time_to_mins(goal_time)
     if mins is None or distance <= 0:
@@ -56,7 +57,7 @@ def get_pacing_zones(goal_time: str, distance: float) -> dict:
     if abs(distance - MARATHON_MILES) < 0.05:
         pace = _get_pace(goal_time, distance)
     else:
-        pace = _equivalent_marathon_pace(goal_time, distance)
+        pace = equivalent_marathon_pace(goal_time, distance)
 
     if pace is None:
         return {}
@@ -64,11 +65,13 @@ def get_pacing_zones(goal_time: str, distance: float) -> dict:
     return {
         "easy_pace":       _min_to_pace(pace + 1.5),
         "marathon_pace":   _min_to_pace(pace),
+        "aerobic_pace": _min_to_pace(pace + 0.75),
         "threshold_pace":  _min_to_pace(pace - 0.25),
         "interval_pace":   _min_to_pace(pace - 1.0),
         "repetition_pace": _min_to_pace(pace - 1.5),
     }
 
+# **replace arg with current plan if it exist once we implement plan logic
 def pacing_calculator(user_id: str, goal_time: str, distance: float) -> dict:
     goal_time = goal_time.strip()
 
