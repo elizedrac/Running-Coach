@@ -4,6 +4,7 @@ from db import client
 from dotenv import load_dotenv
 from services.coach import orchestrate
 from models.planner import History
+from services.end import detect_end
 
 load_dotenv()
 
@@ -16,11 +17,20 @@ def main():
         if user_input.lower().strip() in ["exit", "quit", "q", "bye",""]:
             break
 
-        response = orchestrate(user_input, USER_ID, _hist)[0]
-        if "It seems like you want to end the conversation." in response:
+        if detect_end(user_input, _hist.recent):
+            print("It seems like you want to end the conversation. If that's the case, it was great chatting with you! If not, feel free to ask me anything else.")
             break
-             
-        print(f"Coach: {response}")
+
+        response_parts = []
+        for event_type, data in orchestrate(user_input, USER_ID, _hist):
+            if event_type == "chunk":
+                print(data, end="", flush=True)  # streams to terminal in real time
+                response_parts.append(data)
+            elif event_type == "status":
+                print(f"\n[{data}]", flush=True)
+            elif event_type == "done":
+                hist = data
+        print()
     
 
 if __name__ == "__main__":

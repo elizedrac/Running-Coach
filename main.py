@@ -9,6 +9,7 @@ import os
 app = FastAPI()
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+os.environ["SERVER_MODE"] = "1"
 
 app.add_middleware(
     CORSMiddleware,

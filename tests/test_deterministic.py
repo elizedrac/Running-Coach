@@ -626,62 +626,62 @@ def test_compress_history_caps_tokens(mock_llm):
 
 # ── history cycling in orchestrate ───────────────────────────────────────────
 
-from services.coach import _hist
+from services.coach import orchestrate
+from models.planner import History
 
-def _reset_hist():
-    _hist.summary = ""
-    _hist.recent = []
-    _hist.turn_count = 0
+def _run_orchestrate(query, hist):
+    """Consume the orchestrate generator and return the final hist."""
+    for event_type, data in orchestrate(query, "user1", hist):
+        if event_type == "done":
+            return data
+    return hist
 
 def test_history_appends_after_turn():
-    _reset_hist()
+    hist = History()
     with patch("services.coach.planner") as mock_planner, \
          patch("services.coach.final_output") as mock_final:
         from models.planner import PlannerOutput
         mock_planner.return_value = PlannerOutput(reasoning="", path="no_tools", tools=[])
-        mock_final.return_value = "Easy runs build your aerobic base."
-        from services.coach import orchestrate
-        orchestrate("what is an easy run?", "user1")
+        mock_final.side_effect = lambda *a, **kw: iter(["Easy runs build your aerobic base."])
+        hist = _run_orchestrate("what is an easy run?", hist)
 
-    assert len(_hist.recent) == 2
-    assert _hist.recent[0] == {"role": "user", "content": "what is an easy run?"}
-    assert _hist.recent[1] == {"role": "assistant", "content": "Easy runs build your aerobic base."}
-    assert _hist.turn_count == 1
+    assert len(hist.recent) == 2
+    assert hist.recent[0] == {"role": "user", "content": "what is an easy run?"}
+    assert hist.recent[1] == {"role": "assistant", "content": "Easy runs build your aerobic base."}
+    assert hist.turn_count == 1
 
 @patch("services.memory.call_llm")
 def test_compression_fires_at_turn_5(mock_llm):
     mock_llm.return_value = "compressed summary"
-    _reset_hist()
+    hist = History()
     with patch("services.coach.planner") as mock_planner, \
          patch("services.coach.final_output") as mock_final:
         from models.planner import PlannerOutput
         mock_planner.return_value = PlannerOutput(reasoning="", path="no_tools", tools=[])
-        mock_final.return_value = "response"
-        from services.coach import orchestrate
+        mock_final.side_effect = lambda *a, **kw: iter(["response"])
         for _ in range(5):
-            orchestrate("question", "user1")
+            hist = _run_orchestrate("question", hist)
 
     assert mock_llm.called
-    assert _hist.summary == "compressed summary"
-    assert len(_hist.recent) == 2          # exactly 1 turn kept after compression
-    assert _hist.recent[0]["role"] == "user"
-    assert _hist.recent[1]["role"] == "assistant"
+    assert hist.summary == "compressed summary"
+    assert len(hist.recent) == 2
+    assert hist.recent[0]["role"] == "user"
+    assert hist.recent[1]["role"] == "assistant"
 
 @patch("services.memory.call_llm")
 def test_compression_does_not_fire_before_turn_5(mock_llm):
     mock_llm.return_value = "compressed summary"
-    _reset_hist()
+    hist = History()
     with patch("services.coach.planner") as mock_planner, \
          patch("services.coach.final_output") as mock_final:
         from models.planner import PlannerOutput
         mock_planner.return_value = PlannerOutput(reasoning="", path="no_tools", tools=[])
-        mock_final.return_value = "response"
-        from services.coach import orchestrate
+        mock_final.side_effect = lambda *a, **kw: iter(["response"])
         for _ in range(4):
-            orchestrate("question", "user1")
+            hist = _run_orchestrate("question", hist)
 
     assert not mock_llm.called
-    assert _hist.summary == ""
+    assert hist.summary == ""
 
 
 # ── compute_body_battery tests ───────────────────────────────────────────────

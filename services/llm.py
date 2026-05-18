@@ -40,6 +40,22 @@ def call_llm(system_prompt: str, user_prompt: str = None, model: str = DEFAULT_M
 
     raise RuntimeError(f"call_llm failed after {MAX_RETRIES} retries")
 
+def stream_llm(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL, max_tokens: int = 1024, cache_system: bool = False):
+    """Yields text chunks as Claude generates them."""
+    system = (
+        [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+        if cache_system
+        else system_prompt
+    )
+    with client.messages.stream(
+        model=model,
+        system=system,
+        messages=[{"role": "user", "content": user_prompt}],
+        max_tokens=max_tokens,
+    ) as stream:
+        for text in stream.text_stream:
+            yield text
+
 
 def _backoff(attempt: int, error: Exception) -> None:
     if attempt == MAX_RETRIES - 1:

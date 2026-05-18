@@ -25,7 +25,14 @@ TOOL_METADATA = {
 }
 
 def build_planner_system() -> str:
-    today = date.today().isoformat()
+    from datetime import timedelta
+    today_dt = date.today()
+    today = today_dt.isoformat()
+    weekday = today_dt.weekday()  # 0=Mon, 6=Sun
+    this_week_monday = today_dt - timedelta(days=weekday)
+    last_sunday = this_week_monday - timedelta(days=1)
+    last_week_monday = last_sunday - timedelta(days=6)
+    seven_days_ago = today_dt - timedelta(days=6)
     tool_list = "\n".join(f"- {name}: {desc}" for name, desc in TOOL_METADATA.items())
     return f"""You are a planning assistant for a personal AI running coach.
 
@@ -40,18 +47,21 @@ Available tools (tools path only):
 
 Today's date: {today}
 
-Date interpretation rules:
-- "this past week" / "last week" / "this week" = the 7 days ending today (start_date = today minus 6 days, end_date = today). NOT a calendar week starting Sunday.
-- "yesterday" = today minus 1 day.
-- "this month" = from the 1st of the current month to today.
+Date interpretation rules (use these exact dates — do not compute your own):
+- "this week" / "weekly mileage" / "this week's runs" = {this_week_monday.isoformat()} to {today} (Mon of current week through today)
+- "last week" / "the week ending Sunday" / "this past week" = {last_week_monday.isoformat()} to {last_sunday.isoformat()} (the full Mon–Sun week that just ended)
+- "last Sunday" / "ending Sunday" = {last_sunday.isoformat()}
+- "last 7 days" = {seven_days_ago.isoformat()} to {today} (rolling 7 days including today)
+- "yesterday" = {(today_dt - timedelta(days=1)).isoformat()}
+- "this month" = from the 1st of the current month to today
 
 Args contracts (only include args listed here):
 - get_weather: {{"date": "YYYY-MM-DD"}}  # optional, omit for today
-- garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}}  # omit if unclear — system will ask
+- garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}}  # If the user explicitly states a date or range, include those dates. If NO dates are stated by the user, include garmin_sync with empty args {{}} — do NOT invent dates. The system will ask the user for dates.
 - query_data: {{"query_intent": "description of what to fetch", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "prev_start": "YYYY-MM-DD (optional)", "prev_end": "YYYY-MM-DD (optional)"}}
 - get_course_details: {{"location": "city/place FULLY spelled out (e.g. 'New York City' NOT 'NYC', 'Philadelphia' NOT 'Philly')", "race": "race type FULLY spelled out (e.g. 'marathon', 'half marathon', '10k') NOT abbreviations", "query": "make sure to specify location, race/distance, and specific aspect the user is asking about (e.g. 'elevation profile')"}}  # use for any question about a specific race course
     # start_date/end_date default to last 14 days if not specified. For trend questions, keep window ≤ 31 days.
-    # prev_start/prev_end: ONLY include if the user explicitly specifies a comparison period (e.g. "this week vs last week" → prev_start=today-14, prev_end=today-7). Otherwise the internal selector handles defaults.
+    # prev_start/prev_end: Always include when querying "this week" data — set prev_start={last_week_monday.isoformat()}, prev_end={last_sunday.isoformat()} so the comparison is week-over-week, not the default 30-day shift which would find no data.
 - pacing_calculator: {{"goal_time": "HH:MM:SS or MM:SS", "distance": float (only in miles NOT km), "race_type": "string (optional)"}} if no distance is given, identify from race_type only from one of these options: {", ".join(RACE_DISTANCES_KNOWLEDGE.keys())}. Otherwise, leave blank.
 
 Return ONLY valid JSON — no extra text, no markdown fences:
@@ -95,7 +105,9 @@ Return ONLY valid JSON — no extra text, no markdown fences:
 }"""
 
 TOOL_SNIPPETS = {
-    "garmin_sync":        "The user's Garmin data has just been synced. Reference it naturally without saying 'sync' and tell them they can now see their latest activities and health metrics for the given date_range. If the sync failed, acknowledge that and suggest they try again or check their Garmin connection.",
+    "garmin_sync":        "If the data says the user needs to enter a date range: do NOT say sync failed or that something went wrong. Simply ask the user which dates they'd like to sync (e.g. 'which dates would you like me to pull?') and mention they can also use the Garmin Sync button at the top of the page. "
+                          "If the data has status='success': confirm their data is updated and they can ask about recent runs or health metrics. "
+                          "If the data has status='error': acknowledge something went wrong and suggest using the Garmin Sync button.",
     "get_plan":           "When presenting the plan: state the week number, list each day's workout type and target miles. Flag any hard days back-to-back.",
     "create_plan":        "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
     "update_plan":        "Acknowledge what changed and why. If injury severity was high, include a note to consult a medical professional.",
@@ -113,7 +125,8 @@ TOOL_SNIPPETS = {
                           "TIMEFRAMES: NEVER use vague words like 'this period' or 'last period'. Always name the timeframe explicitly using the actual dates or natural labels: 'this week (May 7-13)' vs 'the same week last month (Apr 7-13)', 'last 14 days' vs 'the 14 days before', etc. If the comparison window was 30 days back, say 'compared to the same X-day window 30 days earlier'. If the user explicitly asked for week-over-week, say 'this week vs last week' with dates.\n\n"
                           "TRENDS: If a trend is present, lead with the direction (improving / declining / stable), then cite the numbers, then give 1-2 actionable insights.\n\n"
                           "MISSING COMPARISON: If a trend result has ONLY a 'current' field (no 'previous' or 'trend' keys), it means no valid comparison window exists (typically because the prior period would be before MIN_DATE 2026-01-01). Say something like 'I don't have enough prior data to detect a trend' — do NOT say it's a single data point (the current value is still an average over the requested window). State the current value with the date range it covers.\n\n"
-                          "MIN_DATE: Data is only available from 2026-01-01 onwards. If the user asked for a date range starting before that, the window was shifted forward to start at 2026-01-01 (preserving its length). When that happens, briefly tell the user their requested range was shifted and why. If the entire requested range was before 2026-01-01, gracefully say no data is available.\n"
+                          "MIN_DATE: Data is only available from 2026-01-01 onwards. If the user asked for a date range starting before that, the window was shifted forward to start at 2026-01-01 (preserving its length). When that happens, briefly tell the user their requested range was shifted and why. If the entire requested range was before 2026-01-01, gracefully say no data is available.\n\n"
+                          "PARTIAL WEEK: You are told today's date and day of week in the prompt. If comparing 'this week' to 'last week' and today is Monday through Wednesday, the current window covers only 1-3 days vs a full 7-day previous week. Always acknowledge this — e.g. 'we're only X days into the week so this isn't a fair comparison yet' — before citing any trend direction. Do not call the week 'trending down' just because Monday has fewer miles than a full prior week.\n"
                           "COMPUTE_BODY_BATTERY: if body battery computation is included and body_battery is close to or exactly 100, also check the component values (sleep_hours, hrv, stress). If all are 0 or missing, it is likely that Garmin hasn't synced yet. Explain this to the user and ask if they want to resync yesterday-today data."
 }
 

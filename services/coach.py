@@ -7,10 +7,10 @@ from services.sql_selector import execute_query
 from services.pacing import _time_to_mins, pacing_calculator
 from services.course_details import get_course_details
 from services.memory import compress_history
-from services.end import detect_end
 from datetime import date, timedelta
 from models.planner import History
 from pathlib import Path
+import os
 import json
 import sys
 
@@ -34,8 +34,8 @@ TOOL_REGISTRY = {
 def call_tool(name: str, args: dict, user_id: str):
     fn = TOOL_REGISTRY.get(name)
     if name == "garmin_sync" and "day_iso_start" not in args:
-        if not sys.stdin.isatty():
-            return "To sync your Garmin data, please specify a date range in your message (e.g. 'sync from May 10 to May 17'), or use the Garmin Sync button at the top of the page."
+        if os.getenv("SERVER_MODE"):
+            return "NOT AN ERROR. No date range was specified. Ask the user which dates to sync (e.g. 'which dates would you like me to pull?'). They can also use the Garmin Sync button at the top of the page."
         start_date = ''
         end_date = ''
         while not start_date or not end_date:
@@ -74,16 +74,10 @@ def call_tool(name: str, args: dict, user_id: str):
         return f"Tool '{name}' not yet implemented"
     return fn(user_id, **args)
 
-def orchestrate(user_query, user_id, hist = None) -> tuple[str, History]:
+def orchestrate(user_query, user_id, hist = None):
     debug = "--debug" in sys.argv
 
     hist = hist or History()
-
-    if detect_end(user_query, hist.recent):
-        final_response = "It seems like you want to end the conversation. If that's the case, it was great chatting with you! If not, feel free to ask me anything else."
-        hist.recent.append({"role": "user", "content": user_query})
-        hist.recent.append({"role": "assistant", "content": final_response})
-        return final_response, hist
     
     recent_context = "\n".join(f"{m['role']}: {m['content']}" for m in hist.recent[-4:])
     planner_prompt = f"User query: {user_query}"
@@ -102,6 +96,15 @@ def orchestrate(user_query, user_id, hist = None) -> tuple[str, History]:
         # garmin sync has priority
         if "garmin_sync" in [tool.name for tool in planner_response.tools]:
             tool = next(tool for tool in planner_response.tools if tool.name == "garmin_sync")
+            if "day_iso_start" not in tool.args: # back up check
+                direct = "To sync your Garmin data I'll need a date range — which dates would you like me to pull? For example: 'sync from May 10 to May 17'. You can also use the Garmin Sync button at the top of the page."
+                hist.recent.append({"role": "user", "content": user_query})
+                hist.recent.append({"role": "assistant", "content": direct})
+                yield ("chunk", direct)
+                yield("done", hist)
+                return
+
+            yield("status", "Please wait a few minutes, syncing Garmin data... ")
             try:
                 tool_results["garmin_sync"] = call_tool("garmin_sync", tool.args, user_id)
             except Exception as e:
@@ -120,9 +123,15 @@ def orchestrate(user_query, user_id, hist = None) -> tuple[str, History]:
     recent_turns = "\n".join(f"{m['role']}: {m['content']}" for m in hist.recent[-4:])
     full_history = "\n".join(p for p in [hist.summary, recent_turns] if p)
 
-    prompt = f"Original user query: {user_query}, convo history: {full_history}"
+    today_label = date.today().strftime("%A, %B %d %Y")
+    prompt = f"Today is {today_label}. Original user query: {user_query}, convo history: {full_history}"
     
-    final_response = final_output(prompt, planner_response, tool_results)
+    full_response = []
+    for chunk in final_output(prompt, planner_response, tool_results):
+        yield ("chunk", chunk)
+        full_response.append(chunk)
+
+    final_response = "".join(full_response)
 
     hist.recent.append({"role": "user", "content": user_query})
     hist.recent.append({"role": "assistant", "content": final_response})
@@ -133,7 +142,8 @@ def orchestrate(user_query, user_id, hist = None) -> tuple[str, History]:
         hist.summary = compress_history(full_history)
         hist.recent = hist.recent[-2:]
 
-    return final_response, hist
+    yield("done", hist)
+    return
         
 
 

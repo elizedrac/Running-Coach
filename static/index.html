@@ -65,6 +65,8 @@
         .chat-card {
             display: flex; flex-direction: column;
             overflow: hidden; min-height: 0;
+            height: calc(100vh - 120px);
+            max-height: calc(100vh - 120px);
         }
         .chat-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid #f0ece6; margin-bottom: 14px; flex-shrink: 0; }
         .chat-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
@@ -224,7 +226,7 @@
 
         <div class="analyzing-inline" id="analyzing-bar">
             <div class="dots"><span></span><span></span><span></span></div>
-            <span>Analyzing...</span>
+            <span id="analyzing-text">Analyzing...</span>
         </div>
 
         <div class="chat-input-row">
@@ -255,9 +257,9 @@
                 <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="#1a1a1a" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                 </svg>
-                Weekly Training Plan + Weather
+                Weekly Training Plan
             </div>
-            <button class="plan-view-btn">View Full Month →</button>
+            <button class="plan-view-btn" onclick="notImplemented('Race Plan')">View Full Month →</button>
         </div>
         <div class="plan-grid" id="plan-grid"></div>
     </div>
@@ -531,12 +533,23 @@ function setAnalyzing(on) {
     document.getElementById('stop-btn').style.display  = on ? 'flex' : 'none';
     document.getElementById('send-btn').style.display  = on ? 'none' : 'flex';
     document.getElementById('chat-input').disabled = on;
+    if (on) document.getElementById('analyzing-text').textContent = 'Analyzing...';
 }
 
 function cancelRequest() {
     if (abortController) { abortController.abort(); abortController = null; }
     setAnalyzing(false);
     document.getElementById('chat-input').focus();
+}
+
+function createCoachMessage() {
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'msg coach';
+    div.innerHTML = `<div class="msg-label">Coach</div><div class="msg-bubble"></div><div class="msg-time">${fmtTime()}</div>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    return div.querySelector('.msg-bubble');
 }
 
 async function sendMessage() {
@@ -547,46 +560,79 @@ async function sendMessage() {
     addMessage('user', text);
     setAnalyzing(true);
     abortController = new AbortController();
+
+    let bubble    = null;
+    let fullText  = '';
+    let hasChunks = false;
+
     try {
-        const res  = await fetch(`${API}/ask`, {
+        const res = await fetch(`${API}/ask`, {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ query: text, session_id: SID }),
             signal: abortController.signal
         });
-        const data = await res.json();
-        setAnalyzing(false);
-        addMessage('coach', data.response, true);
-        if (data.ended && data.follow_ups && data.follow_ups.length) {
-            showFollowUpChips(data.follow_ups);
+
+        const reader  = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let event;
+                try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+                if (event.type === 'status') {
+                    document.getElementById('analyzing-text').textContent = event.text;
+
+                } else if (event.type === 'chunk') {
+                    if (!hasChunks) {
+                        hasChunks = true;
+                        setAnalyzing(false);
+                        bubble = createCoachMessage();
+                    }
+                    fullText += event.text;
+                    bubble.textContent = fullText;
+                    document.getElementById('chat-messages').scrollTop = 999999;
+
+                } else if (event.type === 'done') {
+                    if (bubble) bubble.innerHTML = marked.parse(fullText);
+
+                } else if (event.type === 'ended') {
+                    setAnalyzing(false);
+                    addMessage('coach', 'Great chatting! Here are some things to explore:');
+                    if (event.follow_ups && event.follow_ups.length) showFollowUpChips(event.follow_ups);
+
+                } else if (event.type === 'error') {
+                    setAnalyzing(false);
+                    addMessage('coach', 'Sorry, something went wrong. Please try again.');
+                }
+            }
         }
     } catch(e) {
         setAnalyzing(false);
         if (e.name !== 'AbortError') addMessage('coach', 'Sorry, I had trouble connecting. Please check the server is running.');
     } finally {
+        if (bubble && fullText) bubble.innerHTML = marked.parse(fullText);
+        setAnalyzing(false);
         abortController = null;
         input.focus();
     }
 }
 
 
-// ── Match chat height to left column ─────────────────────────────────────────
-
-function matchChatHeight() {
-    const leftCol  = document.querySelector('.left-col');
-    const chatCard = document.querySelector('.chat-card');
-    const h = leftCol.getBoundingClientRect().height;
-    if (h > 0) chatCard.style.height = h + 'px';
-}
-
-window.addEventListener('resize', matchChatHeight);
-
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadHealthChart();
 loadActivity();
 loadWeather();
 renderPlanGrid();
-// Run after data loads and cards render
-setTimeout(matchChatHeight, 800);
 </script>
 </body>
 </html>
