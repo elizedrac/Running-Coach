@@ -54,13 +54,21 @@ def call_tool(name: str, args: dict, user_id: str):
     if name == "pacing_calculator":
         if "distance" not in args or not args["distance"]:
             if "race_type" in args and args["race_type"] in RACE_DISTANCES_KNOWLEDGE:
-                args["distance"] = RACE_DISTANCES_KNOWLEDGE[args["race_type"]]["miles"]
-        while "distance" not in args or not args["distance"]:
-            raw = input("Please enter the distance in miles of your desired race: ")
-            try:
-                args["distance"] = float(raw)
-            except ValueError:
-                print("Invalid number. Try again.")
+                args["distance"] = RACE_DISTANCES_KNOWLEDGE[args["race_type"]]["miles"] 
+            else: 
+                if os.getenv("SERVER_MODE"):
+                    if "goal_time" not in args or not args["goal_time"]:
+                        return "NOT AN ERROR. Pacing calculator needs a distance in miles and goal time as inputs which the user did not provide. Ask the user to provide this info before continuing"
+                    else:
+                        return "NOT AN ERROR. Pacing calculator needs a distance in miles as input which the user did not provide. Ask the user to provide this info before continuing"
+                else:
+                    raw = input("Please enter the distance in miles of your desired race: ")
+                    try:
+                        args["distance"] = float(raw)
+                    except ValueError:
+                        print("Invalid number. Try again.")
+        if os.getenv("SERVER_MODE") and ("goal_time" not in args or not args["goal_time"]):
+            return "NOT AN ERROR. Pacing calculator needs goal time as an input which the user did not provide. Ask the user to provide this info before continuing"
         while "goal_time" not in args or not args["goal_time"]:
             goal_time = input("Please enter your goal time (HH:MM:SS or MM:SS): ")
             if _time_to_mins(goal_time.strip()) is None:

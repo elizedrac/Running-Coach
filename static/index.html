@@ -271,6 +271,7 @@ const SID   = crypto.randomUUID();
 const DAYS  = ["M","T","W","T","F","S","S"];
 const TODAY = new Date().getDay();
 let   abortController = null;
+let   healthChart     = null;
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
@@ -310,9 +311,9 @@ async function loadHealthChart() {
             return new Date(+y, +m - 1, +d).toLocaleDateString('en-US', {weekday:'short'});
         });
         const steps  = rows.map(r => r.total_steps ? +(r.total_steps / 1000).toFixed(1) : 0);
-        const rhr    = rows.map(r => r.rhr || null);
+        const rhr    = rows.map(r => r.rhr || 0);
         const sleep  = rows.map(r => {
-            if (!r.total_sleep) return null;
+            if (!r.total_sleep) return 0;
             const [h, m] = r.total_sleep.split(':');
             return +(+h + +m / 60).toFixed(1);
         });
@@ -325,7 +326,9 @@ async function loadHealthChart() {
             avgRhr   ? `<span>RHR: <strong>${Math.round(avgRhr)} bpm</strong></span>` : '',
             avgSleep ? `<span>Sleep: <strong>${avgSleep.toFixed(1)}h</strong></span>` : '',
         ].join('');
-        new Chart(document.getElementById('healthChart'), {
+        loadMetricBadges();
+        if (healthChart) { healthChart.destroy(); healthChart = null; }
+        healthChart = new Chart(document.getElementById('healthChart'), {
             data: { labels, datasets: [
                 { type:'bar',  label:'Steps (K)',  data:steps, backgroundColor:'#c4614a', borderRadius:3, yAxisID:'y', order:2 },
                 { type:'line', label:'RHR',         data:rhr,   borderColor:'#e8736a', backgroundColor:'transparent', pointBackgroundColor:'#e8736a', pointRadius:4, tension:0.3, yAxisID:'y2', order:1 },
@@ -367,7 +370,9 @@ async function loadActivity() {
         const a    = rows && rows.length ? rows[rows.length - 1] : null;
         if (!a) { card.innerHTML = '<div class="card-title">Most Recent Activity</div><div class="placeholder-text">No recent activity found.</div>'; return; }
         const date = new Date(a.calendar_date).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
-        const type = a.activity_type ? a.activity_type.charAt(0).toUpperCase() + a.activity_type.slice(1) + ' Run' : 'Run';
+        const type = a.activity_type
+            ? a.activity_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
+            : 'Run';
         card.innerHTML = `
             <div class="card-title">Most Recent Activity</div>
             <div class="activity-name">${type}</div>
@@ -627,6 +632,25 @@ async function sendMessage() {
     }
 }
 
+
+// ── VO2 + Body Battery ────────────────────────────────────────────────────────
+
+async function loadMetricBadges() {
+    const el = document.getElementById('chart-averages');
+    try {
+        const vo2Res = await fetch(`${API}/health/v02`);
+        const vo2    = await vo2Res.json();
+        const vo2Num = Number(vo2);
+        if (!isNaN(vo2Num) && vo2Num > 0)
+            el.innerHTML += `<span>VO₂ Max: <strong>${Math.round(vo2Num)}</strong></span>`;
+    } catch(e) { console.error('VO2:', e); }
+    try {
+        const bbRes = await fetch(`${API}/health/body-battery`);
+        const bb    = await bbRes.json();
+        if (bb && bb.body_battery > 0)
+            el.innerHTML += `<span>Body Battery: <strong>${Math.round(bb.body_battery)}</strong></span>`;
+    } catch(e) { console.error('Body battery:', e); }
+}
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadHealthChart();
