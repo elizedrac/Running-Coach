@@ -9,8 +9,8 @@ from services.course_details import get_course_details
 from services.memory import compress_history
 from services.end import detect_end
 from datetime import date, timedelta
-from pathlib import Path
 from models.planner import History
+from pathlib import Path
 import json
 import sys
 
@@ -18,8 +18,6 @@ import sys
 RACE_DISTANCES_KNOWLEDGE = json.loads(
     Path(__file__).parent.parent.joinpath("knowledge/race_distances.json").read_text()
 )
-
-_hist = History()
 
 def _query_data(user_id: str, query_intent: str = "", start_date: str = None, end_date: str = None, prev_start: str = None, prev_end: str = None):
     return execute_query(user_id, query_intent, start_date or None, end_date or None, prev_start or None, prev_end or None)
@@ -74,19 +72,21 @@ def call_tool(name: str, args: dict, user_id: str):
         return f"Tool '{name}' not yet implemented"
     return fn(user_id, **args)
 
-def orchestrate(user_query, user_id) -> str:
+def orchestrate(user_query, user_id, hist = None) -> tuple[str, History]:
     debug = "--debug" in sys.argv
 
-    if detect_end(user_query, _hist.recent):
+    hist = hist or History()
+
+    if detect_end(user_query, hist.recent):
         final_response = "It seems like you want to end the conversation. If that's the case, it was great chatting with you! If not, feel free to ask me anything else."
-        _hist.recent.append({"role": "user", "content": user_query})
-        _hist.recent.append({"role": "assistant", "content": final_response})
-        return final_response
+        hist.recent.append({"role": "user", "content": user_query})
+        hist.recent.append({"role": "assistant", "content": final_response})
+        return final_response, hist
     
-    recent_context = "\n".join(f"{m['role']}: {m['content']}" for m in _hist.recent[-4:])
+    recent_context = "\n".join(f"{m['role']}: {m['content']}" for m in hist.recent[-4:])
     planner_prompt = f"User query: {user_query}"
-    if _hist.summary or recent_context:
-        context = f"{_hist.summary}\n{recent_context}".strip()
+    if hist.summary or recent_context:
+        context = f"{hist.summary}\n{recent_context}".strip()
         planner_prompt += f"\n\n[Conversation context]\n{context}"
     planner_response = planner(planner_prompt)
 
@@ -115,24 +115,24 @@ def orchestrate(user_query, user_id) -> str:
     if debug:
         print("Tool results:", tool_results, file=sys.stderr)
 
-    recent_turns = "\n".join(f"{m['role']}: {m['content']}" for m in _hist.recent[-4:])
-    full_history = "\n".join(p for p in [_hist.summary, recent_turns] if p)
+    recent_turns = "\n".join(f"{m['role']}: {m['content']}" for m in hist.recent[-4:])
+    full_history = "\n".join(p for p in [hist.summary, recent_turns] if p)
 
     prompt = f"Original user query: {user_query}, convo history: {full_history}"
     
     final_response = final_output(prompt, planner_response, tool_results)
 
-    _hist.recent.append({"role": "user", "content": user_query})
-    _hist.recent.append({"role": "assistant", "content": final_response})
+    hist.recent.append({"role": "user", "content": user_query})
+    hist.recent.append({"role": "assistant", "content": final_response})
 
-    _hist.turn_count += 1
+    hist.turn_count += 1
 
-    if _hist.turn_count % 5 == 0:
-        _hist.summary = compress_history(full_history)
-        _hist.recent = _hist.recent[-2:]
+    if hist.turn_count % 5 == 0:
+        hist.summary = compress_history(full_history)
+        hist.recent = hist.recent[-2:]
 
 
-    return final_response
+    return final_response, hist
         
 
 

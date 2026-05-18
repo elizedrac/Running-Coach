@@ -3,10 +3,12 @@ import os
 from db import client
 from dotenv import load_dotenv
 from services.coach import orchestrate
+from models.planner import History
 
 load_dotenv()
 
 USER_ID = os.getenv("USER_ID")
+_hist = History()
 
 def main():
     while True:
@@ -14,7 +16,7 @@ def main():
         if user_input.lower().strip() in ["exit", "quit", "q", "bye",""]:
             break
 
-        response = orchestrate(user_input, USER_ID)
+        response = orchestrate(user_input, USER_ID, _hist)[0]
         if "It seems like you want to end the conversation." in response:
             break
              
