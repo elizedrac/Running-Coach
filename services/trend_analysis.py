@@ -231,11 +231,11 @@ def total_steps(user_id: str, start_date: str, end_date: str, prev_start=None, p
 def _activity_intensity(total_time: float, avg_hr: float) -> float:
     if avg_hr and total_time:
         if avg_hr > 160:
-            return (total_time * 0.5)  # high intensity
+            return (total_time * 1.2)  # high intensity
         elif avg_hr > 140:
-            return (total_time * 0.3)  # moderate intensity
+            return (total_time * 0.7)  # moderate intensity
         else:
-            return (total_time * 0.1)  # low intensity
+            return (total_time * 0.4)  # low intensity
     return 0
 
 def activity_load(total_time: float, avg_hr: float, max_hr: float) -> float:
@@ -243,20 +243,45 @@ def activity_load(total_time: float, avg_hr: float, max_hr: float) -> float:
         return 0
     return total_time * (avg_hr / max_hr)
 
+def _weighted_avg(rows, field, coerce=None):
+    vals = [(coerce(r.get(field)) if coerce else r.get(field)) for r in rows if r.get(field) is not None]
+    vals = [v for v in vals if v]  # exclude 0/None — no data, not a real zero
+    if not vals:
+        return 0.0
+    today = datetime.today().date()
+    day_weights = {0: 1.0, 1: 0.67, 2: 0.5}
+    weighted_vals = []
+    weight_sum = 0
+    for r in rows:
+        v = coerce(r.get(field)) if coerce else r.get(field)
+        if not v:
+            continue
+        diff = (today - datetime.fromisoformat(r.get("calendar_date", "")[:10]).date()).days
+        w = day_weights.get(diff, 0.5)
+        weighted_vals.append(v * w)
+        weight_sum += w
+    return sum(weighted_vals) / weight_sum if weight_sum else 0.0
+
 def compute_body_battery(user_id: str) -> dict:
     today = datetime.today().date()
     today_str = today.isoformat()
-    yesterday_str = (today - timedelta(days=1)).isoformat()
+    start_today = (today - timedelta(days=3)).isoformat()
+    start_yesterday = (today - timedelta(days=4)).isoformat()
     battery = 100.0
 
-    sleep_hours = _avg(get_health_history(user_id, today_str, today_str), "total_sleep", _time_to_hours)
+    health = get_health_history(user_id, start_yesterday, today_str)
+
+    sleep_rows = [r for r in health if r.get("calendar_date", "")[:10] >= (today - timedelta(days=2)).isoformat()]
+    sleep_hours = _weighted_avg(sleep_rows, "total_sleep", _time_to_hours)
     if sleep_hours and sleep_hours != 0:
         if sleep_hours >= 6 and sleep_hours <= 8:
             battery -= 10
         elif sleep_hours < 6:
             battery -= 25
 
-    stress = stress_trend(user_id, yesterday_str, yesterday_str)["current"]
+
+    stress_rows = [r for r in health if r.get("calendar_date", "")[:10] >= (today - timedelta(days=2)).isoformat() and r.get("calendar_date", "")[:10] < today.isoformat()]
+    stress = _weighted_avg(stress_rows, "stress")
     if stress and stress > 0:
         if stress > 75:
             battery -= 20
@@ -265,16 +290,37 @@ def compute_body_battery(user_id: str) -> dict:
         elif stress < 15:
             battery += 5
 
-    hrv = hrv_trend(user_id, today_str, today_str)["current"]
-    if hrv and hrv != 0:
+    hrv = _weighted_avg(sleep_rows, "hrv")
+    if hrv and hrv > 0:
         if hrv > 80:
             battery += 5
         elif hrv < 50:
             battery -= 15
 
-    activities = get_activities(user_id, yesterday_str, today_str)
+    activities = get_activities(user_id, start_today, today_str)
     for activity in activities:
-        battery -= _activity_intensity(_time_to_hours(activity.get("total_time")) * 60, activity.get("avg_hr"))
+        dt = activity.get("calendar_date", None)
+        weight = 1.0
+        if dt:
+            dt_parsed = datetime.fromisoformat(dt[:10]).date()
+            diff = (today - dt_parsed).days 
+            if diff == 1:
+                weight = 0.6
+            elif diff == 2:
+                weight = 0.5
+            elif diff > 2:
+                weight = 0.3
+
+        battery -= weight * _activity_intensity(_time_to_hours(activity.get("total_time")) * 60, activity.get("avg_hr"))
+
+    last_activity = sorted(activities, key=lambda a: a.get("calendar_date", ""))[-1] if activities else None
+
+    miles = avg_hr = total_time = calendar_date = None
+    if last_activity:
+        miles = last_activity.get("miles", None)
+        avg_hr = last_activity.get("avg_hr", None)
+        total_time = last_activity.get("total_time", None)
+        calendar_date = last_activity.get("calendar_date", None)
 
     body_battery = max(0, min(100, battery))
 
@@ -283,7 +329,8 @@ def compute_body_battery(user_id: str) -> dict:
         "sleep_hours": sleep_hours,
         "stress": stress,
         "hrv": hrv,
-        "num_activities": len(activities)
+        "num_activities": len(activities),
+        "last_activity": {"miles": miles, "avg_hr": avg_hr, "total_time": total_time, "calendar_date": calendar_date} if last_activity else None
     }
 
 # add knowledge maybe?

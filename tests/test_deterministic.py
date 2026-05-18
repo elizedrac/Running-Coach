@@ -686,76 +686,112 @@ def test_compression_does_not_fire_before_turn_5(mock_llm):
 
 # ── compute_body_battery tests ───────────────────────────────────────────────
 
-from services.trend_analysis import compute_body_battery, compute_load
+from services.trend_analysis import compute_body_battery, compute_load, _weighted_avg
 
 @patch("services.trend_analysis.get_activities")
-@patch("services.trend_analysis.hrv_trend")
-@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis._weighted_avg")
 @patch("services.trend_analysis.get_health_history")
-def test_body_battery_good_recovery(mock_health, mock_stress, mock_hrv, mock_activities):
-    mock_health.return_value = [{"total_sleep": "08:00:00"}]  # optimal sleep
-    mock_stress.return_value = {"current": 20}                # low stress, no adjustment
-    mock_hrv.return_value = {"current": 85}                   # high HRV → +5
+def test_body_battery_good_recovery(mock_health, mock_wavg, mock_activities):
+    mock_health.return_value = []
+    mock_wavg.side_effect = [8.0, 20.0, 85.0]  # sleep=8h, stress=20, hrv=85
     mock_activities.return_value = []
     result = compute_body_battery("user1")
-    # 100 - 10 (sleep 6-8h) + 5 (hrv > 80) = 95
+    # sleep 6-8h → -10, stress 15<20<50 → no adj, hrv >80 → +5 → 95
     assert result["body_battery"] == 95
-    assert result["sleep_hours"] == 8.0
     assert result["num_activities"] == 0
 
 @patch("services.trend_analysis.get_activities")
-@patch("services.trend_analysis.hrv_trend")
-@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis._weighted_avg")
 @patch("services.trend_analysis.get_health_history")
-def test_body_battery_poor_recovery(mock_health, mock_stress, mock_hrv, mock_activities):
-    mock_health.return_value = [{"total_sleep": "05:00:00"}]  # poor sleep → -25
-    mock_stress.return_value = {"current": 80}                # high stress → -20
-    mock_hrv.return_value = {"current": 40}                   # low HRV → -15
+def test_body_battery_poor_recovery(mock_health, mock_wavg, mock_activities):
+    mock_health.return_value = []
+    mock_wavg.side_effect = [5.0, 80.0, 40.0]  # sleep=5h, stress=80, hrv=40
     mock_activities.return_value = []
     result = compute_body_battery("user1")
-    # 100 - 25 - 20 - 15 = 40
+    # sleep <6 → -25, stress >75 → -20, hrv <50 → -15 → 40
     assert result["body_battery"] == 40
 
 @patch("services.trend_analysis.get_activities")
-@patch("services.trend_analysis.hrv_trend")
-@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis._weighted_avg")
 @patch("services.trend_analysis.get_health_history")
-def test_body_battery_missing_data_no_penalty(mock_health, mock_stress, mock_hrv, mock_activities):
-    mock_health.return_value = []          # no health data → sleep_hours = 0
-    mock_stress.return_value = {"current": 0}   # no stress data
-    mock_hrv.return_value = {"current": 0}      # no HRV data
+def test_body_battery_missing_data_no_penalty(mock_health, mock_wavg, mock_activities):
+    mock_health.return_value = []
+    mock_wavg.side_effect = [0.0, 0.0, 0.0]  # all zeroes = no data
     mock_activities.return_value = []
     result = compute_body_battery("user1")
-    # missing data should not penalise — battery stays at 100
     assert result["body_battery"] == 100
 
 @patch("services.trend_analysis.get_activities")
-@patch("services.trend_analysis.hrv_trend")
-@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis._weighted_avg")
 @patch("services.trend_analysis.get_health_history")
-def test_body_battery_activity_deduction(mock_health, mock_stress, mock_hrv, mock_activities):
-    mock_health.return_value = [{"total_sleep": "08:00:00"}]
-    mock_stress.return_value = {"current": 20}
-    mock_hrv.return_value = {"current": 85}
-    # moderate intensity run: avg_hr 150 > 140 → intensity = 60min * 0.3 = 18
-    mock_activities.return_value = [{"total_time": "01:00:00", "avg_hr": 150}]
+def test_body_battery_activity_deduction(mock_health, mock_wavg, mock_activities):
+    from datetime import date
+    mock_health.return_value = []
+    mock_wavg.side_effect = [8.0, 20.0, 85.0]  # sleep → -10, stress → no adj, hrv → +5
+    # today activity: diff=0, weight=1.0, avg_hr=150 >140 → 60min * 0.5 = 30
+    mock_activities.return_value = [{"total_time": "01:00:00", "avg_hr": 150, "calendar_date": date.today().isoformat()}]
     result = compute_body_battery("user1")
-    # 100 - 10 + 5 - 18 = 77
-    assert result["body_battery"] == 77
+    # sleep 6-8h → -10, hrv >80 → +5, moderate activity (150bpm, 60min * 0.7 = 42) → -42
+    # 100 - 10 + 5 - 42 = 53
+    assert result["body_battery"] == 53
     assert result["num_activities"] == 1
 
 @patch("services.trend_analysis.get_activities")
-@patch("services.trend_analysis.hrv_trend")
-@patch("services.trend_analysis.stress_trend")
+@patch("services.trend_analysis._weighted_avg")
 @patch("services.trend_analysis.get_health_history")
-def test_body_battery_returns_expected_keys(mock_health, mock_stress, mock_hrv, mock_activities):
+def test_body_battery_returns_expected_keys(mock_health, mock_wavg, mock_activities):
     mock_health.return_value = []
-    mock_stress.return_value = {"current": 0}
-    mock_hrv.return_value = {"current": 0}
+    mock_wavg.side_effect = [0.0, 0.0, 0.0]
     mock_activities.return_value = []
     result = compute_body_battery("user1")
-    assert {"body_battery", "sleep_hours", "stress", "hrv", "num_activities"} <= set(result)
+    assert {"body_battery", "sleep_hours", "stress", "hrv", "num_activities", "last_activity"} <= set(result)
 
+
+# ── _weighted_avg tests ──────────────────────────────────────────────────────
+
+def test_weighted_avg_skips_zero_values():
+    today = datetime.today().date()
+    rows = [
+        {"hrv": 80, "calendar_date": (today - timedelta(days=2)).isoformat()},
+        {"hrv": 0,  "calendar_date": (today - timedelta(days=1)).isoformat()},  # skipped
+        {"hrv": 90, "calendar_date": today.isoformat()},
+    ]
+    result = _weighted_avg(rows, "hrv")
+    # 80*(w=0.5) + 90*(w=1.0) / (0.5+1.0) = 86.67
+    assert result > 80
+    assert result < 90
+
+def test_weighted_avg_all_zeros_returns_zero():
+    rows = [{"hrv": 0}, {"hrv": 0}]
+    assert _weighted_avg(rows, "hrv") == 0.0
+
+def test_weighted_avg_single_value_returns_full_weight():
+    today = datetime.today().date()
+    rows = [{"hrv": 75, "calendar_date": today.isoformat()}]
+    result = _weighted_avg(rows, "hrv")
+    assert result == 75.0  # today → weight 1.0, no dilution
+
+def test_weighted_avg_recency_bias():
+    today = datetime.today().date()
+    rows = [
+        {"hrv": 50,  "calendar_date": (today - timedelta(days=2)).isoformat()},
+        {"hrv": 50,  "calendar_date": (today - timedelta(days=1)).isoformat()},
+        {"hrv": 100, "calendar_date": today.isoformat()},
+    ]
+    result = _weighted_avg(rows, "hrv")
+    # simple avg = 66.7, recency weighting pushes it higher
+    assert result > 66.7
+
+def test_weighted_avg_gap_day_uses_actual_diff():
+    # yesterday missing — today and 2-days-ago should still use their correct weights
+    today = datetime.today().date()
+    rows = [
+        {"hrv": 60, "calendar_date": (today - timedelta(days=2)).isoformat()},  # w=0.5
+        {"hrv": 80, "calendar_date": today.isoformat()},                          # w=1.0
+    ]
+    result = _weighted_avg(rows, "hrv")
+    # 60*0.5 + 80*1.0 / (0.5+1.0) = 73.33
+    assert abs(result - (60*0.5 + 80*1.0) / (0.5 + 1.0)) < 0.01
 
 # ── compute_load tests ───────────────────────────────────────────────────────
 
