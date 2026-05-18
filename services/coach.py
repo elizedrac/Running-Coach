@@ -34,6 +34,8 @@ TOOL_REGISTRY = {
 def call_tool(name: str, args: dict, user_id: str):
     fn = TOOL_REGISTRY.get(name)
     if name == "garmin_sync" and "day_iso_start" not in args:
+        if not sys.stdin.isatty():
+            return "To sync your Garmin data, please specify a date range in your message (e.g. 'sync from May 10 to May 17'), or use the Garmin Sync button at the top of the page."
         start_date = ''
         end_date = ''
         while not start_date or not end_date:
@@ -130,7 +132,6 @@ def orchestrate(user_query, user_id, hist = None) -> tuple[str, History]:
     if hist.turn_count % 5 == 0:
         hist.summary = compress_history(full_history)
         hist.recent = hist.recent[-2:]
-
 
     return final_response, hist
         

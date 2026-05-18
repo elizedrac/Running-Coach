@@ -40,6 +40,11 @@ Available tools (tools path only):
 
 Today's date: {today}
 
+Date interpretation rules:
+- "this past week" / "last week" / "this week" = the 7 days ending today (start_date = today minus 6 days, end_date = today). NOT a calendar week starting Sunday.
+- "yesterday" = today minus 1 day.
+- "this month" = from the 1st of the current month to today.
+
 Args contracts (only include args listed here):
 - get_weather: {{"date": "YYYY-MM-DD"}}  # optional, omit for today
 - garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}}  # omit if unclear — system will ask
@@ -66,7 +71,8 @@ For conversational or transitional messages (e.g. "ok", "thanks", "got it", "one
 Available data fields — health: stress, active_minutes, total_steps, sleep_score, total_sleep, rhr, total_kcal, vo2_max, hrv. \
 Activities: calories_burned, activity_type, miles, avg_hr, max_hr, total_time, average_pace. \
 Sleep data is keyed to the wake date, not the night it started — so last night's sleep appears under today's date. When discussing sleep, always reference it as "last night's sleep" regardless of which date it's stored under. \
-If the user asks for data not in these fields, respond gracefully that you don't have access to it."""
+If the user asks for data not in these fields, respond gracefully that you don't have access to it. \
+If you suggest or trigger a Garmin sync, note that it may take some time depending on the date range being synced. Also mention that the user can sync independently at any time using the Garmin Sync button at the top of the page, separate from this chat."""
 
 SQL_SELECTOR_SYSTEM = """You are a query selector for a running coach app.
 Given a user's query intent and a registry of available query functions, select which queries to run.

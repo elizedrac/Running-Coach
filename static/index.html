@@ -1,0 +1,592 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RunCoach</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f0eb; color: #1a1a1a; min-height: 100vh; }
+
+        /* ── Header ── */
+        header { background: #1a1a1a; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 100; }
+        .logo { display: flex; align-items: center; gap: 10px; color: white; font-size: 18px; font-weight: 600; }
+        .header-btns { display: flex; gap: 10px; position: relative; }
+        .header-btn { background: transparent; border: 1px solid #555; color: white; padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; transition: border-color 0.2s; display: flex; align-items: center; gap: 6px; }
+        .header-btn:hover { border-color: white; }
+
+        /* ── Garmin sync popover ── */
+        .sync-popover { display: none; position: absolute; top: calc(100% + 10px); right: 0; background: white; border-radius: 12px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); width: 280px; z-index: 200; }
+        .sync-popover.open { display: block; }
+        .sync-popover-title { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 12px; }
+        .sync-field { margin-bottom: 10px; }
+        .sync-field label { display: block; font-size: 12px; color: #777; margin-bottom: 4px; }
+        .sync-field input { width: 100%; border: 1px solid #e0d8d0; border-radius: 8px; padding: 7px 10px; font-size: 13px; outline: none; color: #1a1a1a; }
+        .sync-field input:focus { border-color: #c4614a; }
+        .sync-actions { display: flex; gap: 8px; margin-top: 12px; }
+        .sync-default-btn { flex: 1; background: #f5f0eb; border: none; border-radius: 8px; padding: 8px; font-size: 12px; cursor: pointer; color: #555; }
+        .sync-default-btn:hover { background: #ede8e2; }
+        .sync-go-btn { flex: 1; background: #c4614a; border: none; border-radius: 8px; padding: 8px; font-size: 12px; color: white; cursor: pointer; font-weight: 500; }
+        .sync-go-btn:hover { background: #b0523c; }
+
+        /* ── Layout ── */
+        .main { display: grid; grid-template-columns: 1fr 600px; gap: 16px; padding: 12px 16px; align-items: start; }
+        .left-col { display: flex; flex-direction: column; gap: 16px; }
+        .bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+
+        /* ── Cards ── */
+        .card { background: white; border-radius: 12px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .card-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+
+        /* ── Health chart (compact) ── */
+        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+        .chart-legend { display: flex; gap: 16px; margin-top: 8px; }
+        .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #888; }
+        .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
+
+        /* ── Activity card ── */
+        .activity-name { font-size: 17px; font-weight: 600; margin-bottom: 3px; }
+        .activity-date { font-size: 12px; color: #888; margin-bottom: 12px; }
+        .stat-row { display: flex; justify-content: space-between; font-size: 13px; padding: 5px 0; border-bottom: 1px solid #f5f0eb; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #777; }
+        .stat-value { font-weight: 500; }
+        .placeholder-text { color: #aaa; font-size: 13px; text-align: center; padding: 20px 0; }
+
+        /* ── Weather card ── */
+        .weather-location { font-size: 12px; color: #888; margin-bottom: 2px; }
+        .weather-temp { font-size: 38px; font-weight: 300; line-height: 1.1; }
+        .weather-feels { font-size: 14px; margin-bottom: 12px; }
+        .weather-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: #555; }
+
+        /* ── Chatbot ── */
+        .chat-card {
+            display: flex; flex-direction: column;
+            overflow: hidden; min-height: 0;
+        }
+        .chat-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid #f0ece6; margin-bottom: 14px; flex-shrink: 0; }
+        .chat-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .online-badge { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #666; }
+        .online-dot { width: 7px; height: 7px; background: #22c55e; border-radius: 50%; }
+
+        .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; min-height: 0; }
+        .chat-messages::-webkit-scrollbar { width: 4px; }
+        .chat-messages::-webkit-scrollbar-thumb { background: #e0d8d0; border-radius: 2px; }
+
+        /* coach — plain text on white */
+        .msg { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; }
+        .msg-label { font-size: 11px; font-weight: 600; color: #bbb; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 2px; }
+        .msg-bubble { font-size: 13.5px; line-height: 1.6; color: #1a1a1a; background: none; padding: 0; }
+        .msg-time { font-size: 11px; color: #ccc; }
+
+        /* user — bubble */
+        .msg.user { align-items: flex-end; }
+        .msg.user .msg-label { color: #c4614a; }
+        .msg.user .msg-bubble { background: #c4614a; color: white; padding: 10px 14px; border-radius: 14px; border-bottom-right-radius: 4px; max-width: 85%; }
+        .msg.user .msg-time { text-align: right; }
+
+        .msg.coach .msg-bubble strong { font-weight: 600; }
+        .msg.coach .msg-bubble ul, .msg.coach .msg-bubble ol { padding-left: 16px; margin: 6px 0; }
+        .msg.coach .msg-bubble li { margin: 3px 0; }
+        .msg.coach .msg-bubble h3, .msg.coach .msg-bubble h4 { margin: 8px 0 4px; font-size: 14px; }
+        .msg.coach .msg-bubble table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
+        .msg.coach .msg-bubble td, .msg.coach .msg-bubble th { border: 1px solid #e8e0d8; padding: 5px 9px; }
+        .msg.coach .msg-bubble th { background: #f5f0eb; font-weight: 600; }
+        .msg.coach .msg-bubble p { margin: 4px 0; }
+        .msg.coach .msg-bubble hr { border: none; border-top: 1px solid #eee; margin: 8px 0; }
+
+        /* ── Analyzing dots (inline) ── */
+        .dots { display: flex; gap: 4px; }
+        .dots span { width: 6px; height: 6px; background: #c4614a; border-radius: 50%; animation: bounce 1.2s infinite; }
+        .dots span:nth-child(2) { animation-delay: 0.2s; }
+        .dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-5px); } }
+        .analyzing-inline { display: none; align-items: center; gap: 6px; padding: 6px 0 2px; flex-shrink: 0; }
+        .analyzing-inline span { font-size: 12px; color: #aaa; }
+
+        /* ── Input row ── */
+        .chat-input-row { display: flex; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid #f0ece6; margin-top: 8px; flex-shrink: 0; }
+        .chat-input-wrap { flex: 1; display: flex; align-items: center; background: #f5f0eb; border-radius: 24px; padding: 4px 6px 4px 18px; gap: 6px; }
+        .chat-input { flex: 1; background: transparent; border: none; font-size: 13.5px; outline: none; color: #1a1a1a; padding: 7px 0; }
+        .chat-input::placeholder { color: #bbb; }
+        .stop-btn { display: none; width: 30px; height: 30px; background: #1a1a1a; border: none; border-radius: 50%; cursor: pointer; align-items: center; justify-content: center; flex-shrink: 0; }
+        .send-btn { width: 38px; height: 38px; background: #c4614a; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }
+        .send-btn:hover { background: #b0523c; }
+
+        /* ── Training plan ── */
+        .plan-section { padding: 0 16px 20px; }
+        .plan-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .plan-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .plan-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .plan-view-btn { background: #c4614a; color: white; border: none; padding: 8px 16px; border-radius: 20px; font-size: 13px; cursor: pointer; }
+        .plan-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid #f0ece6; border-radius: 8px; overflow: hidden; }
+        .plan-day-header { background: #1a1a1a; color: white; text-align: center; padding: 10px; font-size: 13px; font-weight: 500; }
+        .plan-day-header.today { background: #c4614a; }
+        .plan-placeholder { grid-column: span 7; text-align: center; padding: 28px; color: #bbb; font-size: 13px; border-top: 1px solid #f0ece6; }
+
+        /* ── Follow-up chips ── */
+        .followup-chips { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-width: 90%; }
+        .followup-chip { background: white; border: 1px solid #e0d8d0; border-radius: 16px; padding: 8px 14px; font-size: 13px; color: #555; cursor: pointer; text-align: left; transition: border-color 0.15s, color 0.15s; }
+        .followup-chip:hover { border-color: #c4614a; color: #c4614a; }
+
+        /* ── Resize handle hint ── */
+        .chat-card::after { content: ''; display: block; height: 4px; background: linear-gradient(to right, #f0ece6, #e0d8d0, #f0ece6); border-radius: 2px; margin-top: 4px; cursor: ns-resize; flex-shrink: 0; }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+    <div class="logo">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#c4614a" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l3-8 4 16 3-8 2 4 2-4h2"/>
+        </svg>
+        RunCoach
+    </div>
+    <div class="header-btns">
+        <div style="position:relative">
+            <button class="header-btn" onclick="toggleSyncPopover(event)" id="sync-btn">
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Garmin Sync
+            </button>
+            <div class="sync-popover" id="sync-popover">
+                <div class="sync-popover-title">Sync Garmin Data</div>
+                <div class="sync-field">
+                    <label>Start date</label>
+                    <input type="date" id="sync-start"/>
+                </div>
+                <div class="sync-field">
+                    <label>End date</label>
+                    <input type="date" id="sync-end"/>
+                </div>
+                <div class="sync-actions">
+                    <button class="sync-default-btn" onclick="setDefaultDates()">Last 7 days</button>
+                    <button class="sync-go-btn" onclick="runSync()">Sync</button>
+                </div>
+            </div>
+        </div>
+        <button class="header-btn" onclick="notImplemented('Edit Race')">Edit Race</button>
+        <button class="header-btn" onclick="notImplemented('Edit Training Plan')">Edit Training Plan</button>
+        <button class="header-btn" onclick="notImplemented('Predictions')">Predictions</button>
+    </div>
+</header>
+
+<!-- Main grid -->
+<div class="main">
+
+    <!-- Left column -->
+    <div class="left-col">
+
+        <!-- Health chart (compact) -->
+        <div class="card">
+            <div class="chart-header">
+                <div class="card-title" style="margin-bottom:0;font-size:14px">Health Data (Past 7 Days)</div>
+                <div id="chart-averages" style="display:flex;gap:16px;font-size:12px;color:#666;"></div>
+            </div>
+            <canvas id="healthChart" height="120"></canvas>
+            <div class="chart-legend">
+                <div class="legend-item"><div class="legend-dot" style="background:#c4614a"></div> Steps (K)</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#e8736a"></div> RHR</div>
+                <div class="legend-item"><div class="legend-dot" style="background:#2d7dd2"></div> Sleep (hrs)</div>
+            </div>
+        </div>
+
+        <!-- Activity + Weather -->
+        <div class="bottom-row">
+            <div class="card" id="activity-card">
+                <div class="card-title">Most Recent Activity</div>
+                <div class="placeholder-text">Loading...</div>
+            </div>
+            <div class="card" id="weather-card">
+                <div class="weather-location">Loading...</div>
+                <div class="weather-temp">—</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chatbot -->
+    <div class="card chat-card">
+        <div class="chat-header">
+            <div class="chat-title">
+                <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="#1a1a1a" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                </svg>
+                Chatbot
+            </div>
+            <div class="online-badge"><div class="online-dot"></div> Online</div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages"></div>
+
+        <div class="analyzing-inline" id="analyzing-bar">
+            <div class="dots"><span></span><span></span><span></span></div>
+            <span>Analyzing...</span>
+        </div>
+
+        <div class="chat-input-row">
+            <div class="chat-input-wrap">
+                <input class="chat-input" id="chat-input" placeholder="Type a message..."
+                    onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendMessage(); }"/>
+                <button class="stop-btn" id="stop-btn" onclick="cancelRequest()" title="Stop">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="white">
+                        <rect x="2" y="2" width="8" height="8" rx="1"/>
+                    </svg>
+                </button>
+            </div>
+            <button class="send-btn" id="send-btn" onclick="sendMessage()">
+                <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+            </button>
+        </div>
+    </div><!-- end chat-card -->
+
+</div>
+
+<!-- Training Plan -->
+<div class="plan-section">
+    <div class="plan-card">
+        <div class="plan-header">
+            <div class="plan-title">
+                <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="#1a1a1a" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                </svg>
+                Weekly Training Plan + Weather
+            </div>
+            <button class="plan-view-btn">View Full Month →</button>
+        </div>
+        <div class="plan-grid" id="plan-grid"></div>
+    </div>
+</div>
+
+<script>
+const API   = "http://localhost:8000";
+const SID   = crypto.randomUUID();
+const DAYS  = ["M","T","W","T","F","S","S"];
+const TODAY = new Date().getDay();
+let   abortController = null;
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+function showToast(msg, color = '#1a1a1a') {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    Object.assign(t.style, {
+        position:'fixed', bottom:'24px', left:'50%', transform:'translateX(-50%)',
+        background: color, color:'white', padding:'10px 20px', borderRadius:'8px',
+        fontSize:'13px', zIndex:'999', opacity:'1', transition:'opacity 0.4s', whiteSpace:'nowrap'
+    });
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 400); }, 2500);
+}
+
+function notImplemented(name) { showToast(`${name} coming soon`); }
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function isoDate(offsetDays = 0) {
+    return new Date(Date.now() + offsetDays * 864e5).toISOString().split('T')[0];
+}
+
+function fmtTime() {
+    return new Date().toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+}
+
+// ── Health chart ──────────────────────────────────────────────────────────────
+
+async function loadHealthChart() {
+    try {
+        const res  = await fetch(`${API}/health/recent?start_date=${localOffset(-6)}&end_date=${localToday()}`);
+        const rows = await res.json();
+        if (!rows || !rows.length) return;
+        const labels = rows.map(r => {
+            const [y, m, d] = r.calendar_date.split('T')[0].split('-');
+            return new Date(+y, +m - 1, +d).toLocaleDateString('en-US', {weekday:'short'});
+        });
+        const steps  = rows.map(r => r.total_steps ? +(r.total_steps / 1000).toFixed(1) : 0);
+        const rhr    = rows.map(r => r.rhr || null);
+        const sleep  = rows.map(r => {
+            if (!r.total_sleep) return null;
+            const [h, m] = r.total_sleep.split(':');
+            return +(+h + +m / 60).toFixed(1);
+        });
+
+        // Show averages
+        const avg = (arr) => { const v = arr.filter(x => x); return v.length ? (v.reduce((a,b) => a+b, 0) / v.length) : null; };
+        const avgSteps = avg(steps), avgRhr = avg(rhr), avgSleep = avg(sleep);
+        document.getElementById('chart-averages').innerHTML = [
+            avgSteps ? `<span>Steps: <strong>${avgSteps.toFixed(1)}K</strong></span>` : '',
+            avgRhr   ? `<span>RHR: <strong>${Math.round(avgRhr)} bpm</strong></span>` : '',
+            avgSleep ? `<span>Sleep: <strong>${avgSleep.toFixed(1)}h</strong></span>` : '',
+        ].join('');
+        new Chart(document.getElementById('healthChart'), {
+            data: { labels, datasets: [
+                { type:'bar',  label:'Steps (K)',  data:steps, backgroundColor:'#c4614a', borderRadius:3, yAxisID:'y', order:2 },
+                { type:'line', label:'RHR',         data:rhr,   borderColor:'#e8736a', backgroundColor:'transparent', pointBackgroundColor:'#e8736a', pointRadius:4, tension:0.3, yAxisID:'y2', order:1 },
+                { type:'line', label:'Sleep (hrs)', data:sleep, borderColor:'#2d7dd2', backgroundColor:'transparent', pointBackgroundColor:'#2d7dd2', pointRadius:4, tension:0.3, yAxisID:'ySleep', order:1 },
+            ]},
+            options: {
+                responsive:true, maintainAspectRatio:true,
+                plugins:{
+                    legend:{ display:false },
+                    tooltip:{
+                        mode:'index', intersect:false,
+                        callbacks:{
+                            label: ctx => {
+                                if (ctx.dataset.label === 'Sleep (hrs)') return ` Sleep: ${ctx.raw}h`;
+                                if (ctx.dataset.label === 'RHR') return ` RHR: ${ctx.raw} bpm`;
+                                return ` Steps: ${ctx.raw}K`;
+                            }
+                        }
+                    }
+                },
+                scales:{
+                    y:      { position:'left',  grid:{ color:'#f5f0eb' }, ticks:{ color:'#aaa', font:{size:10} } },
+                    y2:     { position:'right', grid:{ display:false },   ticks:{ color:'#aaa', font:{size:10} } },
+                    ySleep: { position:'right', display:false, min:0, max:24 },
+                    x:      { grid:{ display:false }, ticks:{ color:'#aaa', font:{size:10} } },
+                }
+            }
+        });
+    } catch(e) { console.error('Health chart:', e); }
+}
+
+// ── Activity card ─────────────────────────────────────────────────────────────
+
+async function loadActivity() {
+    const card = document.getElementById('activity-card');
+    try {
+        const res  = await fetch(`${API}/activities/recent?start_date=${localOffset(-7)}&end_date=${localToday()}`);
+        const rows = await res.json();
+        const a    = rows && rows.length ? rows[rows.length - 1] : null;
+        if (!a) { card.innerHTML = '<div class="card-title">Most Recent Activity</div><div class="placeholder-text">No recent activity found.</div>'; return; }
+        const date = new Date(a.calendar_date).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
+        const type = a.activity_type ? a.activity_type.charAt(0).toUpperCase() + a.activity_type.slice(1) + ' Run' : 'Run';
+        card.innerHTML = `
+            <div class="card-title">Most Recent Activity</div>
+            <div class="activity-name">${type}</div>
+            <div class="activity-date">${date}</div>
+            <div class="stat-row"><span class="stat-label">Total Mileage</span><span class="stat-value">${a.miles ? a.miles.toFixed(1)+' mi' : '—'}</span></div>
+            <div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${a.average_pace || '—'}</span></div>
+            <div class="stat-row"><span class="stat-label">Avg HR</span><span class="stat-value">${a.avg_hr ? Math.round(a.avg_hr)+' bpm' : '—'}</span></div>
+            <div class="stat-row"><span class="stat-label">Kcals Burned</span><span class="stat-value">${a.calories_burned ? Math.round(a.calories_burned) : '—'}</span></div>`;
+    } catch(e) {
+        card.innerHTML = '<div class="card-title">Most Recent Activity</div><div class="placeholder-text">Could not load activity.</div>';
+    }
+}
+
+// ── Weather card ──────────────────────────────────────────────────────────────
+
+async function loadWeather() {
+    const card = document.getElementById('weather-card');
+    try {
+        const res   = await fetch(`${API}/weather`);
+        const hours = await res.json();
+        const h     = hours && hours.length ? hours[0] : null;
+        if (!h) { card.innerHTML = '<div class="weather-location">Weather unavailable</div>'; return; }
+        const feelColor = (h.feels_like > 75 || h.feels_like < 32) ? '#c4614a' : '#22c55e';
+        card.innerHTML = `
+            <div class="weather-location">Your Location</div>
+            <div class="weather-temp">${Math.round(h.temperature)}°F</div>
+            <div class="weather-feels" style="color:${feelColor}">Feels like ${Math.round(h.feels_like)}°F</div>
+            <div class="weather-row"><span>Actual</span><span>${Math.round(h.temperature)}°F</span></div>
+            <div class="weather-row"><span>Wind</span><span>${h.wind_speed} mph ${h.wind_direction}</span></div>
+            <div class="weather-row"><span>Humidity</span><span>${h.humidity}%</span></div>
+            <div class="weather-row"><span>Rain chance</span><span>${h.chance_of_rain}%</span></div>`;
+    } catch(e) {
+        card.innerHTML = '<div class="weather-location">Weather unavailable</div>';
+    }
+}
+
+// ── Training plan ─────────────────────────────────────────────────────────────
+
+function renderPlanGrid() {
+    const grid    = document.getElementById('plan-grid');
+    const todayIdx = TODAY === 0 ? 6 : TODAY - 1;
+    grid.innerHTML = DAYS.map((d, i) =>
+        `<div class="plan-day-header${i === todayIdx ? ' today' : ''}">${d}</div>`
+    ).join('') + `<div class="plan-placeholder">Training plan coming soon — ask your coach to create one!</div>`;
+}
+
+// ── Garmin sync popover ───────────────────────────────────────────────────────
+
+function localToday() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+
+function localOffset(days) {
+    const d = new Date(); d.setDate(d.getDate() + days);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+function toggleSyncPopover(e) {
+    e.stopPropagation();
+    const pop = document.getElementById('sync-popover');
+    pop.classList.toggle('open');
+    if (pop.classList.contains('open')) {
+        document.getElementById('sync-end').value   = localToday();
+        document.getElementById('sync-start').value = localOffset(-1);
+    }
+}
+
+function setDefaultDates() {
+    document.getElementById('sync-start').value = localOffset(-7);
+    document.getElementById('sync-end').value   = localToday();
+}
+
+async function runSync() {
+    const start = document.getElementById('sync-start').value;
+    const end   = document.getElementById('sync-end').value;
+    if (!start || !end) { alert('Please enter both dates.'); return; }
+    document.getElementById('sync-popover').classList.remove('open');
+    const btn = document.getElementById('sync-btn');
+    btn.textContent = 'Syncing...';
+    btn.disabled = true;
+    try {
+        await fetch(`${API}/garmin-sync`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ start_date: start, end_date: end })
+        });
+        btn.textContent = '✓ Synced';
+        showToast('Garmin sync complete', '#22c55e');
+        setTimeout(() => { btn.innerHTML = '↺ Garmin Sync'; btn.disabled = false; loadActivity(); loadHealthChart(); }, 2000);
+    } catch(e) {
+        btn.textContent = 'Failed';
+        showToast('Sync failed — check your Garmin connection', '#c4614a');
+        setTimeout(() => { btn.textContent = 'Garmin Sync'; btn.disabled = false; }, 2000);
+    }
+}
+
+document.getElementById('sync-popover').addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', e => {
+    if (!e.target.closest('#sync-btn') && !e.target.closest('#sync-popover')) {
+        document.getElementById('sync-popover').classList.remove('open');
+    }
+});
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+
+function addMessage(role, text, animate = false) {
+    const container = document.getElementById('chat-messages');
+    const isUser    = role === 'user';
+    const div       = document.createElement('div');
+    div.className   = `msg ${isUser ? 'user' : 'coach'}`;
+    div.innerHTML   = `
+        <div class="msg-label">${isUser ? 'You' : 'Coach'}</div>
+        <div class="msg-bubble"></div>
+        <div class="msg-time">${fmtTime()}</div>`;
+    container.appendChild(div);
+
+    const bubble = div.querySelector('.msg-bubble');
+
+    if (isUser || !animate) {
+        bubble.innerHTML = isUser ? text.replace(/</g,'&lt;') : marked.parse(text);
+    } else {
+        // typewriter — speed scales so long responses don't take forever
+        const interval = Math.max(5, Math.min(25, 1800 / text.length));
+        let i = 0;
+        const tick = setInterval(() => {
+            i += 2;
+            bubble.textContent = text.slice(0, i);
+            container.scrollTop = container.scrollHeight;
+            if (i >= text.length) {
+                clearInterval(tick);
+                bubble.innerHTML = marked.parse(text);
+                container.scrollTop = container.scrollHeight;
+            }
+        }, interval);
+    }
+
+    container.scrollTop = container.scrollHeight;
+}
+
+function showFollowUpChips(questions) {
+    const container = document.getElementById('chat-messages');
+    const wrap = document.createElement('div');
+    wrap.className = 'followup-chips';
+    questions.forEach(q => {
+        const btn = document.createElement('button');
+        btn.className = 'followup-chip';
+        btn.textContent = q;
+        btn.onclick = () => {
+            wrap.remove();
+            const input = document.getElementById('chat-input');
+            input.value = q;
+            input.focus();
+        };
+        wrap.appendChild(btn);
+    });
+    container.appendChild(wrap);
+    container.scrollTop = container.scrollHeight;
+}
+
+function setAnalyzing(on) {
+    document.getElementById('analyzing-bar').style.display = on ? 'flex' : 'none';
+    document.getElementById('stop-btn').style.display  = on ? 'flex' : 'none';
+    document.getElementById('send-btn').style.display  = on ? 'none' : 'flex';
+    document.getElementById('chat-input').disabled = on;
+}
+
+function cancelRequest() {
+    if (abortController) { abortController.abort(); abortController = null; }
+    setAnalyzing(false);
+    document.getElementById('chat-input').focus();
+}
+
+async function sendMessage() {
+    const input = document.getElementById('chat-input');
+    const text  = input.value.trim();
+    if (!text || input.disabled) return;
+    input.value = '';
+    addMessage('user', text);
+    setAnalyzing(true);
+    abortController = new AbortController();
+    try {
+        const res  = await fetch(`${API}/ask`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ query: text, session_id: SID }),
+            signal: abortController.signal
+        });
+        const data = await res.json();
+        setAnalyzing(false);
+        addMessage('coach', data.response, true);
+        if (data.ended && data.follow_ups && data.follow_ups.length) {
+            showFollowUpChips(data.follow_ups);
+        }
+    } catch(e) {
+        setAnalyzing(false);
+        if (e.name !== 'AbortError') addMessage('coach', 'Sorry, I had trouble connecting. Please check the server is running.');
+    } finally {
+        abortController = null;
+        input.focus();
+    }
+}
+
+
+// ── Match chat height to left column ─────────────────────────────────────────
+
+function matchChatHeight() {
+    const leftCol  = document.querySelector('.left-col');
+    const chatCard = document.querySelector('.chat-card');
+    const h = leftCol.getBoundingClientRect().height;
+    if (h > 0) chatCard.style.height = h + 'px';
+}
+
+window.addEventListener('resize', matchChatHeight);
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+loadHealthChart();
+loadActivity();
+loadWeather();
+renderPlanGrid();
+// Run after data loads and cards render
+setTimeout(matchChatHeight, 800);
+</script>
+</body>
+</html>
