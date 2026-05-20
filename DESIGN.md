@@ -61,19 +61,24 @@ runcoach/
 ├── requirements.txt
 ├── DESIGN.md
 │
-├── routes/                        # Empty in V1; populated in Phase 4 (server)
-│   ├── activities.py              # Garmin webhook handler endpoints
-│   ├── plan.py                    # Plan CRUD endpoints
-│   ├── ask.py                     # Main /ask entry point
+├── static/
+│   └── index.html                 # Single-file frontend (served by FastAPI via StaticFiles)
+│
+├── routes/
+│   ├── ask.py                     # POST /ask — SSE streaming endpoint; owns per-session History dict
+│   ├── activities.py              # GET /health/recent, /health/v02, /health/body-battery, /activities/recent, /weather; POST /garmin-sync
+│   ├── plan.py                    # Plan CRUD endpoints (stub — wired when plan tools are built)
 │   └── auth.py                    # Auth endpoints (added pre-launch)
 │
 ├── services/
-│   ├── coach.py                   # Orchestrator — ask(question, user_id), single-shot planner + dispatch
-│   ├── llm.py                     # Central call_llm() with retry + caching
+│   ├── coach.py                   # Orchestrator — generator that yields SSE events (status, chunk, done)
+│   ├── llm.py                     # call_llm() (blocking) + stream_llm() (generator) with retry + prompt caching
+│   ├── memory.py                  # compress_history() — Haiku call that summarises conversation to plain text
+│   ├── end.py                     # detect_end() + generate_followups() — end-of-conversation detection and follow-up chips
 │   ├── planner.py                 # Planner LLM call + PlannerOutput validation
 │   ├── sql_selector.py            # Haiku call that picks query functions from REGISTRY; called internally by query_data tool
-│   ├── trend_analysis.py          # 14 per-metric trend functions + compute_body_battery + compute_load
-│   ├── final.py                   # Final LLM call (Sonnet). System prompt = BASE_COACH; per-tool snippets + data in user prompt.
+│   ├── trend_analysis.py          # 14 per-metric trend functions + compute_body_battery (3-day weighted) + compute_load
+│   ├── final.py                   # Final LLM call (Sonnet) — generator, yields chunks via stream_llm
 │   ├── garmin.py                  # Garmin data sync (token-cached auth, upsert to Supabase)
 │   ├── plan.py                    # Training plan creation, update, injury logic
 │   ├── web_search.py              # Anthropic web search wrapper + persistence
@@ -99,7 +104,7 @@ runcoach/
 │   └── plan.py                    # Plan read/write queries (current_plan, plan_days, plan_intervals, plan_history)
 │
 ├── models/
-│   ├── planner.py                 # Pydantic model for planner LLM JSON output (ToolPlan)
+│   ├── planner.py                 # Pydantic models: PlannerOutput, SQLPlan, AskRequest, DataRequest, History (dataclass), EndBehaviorClassification
 │   └── finish_time_predictor.json # Serialised XGBoost model (V2)
 │
 ├── knowledge/
@@ -439,8 +444,9 @@ Question arrives
 
 ### 6. Pacing Calculator
 - Used by plan creation or direct user request
-- Common pace formulas for each workout type (easy, tempo, threshold, interval)
-- Knowledge entries define pace ranges per workout type
+- Zones (Daniels-style offsets from equivalent marathon pace): easy (+1:30), aerobic (+0:45), marathon (0), threshold (-0:15), interval (-1:00), repetition (-1:30)
+- Also returns `goal_pace`, `gps_adjusted_pace` (+2.5% for tangent/GPS drift), `current_easy_pace` (from VO2 max via ACSM formula)
+- Server context returns message asking for missing args rather than prompting via `input()`
 
 ### 7. Get Weather ✓
 - Triggered if user asks about weather or whether to run inside
@@ -449,7 +455,22 @@ Question arrives
 - Past/future dates beyond today gracefully rejected with explanation
 - Hourly data passed to final LLM; TOOL_SNIPPETS guide the response (best time window, treadmill suggestion, what to wear)
 
-### 8. Get Race Results
+### 8. Search Race Info
+- Web search for time-sensitive race data: qualifying standards, registration dates/status, entry fees, lottery odds, race date
+- Do NOT rely on model knowledge for this — standards and dates change yearly
+- Always caveats results and directs user to verify on official race website
+- Args: `{race, location, query}` — query is the specific aspect (e.g. "qualifying standards 2026")
+- **Caching**: NOT stored in the permanent RAG store (`course_chunks.json`) since data goes stale year-to-year. Within a session, results are preserved naturally in conversation history. Cross-session: cache in `search_cache` (Supabase) with 7-day TTL.
+- Implemented in `services/race_info.py`
+
+### 9. Get Heart Rate Zones
+- Pulls `max_hr` from last 30 days of activity data (highest recorded), `rhr` from today's health record
+- Returns two zone tables: % max HR (Garmin-style) and Karvonen/HR Reserve (more accurate with resting HR)
+- 5 zones: Recovery (50-60%), Aerobic (60-70%), Tempo (70-80%), Threshold (80-90%), VO2 Max (90-100%)
+- If no max HR data: returns guidance to do a max effort or use 220-age estimate
+- Implemented in `services/hr_zones.py`
+
+### 10. Get Race Results
 - Anthropic web search to find Athlinks event ID
 - Ask user for bib number
 - Extract event ID from search result URL via regex
@@ -457,7 +478,7 @@ Question arrives
 - Encouraging final LLM response either way
 - If no data found: state no access gracefully
 
-### 9. Query User Data
+### 9. Query User Data ✓
 - Second LLM call to determine tables + timeframes (metadata + all possibilities)
 - Returns data as plain English with light knowledge context
 - Reroute to Garmin sync form if no data
@@ -470,7 +491,7 @@ Question arrives
 - Trend functions internally call the cached `get_activities`/`get_health_history` — no extra DB calls
 - MIN_DATE = `"2026-01-01"` enforced in db layer: if requested start is before MIN_DATE, window shifts forward (preserves length); if entire range is before MIN_DATE, returns `[]`. Final LLM is told to inform the user when shifting occurs.
 
-### 11. Get Course Details
+### 11. Get Course Details ✓
 - Anthropic web search + planner LLM-generated query
 - Second LLM call (Haiku) to consolidate search results into plain English summary
 - RAG with embedding similarity scores for cached races
@@ -482,9 +503,12 @@ Question arrives
 
 ### 13. Compute Body Battery ✓
 - Recovery readiness score computed from today's sleep hours, yesterday's stress, today's HRV, and the past 24h of activity load
-- Returns `{body_battery: float (0-100), sleep_hours: float, stress: int, hrv: int, num_activities: int}` — component values included so the LLM can caveat if inputs are missing (e.g. Garmin not yet synced today)
+- Returns `{body_battery, sleep_hours, stress, hrv, num_activities, last_activity}` — component values included so LLM can caveat missing data or account for a hard run today
+- `sleep_hours`, `hrv`, `stress` are **3-day recency-weighted averages** via `_weighted_avg()` (weights: today=1.0, yesterday=0.67, 2 days ago=0.5). Zero/missing days excluded from average.
+- `last_activity` = most recent activity dict (or null) — if today, LLM factors it into recovery recommendation regardless of battery score
 - Implemented in `services/trend_analysis.py::compute_body_battery(user_id)`
-- Registered in `sql_selector.REGISTRY`; system prompt instructs Haiku to use only when user asks about readiness / how they feel / whether to exercise
+- Also exposed as `GET /health/body-battery` route for dashboard display
+- Registered in `sql_selector.REGISTRY`; Haiku instructed to use only for readiness/recovery questions
 
 ### 14. Compute Training Load ✓
 - Returns `{acute_load, chronic_load, acwr}` — acute=last 7 days, chronic=28-day weekly avg, ACWR=acute/chronic (flag >1.3)
@@ -704,11 +728,17 @@ models/
 - **Planner LLM output validated** via `ToolPlan` Pydantic model (`models/planner.py`) before any tool dispatch — catches malformed JSON, missing fields, wrong types, invalid `path` enum
 - Garmin data is not validated with Pydantic — the API shape is stable and helper functions handle type coercion (`_to_int`, `_seconds_to_interval`, `_mps_to_pace`)
 
-### Deterministic Checks
+### Input Guardrails ✓
+- **`services/guardrails.py::input_check(query)`** — runs before planner on every message, returns `(blocked: bool, message: str)`
+- Query too short (< 2 chars after strip) → "Looks like you got cut off"
+- Query too long (> 150 words) → "That message is a bit long"
+- If blocked: yields message as a `("chunk", msg)` SSE event and returns early — no planner call, no LLM cost
+
+### Deterministic Checks ✓
 - SQL outputs must start with SELECT — raise ValueError otherwise
 - Plan constraints: no back-to-back hard days, max long run ≤ race distance
 - Timeframe constraints: planner cannot schedule beyond race date
-- Tool name validity: if all tool names invalid, fallback to direct LLM response
+- **Tool name validity** ✓ — unknown tool names silently skipped in `orchestrate`; if ALL tools are invalid, `planner_response.path` is set to `"no_tools"` to prevent empty tool results being passed to final LLM
 
 ### Prompt Injection Protection
 - Main functionality snippet included in both main LLM prompts
@@ -725,21 +755,28 @@ models/
 
 ---
 
-## Memory & Compression
+## Memory & Compression ✓
 
-- Compression triggered every **5 turns** via `services/memory.py::compress_history` (Haiku call, max 400 tokens)
-- `History` dataclass in `models/planner.py` stores: `summary` (compressed), `recent` (last N turns as `{role, content}` dicts), `turn_count`
-- After compression: `recent` trimmed to last 2 turns, `summary` updated. Module-level singleton in `coach.py` — per-session, resets on restart.
-- Recent context (last 4 turns) + summary injected into planner prompt so it has conversation awareness
-- Full history passed to final LLM call for response coherence
-- `COMPRESSION` system prompt uses `cache_system=True` for Anthropic prompt caching
+- `History` dataclass (`models/planner.py`): `summary: str`, `recent: list[dict]`, `turn_count: int`
+- **Session ownership**: history is passed to `orchestrate()` as a parameter and returned after each turn. `routes/ask.py` owns a `session_memory: dict[str, History]` keyed by `session_id` (UUID generated by frontend). Resets on page reload.
+- **Planner context**: last 2 turns from `recent` + `summary` injected into planner user prompt
+- **Final LLM context**: last 2 turns + `summary` injected into final user prompt alongside today's date
+- **Compression**: fires every 5 turns. Haiku call via `services/memory.py::compress_history()` (max 400 tokens, `cache_system=True`). After compression: `summary` updated, `recent` trimmed to last 1 turn as overlap.
 
-## End Behavior & Follow-up
+## End Behavior & Follow-up ✓
 
-- `services/end.py::is_end_message` — keyword check (exact phrase + substring) on user input. END_WORDS: bye, thanks, thank you, that's all, no thanks, nope, all good, ok.
-- `detect_end(query, recent)` — if keyword match, calls Haiku with `END_DETECTION` prompt to confirm intent. Returns `bool` via `EndBehaviorClassification` Pydantic model.
-- If `detect_end` returns True, `orchestrate` short-circuits before planner call and returns a graceful closing message.
-- `generate_followups(query, recent)` — Haiku call using `FOLLOW_UP` prompt. Generates 3 suggested follow-up questions. Reserved for UI phase (not called from CLI).
+- `services/end.py::is_end_message` — keyword check (exact phrase + substring). END_WORDS: bye, thanks, thank you, that's all, no thanks, nope, all good, ok.
+- `detect_end(query, recent)` — calls Haiku with `END_DETECTION` prompt if keyword match. Returns `bool` via `EndBehaviorClassification`.
+- Handled in `routes/ask.py` before calling `orchestrate`. If ending: generates follow-ups, yields `{type: "ended", follow_ups: [...]}` SSE event. History NOT updated (so follow-up questions resume from pre-goodbye context).
+- `generate_followups(query, recent)` — Haiku call, returns list of 3 strings. Frontend renders as clickable chips that pre-fill the input box.
+
+## SSE Streaming ✓
+
+- `services/llm.py::stream_llm()` — wraps `client.messages.stream()`, yields text chunks as Claude generates them
+- `services/final.py::final_output()` — generator, `yield from stream_llm(...)`
+- `services/coach.py::orchestrate()` — generator yielding tuples: `("status", text)` before blocking tool calls, `("chunk", text)` for response tokens, `("done", hist)` at end
+- `routes/ask.py` wraps `orchestrate` in a `StreamingResponse` generator that formats tuples as SSE events (`data: {...}\n\n`)
+- Frontend reads stream via `fetch` + `ReadableStream`, appends chunks in real-time to the chat bubble
 
 ---
 
@@ -849,14 +886,15 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 
 ### Phase 4 — Agent + Output (Week 2, Mon–Tue)
 
-9. **Final call + end behaviour + follow-ups** ✓ — keyword detection + Haiku confirmation for end behavior; follow-up generation stubbed for UI phase; conversation history + compression every 5 turns
-10. **Remaining tools** — Plan Creation → Update Plan → Clear Plan → Get Race Results
-11. **Server side** — FastAPI routes wired up, webhook handler live, Render/Railway deploy
+9. **Final call + end behaviour + follow-ups** ✓ — keyword detection + Haiku confirmation; follow-up chips rendered in frontend; conversation history + Haiku compression every 5 turns
+10. **SSE streaming** ✓ — `stream_llm()` + `final_output` as generator + `orchestrate` as generator + `StreamingResponse` route; status events between tool calls
+11. **Server side** ✓ — FastAPI + CORS + StaticFiles; `routes/ask.py` (SSE), `routes/activities.py` (health, sync, weather endpoints)
+12. **Remaining tools** — Get Race Results → Plan Creation → Update Plan → Clear Plan → Get Plan
 
-### Phase 5 — Frontend (Weekend 2)
+### Phase 5 — Frontend ✓
 
-12. **Design** — wireframes via Pencil.ai
-13. **Frontend implementation** — vibe code initial build, manually edit + refine
+13. **Design** — single-file `static/index.html` served from FastAPI
+14. **Frontend implementation** ✓ — health chart, activity card, weather widget, chatbot with SSE streaming, follow-up chips, Garmin sync popover
 
 ### Phase 6 — Launch Prep
 

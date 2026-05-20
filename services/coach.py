@@ -7,6 +7,7 @@ from services.sql_selector import execute_query
 from services.pacing import _time_to_mins, pacing_calculator
 from services.course_details import get_course_details
 from services.memory import compress_history
+from services.guardrails import input_check
 from datetime import date, timedelta
 from models.planner import History
 from pathlib import Path
@@ -86,6 +87,12 @@ def orchestrate(user_query, user_id, hist = None):
     debug = "--debug" in sys.argv
 
     hist = hist or History()
+
+    b, s = input_check(user_query)
+    if b:
+        yield("chunk", s)
+        yield("done", hist)
+        return 
     
     recent_context = "\n".join(f"{m['role']}: {m['content']}" for m in hist.recent[-4:])
     planner_prompt = f"User query: {user_query}"
@@ -119,12 +126,17 @@ def orchestrate(user_query, user_id, hist = None):
                 tool_results["garmin_sync"] = f"Error running garmin_sync: {e}"
 
         for tool in planner_response.tools:
-            if tool.name != "garmin_sync":
-                name = tool.name.strip()
+            name = tool.name.strip()
+            if name not in TOOL_REGISTRY:
+                continue
+            if name != "garmin_sync":
                 try:
                     tool_results[name] = call_tool(name, tool.args, user_id)
                 except Exception as e:
                     tool_results[name] = f"Error running {name}: {e}"
+        if not tool_results:
+            planner_response.path = "no_tools"
+
     if debug:
         print("Tool results:", tool_results, file=sys.stderr)
 

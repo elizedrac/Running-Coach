@@ -30,6 +30,7 @@
         .sync-default-btn:hover { background: #ede8e2; }
         .sync-go-btn { flex: 1; background: #c4614a; border: none; border-radius: 8px; padding: 8px; font-size: 12px; color: white; cursor: pointer; font-weight: 500; }
         .sync-go-btn:hover { background: #b0523c; }
+        .sync-error { font-size: 11px; color: #c4614a; margin-top: 8px; display: none; }
 
         /* ── Layout ── */
         .main { display: grid; grid-template-columns: 1fr 600px; gap: 16px; padding: 12px 16px; align-items: start; }
@@ -165,6 +166,7 @@
                     <label>End date</label>
                     <input type="date" id="sync-end"/>
                 </div>
+                <div class="sync-error" id="sync-error"></div>
                 <div class="sync-actions">
                     <button class="sync-default-btn" onclick="setDefaultDates()">Last 7 days</button>
                     <button class="sync-go-btn" onclick="runSync()">Sync</button>
@@ -446,10 +448,21 @@ function setDefaultDates() {
     document.getElementById('sync-end').value   = localToday();
 }
 
+function syncValidationError(msg) {
+    const el = document.getElementById('sync-error');
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+}
+
 async function runSync() {
     const start = document.getElementById('sync-start').value;
     const end   = document.getElementById('sync-end').value;
-    if (!start || !end) { alert('Please enter both dates.'); return; }
+    const today = localToday();
+
+    if (!start || !end) { syncValidationError('Please enter both dates.'); return; }
+    if (end > today)    { syncValidationError('End date cannot be in the future.'); return; }
+    if (start > end)    { syncValidationError('Start date must be before end date.'); return; }
+    syncValidationError('');
     document.getElementById('sync-popover').classList.remove('open');
     const btn = document.getElementById('sync-btn');
     btn.textContent = 'Syncing...';

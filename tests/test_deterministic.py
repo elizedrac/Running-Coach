@@ -381,7 +381,7 @@ def test_sql_selector_keeps_raw_fetcher_alone(mock_select, mock_get_activities):
 
 # ── pacing tests ─────────────────────────────────────────────────────────────
 from services.pacing import (
-    _time_to_mins, _min_to_pace, _get_pace, _equivalent_marathon_pace,
+    _time_to_mins, _min_to_pace, _get_pace, equivalent_marathon_pace,
     get_pacing_zones, pacing_calculator,
 )
 
@@ -417,7 +417,7 @@ def test_get_pace_invalid():
     assert _get_pace("3:30:00", -5) is None
 
 def test_equivalent_marathon_pace_from_5k():
-    pace = _equivalent_marathon_pace("20:00", 3.107)
+    pace = equivalent_marathon_pace("20:00", 3.107)
     assert 7.0 < pace < 7.5
 
 def test_pacing_zones_marathon():
@@ -745,6 +745,46 @@ def test_body_battery_returns_expected_keys(mock_health, mock_wavg, mock_activit
     mock_activities.return_value = []
     result = compute_body_battery("user1")
     assert {"body_battery", "sleep_hours", "stress", "hrv", "num_activities", "last_activity"} <= set(result)
+
+
+# ── input_check guardrail tests ──────────────────────────────────────────────
+
+from services.guardrails import input_check
+
+def test_input_check_empty_query():
+    blocked, _ = input_check("")
+    assert blocked
+
+def test_input_check_whitespace_only():
+    blocked, _ = input_check("   ")
+    assert blocked
+
+def test_input_check_too_short():
+    blocked, _ = input_check("a")
+    assert blocked
+
+def test_input_check_valid_query():
+    blocked, _ = input_check("what was my pace last week?")
+    assert not blocked
+
+def test_input_check_too_long():
+    long_query = " ".join(["word"] * 151)
+    blocked, msg = input_check(long_query)
+    assert blocked
+    assert "long" in msg.lower()
+
+def test_input_check_short_returns_message():
+    blocked, msg = input_check("hi")
+    assert not blocked  # 2 chars is fine — len("hi".strip()) == 2, not < 2
+
+def test_input_check_exactly_two_chars():
+    blocked, _ = input_check("ok")
+    assert not blocked  # boundary: len == 2 is allowed
+
+def test_input_check_150_words_allowed():
+    query = " ".join(["word"] * 150)
+    blocked, _ = input_check(query)
+    assert not blocked  # exactly 150 is fine
 
 
 # ── _weighted_avg tests ──────────────────────────────────────────────────────
