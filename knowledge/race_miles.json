@@ -1,0 +1,7 @@
+{
+    "5k": {"avg_miles": 25, "max_miles": 40, "lead_up": 10},
+    "10": {"avg_miles": 30, "max_miles": 50, "lead_up": 14},
+    "half": {"avg_miles": 40, "max_miles": 60, "lead_up": 18},
+    "marathon": {"avg_miles": 50, "max_miles": 70, "lead_up": 25}
+} 
+

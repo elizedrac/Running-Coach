@@ -179,6 +179,22 @@ create table activity_history (
 );
 ```
 
+### activity_splits (lap/interval data per activity — V2)
+```sql
+create table activity_splits (
+    id                  uuid default gen_random_uuid() primary key,
+    garmin_activity_id  bigint references activity_history(garmin_activity_id) on delete cascade,
+    split_num           integer,
+    split_type          text,                -- LAP | INTERVAL | WARMUP | COOLDOWN
+    distance_meters     float,
+    total_time          interval,
+    avg_pace            text,
+    avg_hr              float,
+    max_hr              float,
+    created_at          timestamptz default now()
+);
+```
+
 ### health_history (one row per day; merges daily + sleep metrics)
 ```sql
 create table health_history (
@@ -916,6 +932,9 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 | Enhanced pacing calculator | McMillan/Vdot/Jack Daniels formulas, per workout type |
 | Embedding-based course RAG | pgvector in Supabase for similarity search on cached course data |
 | Multi-user support | Auth already in place, extend schema for multiple users |
+| Activity split data | `get_activity_splits(garmin_activity_id)` per activity during sync — lap-level data (split time, distance, pace, HR). New `activity_splits` table. Enables interval verification against plan, more accurate body battery, split analysis in chat. |
+| Heart rate zones (LTHR) | After race results are stored, use avg HR from race efforts as lactate threshold HR (Friel method). Build Friel zones from LTHR — more accurate than % max HR. |
+| Search cache persistence | Wire `web_search.py` to check/write `search_cache` Supabase table with topic-appropriate TTLs (7 days for race info). Currently uncached. |
 
 ---
 

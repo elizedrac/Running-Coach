@@ -369,9 +369,11 @@ async function loadActivity() {
     try {
         const res  = await fetch(`${API}/activities/recent?start_date=${localOffset(-7)}&end_date=${localToday()}`);
         const rows = await res.json();
-        const a    = rows && rows.length ? rows[rows.length - 1] : null;
+        const sorted = rows && rows.length ? rows.slice().sort((a, b) => a.calendar_date > b.calendar_date ? 1 : -1) : [];
+        const a    = sorted.length ? sorted[sorted.length - 1] : null;
         if (!a) { card.innerHTML = '<div class="card-title">Most Recent Activity</div><div class="placeholder-text">No recent activity found.</div>'; return; }
-        const date = new Date(a.calendar_date).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
+        const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
+        const date = new Date(+ay, +am - 1, +ad).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
         const type = a.activity_type
             ? a.activity_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
             : 'Run';
@@ -439,7 +441,7 @@ function toggleSyncPopover(e) {
     pop.classList.toggle('open');
     if (pop.classList.contains('open')) {
         document.getElementById('sync-end').value   = localToday();
-        document.getElementById('sync-start').value = localOffset(-1);
+        document.getElementById('sync-start').value = localToday();
     }
 }
 
