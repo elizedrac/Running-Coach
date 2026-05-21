@@ -129,6 +129,33 @@
         .plan-day-header.today { background: #c4614a; }
         .plan-placeholder { grid-column: span 7; text-align: center; padding: 28px; color: #bbb; font-size: 13px; border-top: 1px solid #f0ece6; }
 
+        /* ── Plan modal ── */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 300; align-items: center; justify-content: center; }
+        .modal-overlay.open { display: flex; }
+        .modal { background: white; border-radius: 16px; padding: 28px; width: 460px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .modal-title { font-size: 16px; font-weight: 600; }
+        .modal-close { background: none; border: none; font-size: 20px; color: #aaa; cursor: pointer; line-height: 1; }
+        .modal-close:hover { color: #1a1a1a; }
+        .modal-step-indicator { font-size: 12px; color: #aaa; margin-bottom: 20px; }
+        .modal-field { margin-bottom: 14px; }
+        .modal-field label { display: block; font-size: 12px; color: #777; margin-bottom: 5px; font-weight: 500; }
+        .modal-field input, .modal-field select { width: 100%; border: 1px solid #e0d8d0; border-radius: 8px; padding: 9px 12px; font-size: 13.5px; outline: none; color: #1a1a1a; }
+        .modal-field input:focus, .modal-field select:focus { border-color: #c4614a; }
+        .modal-days { display: flex; gap: 6px; flex-wrap: wrap; }
+        .day-chip { padding: 6px 12px; border: 1px solid #e0d8d0; border-radius: 20px; font-size: 12px; cursor: pointer; color: #555; transition: all 0.15s; user-select: none; }
+        .day-chip.selected { background: #c4614a; border-color: #c4614a; color: white; }
+        .modal-toggle { display: flex; gap: 0; border: 1px solid #e0d8d0; border-radius: 8px; overflow: hidden; }
+        .modal-toggle button { flex: 1; background: none; border: none; padding: 8px; font-size: 13px; cursor: pointer; color: #555; transition: all 0.15s; }
+        .modal-toggle button.active { background: #c4614a; color: white; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 22px; }
+        .modal-btn-secondary { flex: 1; background: #f5f0eb; border: none; border-radius: 8px; padding: 10px; font-size: 13px; cursor: pointer; color: #555; }
+        .modal-btn-primary { flex: 1; background: #c4614a; border: none; border-radius: 8px; padding: 10px; font-size: 13px; color: white; cursor: pointer; font-weight: 500; }
+        .modal-btn-primary:hover { background: #b0523c; }
+        .modal-error { font-size: 12px; color: #c4614a; margin-top: 8px; display: none; }
+        .create-plan-btn { background: #c4614a; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 500; margin-top: 8px; }
+        .create-plan-btn:hover { background: #b0523c; }
+
         /* ── Follow-up chips ── */
         .followup-chips { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-width: 90%; }
         .followup-chip { background: white; border: 1px solid #e0d8d0; border-radius: 16px; padding: 8px 14px; font-size: 13px; color: #555; cursor: pointer; text-align: left; transition: border-color 0.15s, color 0.15s; }
@@ -173,8 +200,8 @@
                 </div>
             </div>
         </div>
-        <button class="header-btn" onclick="notImplemented('Edit Race')">Edit Race</button>
-        <button class="header-btn" onclick="notImplemented('Edit Training Plan')">Edit Training Plan</button>
+        <button class="header-btn" onclick="openEditRaceModal()">Edit Race</button>
+        <button class="header-btn" onclick="openEditPrefsModal()">Edit Training Preferences</button>
         <button class="header-btn" onclick="notImplemented('Predictions')">Predictions</button>
     </div>
 </header>
@@ -264,6 +291,183 @@
             <button class="plan-view-btn" onclick="notImplemented('Race Plan')">View Full Month →</button>
         </div>
         <div class="plan-grid" id="plan-grid"></div>
+    </div>
+</div>
+
+<!-- Edit training preferences modal -->
+<div class="modal-overlay" id="edit-prefs-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">Edit Training Preferences</div>
+            <button class="modal-close" onclick="closeEditPrefsModal()">×</button>
+        </div>
+        <div class="modal-step-indicator" style="color:#aaa;font-size:12px;margin-bottom:20px">Update your training preferences</div>
+        <div class="modal-field">
+            <label>Days per week</label>
+            <input type="number" id="ep-days" min="1" max="7" placeholder="e.g. 4"/>
+        </div>
+        <div class="modal-field">
+            <label>Preferred training days</label>
+            <div class="modal-days" id="ep-pref-days">
+                <span class="day-chip" onclick="toggleDay(this)">Mon</span>
+                <span class="day-chip" onclick="toggleDay(this)">Tue</span>
+                <span class="day-chip" onclick="toggleDay(this)">Wed</span>
+                <span class="day-chip" onclick="toggleDay(this)">Thu</span>
+                <span class="day-chip" onclick="toggleDay(this)">Fri</span>
+                <span class="day-chip" onclick="toggleDay(this)">Sat</span>
+                <span class="day-chip" onclick="toggleDay(this)">Sun</span>
+            </div>
+        </div>
+        <div class="modal-field">
+            <label>Average miles/week</label>
+            <input type="number" id="ep-avg-miles" placeholder="e.g. 30" step="1"/>
+        </div>
+        <div class="modal-field">
+            <label>Max miles/week (peak week)</label>
+            <input type="number" id="ep-max-miles" placeholder="e.g. 45" step="1"/>
+        </div>
+        <div class="modal-field">
+            <label>Training style</label>
+            <div class="modal-toggle">
+                <button id="ep-toggle-miles" class="active" onclick="setEpTimeBased(false)">Mileage-based</button>
+                <button id="ep-toggle-time" onclick="setEpTimeBased(true)">Time-based</button>
+            </div>
+        </div>
+        <div class="modal-error" id="ep-error"></div>
+        <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="closeEditPrefsModal()">Cancel</button>
+            <button class="modal-btn-primary" onclick="saveEditedPrefs()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit race modal -->
+<div class="modal-overlay" id="edit-race-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">Edit Race</div>
+            <button class="modal-close" onclick="closeEditRaceModal()">×</button>
+        </div>
+        <div class="modal-step-indicator" style="color:#aaa;font-size:12px;margin-bottom:20px">Current race details</div>
+        <div class="modal-field">
+            <label>Race name</label>
+            <input type="text" id="er-race-name" placeholder="e.g. Boston Marathon"/>
+        </div>
+        <div class="modal-field">
+            <label>Race date</label>
+            <input type="date" id="er-race-date"/>
+        </div>
+        <div class="modal-field">
+            <label>Goal time</label>
+            <input type="text" id="er-goal-time" placeholder="HH:MM:SS"/>
+        </div>
+        <div class="modal-field">
+            <label>Distance</label>
+            <select id="er-distance" onchange="toggleEditCustomDistance(this.value)">
+                <option value="">Select distance</option>
+                <option value="3.107">5K</option>
+                <option value="6.214">10K</option>
+                <option value="13.1094">Half Marathon</option>
+                <option value="26.2188">Marathon</option>
+                <option value="custom">Custom</option>
+            </select>
+        </div>
+        <div class="modal-field" id="er-custom-distance-field" style="display:none">
+            <label>Distance in miles</label>
+            <input type="number" id="er-custom-miles" placeholder="e.g. 31.07" step="0.01"/>
+        </div>
+        <div class="modal-error" id="er-error"></div>
+        <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="closeEditRaceModal()">Cancel</button>
+            <button class="modal-btn-primary" onclick="saveEditedRace()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Plan creation modal -->
+<div class="modal-overlay" id="plan-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title" id="modal-title">Set Up Your Race</div>
+            <button class="modal-close" onclick="closePlanModal()">×</button>
+        </div>
+        <div class="modal-step-indicator" id="modal-step-indicator">Step 1 of 2</div>
+
+        <!-- Step 1: Race -->
+        <div id="plan-step-1">
+            <div class="modal-field">
+                <label>Race name</label>
+                <input type="text" id="p-race-name" placeholder="e.g. Boston Marathon"/>
+            </div>
+            <div class="modal-field">
+                <label>Race date</label>
+                <input type="date" id="p-race-date"/>
+            </div>
+            <div class="modal-field">
+                <label>Goal time</label>
+                <input type="text" id="p-goal-time" placeholder="HH:MM:SS"/>
+            </div>
+            <div class="modal-field">
+                <label>Distance</label>
+                <select id="p-distance" onchange="toggleCustomDistance(this.value)">
+                    <option value="">Select distance</option>
+                    <option value="3.107">5K</option>
+                    <option value="6.214">10K</option>
+                    <option value="13.1094">Half Marathon</option>
+                    <option value="26.2188">Marathon</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+            <div class="modal-field" id="custom-distance-field" style="display:none">
+                <label>Distance in miles</label>
+                <input type="number" id="p-custom-miles" placeholder="e.g. 31.07" step="0.01"/>
+            </div>
+            <div class="modal-error" id="step1-error"></div>
+            <div class="modal-actions">
+                <button class="modal-btn-secondary" onclick="closePlanModal()">Cancel</button>
+                <button class="modal-btn-primary" onclick="goToStep2()">Continue →</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Preferences -->
+        <div id="plan-step-2" style="display:none">
+            <div class="modal-field">
+                <label>Days per week</label>
+                <input type="number" id="p-days" min="1" max="7" placeholder="e.g. 4"/>
+            </div>
+            <div class="modal-field">
+                <label>Preferred training days</label>
+                <div class="modal-days" id="p-pref-days">
+                    <span class="day-chip" onclick="toggleDay(this)">Mon</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Tue</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Wed</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Thu</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Fri</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Sat</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Sun</span>
+                </div>
+            </div>
+            <div class="modal-field">
+                <label>Average miles/week</label>
+                <input type="number" id="p-avg-miles" placeholder="e.g. 30" step="1"/>
+            </div>
+            <div class="modal-field">
+                <label>Max miles/week (peak week)</label>
+                <input type="number" id="p-max-miles" placeholder="e.g. 45" step="1"/>
+            </div>
+            <div class="modal-field">
+                <label>Training style</label>
+                <div class="modal-toggle">
+                    <button id="toggle-miles" class="active" onclick="setTimeBased(false)">Mileage-based</button>
+                    <button id="toggle-time" onclick="setTimeBased(true)">Time-based</button>
+                </div>
+            </div>
+            <div class="modal-error" id="step2-error"></div>
+            <div class="modal-actions">
+                <button class="modal-btn-secondary" onclick="goToStep1()">← Back</button>
+                <button class="modal-btn-primary" onclick="submitPlan()">Create Plan</button>
+            </div>
+        </div>
     </div>
 </div>
 
@@ -420,7 +624,7 @@ function renderPlanGrid() {
     const todayIdx = TODAY === 0 ? 6 : TODAY - 1;
     grid.innerHTML = DAYS.map((d, i) =>
         `<div class="plan-day-header${i === todayIdx ? ' today' : ''}">${d}</div>`
-    ).join('') + `<div class="plan-placeholder">Training plan coming soon — ask your coach to create one!</div>`;
+    ).join('') + `<div class="plan-placeholder">No training plan yet.<br><button class="create-plan-btn" onclick="openPlanModal()">+ Create Training Plan</button></div>`;
 }
 
 // ── Garmin sync popover ───────────────────────────────────────────────────────
@@ -666,6 +870,221 @@ async function loadMetricBadges() {
             el.innerHTML += `<span>Body Battery: <strong>${Math.round(bb.body_battery)}</strong></span>`;
     } catch(e) { console.error('Body battery:', e); }
 }
+
+// ── Edit Preferences modal ────────────────────────────────────────────────────
+
+let _epTimeBased = false;
+
+function setEpTimeBased(val) {
+    _epTimeBased = val;
+    document.getElementById('ep-toggle-miles').classList.toggle('active', !val);
+    document.getElementById('ep-toggle-time').classList.toggle('active', val);
+}
+
+async function openEditPrefsModal() {
+    document.getElementById('ep-error').style.display = 'none';
+    try {
+        const res   = await fetch(`${API}/preferences`);
+        const prefs = await res.json();
+        if (prefs.days_per_week) document.getElementById('ep-days').value     = prefs.days_per_week;
+        if (prefs.avg_miles)     document.getElementById('ep-avg-miles').value = prefs.avg_miles;
+        if (prefs.max_miles)     document.getElementById('ep-max-miles').value = prefs.max_miles;
+        if (prefs.time_based != null) setEpTimeBased(prefs.time_based);
+        if (prefs.preferred_days) {
+            document.querySelectorAll('#ep-pref-days .day-chip').forEach(chip => {
+                chip.classList.toggle('selected', prefs.preferred_days.includes(chip.textContent));
+            });
+        }
+    } catch(e) { /* open with empty fields if no prefs yet */ }
+    document.getElementById('edit-prefs-modal').classList.add('open');
+}
+
+function closeEditPrefsModal() {
+    document.getElementById('edit-prefs-modal').classList.remove('open');
+}
+
+async function saveEditedPrefs() {
+    const post = (url, body) => fetch(`${API}${url}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const err  = document.getElementById('ep-error');
+    const days     = parseInt(document.getElementById('ep-days').value);
+    const avgMiles = parseFloat(document.getElementById('ep-avg-miles').value);
+    const maxMiles = parseFloat(document.getElementById('ep-max-miles').value);
+    const prefDays = [...document.querySelectorAll('#ep-pref-days .day-chip.selected')].map(d => d.textContent);
+
+    try {
+        const calls = [post('/preferences/time-based', {time_based: _epTimeBased})];
+        if (!isNaN(days))     calls.push(post('/preferences/total-days',    {days_per_week: days}));
+        if (!isNaN(avgMiles)) calls.push(post('/preferences/avg-miles',     {avg_miles: avgMiles}));
+        if (!isNaN(maxMiles)) calls.push(post('/preferences/max-miles',     {max_miles: maxMiles}));
+        if (prefDays.length)  calls.push(post('/preferences/preferred-days', {preferred_days: prefDays}));
+        await Promise.all(calls);
+        closeEditPrefsModal();
+        showToast('Training preferences updated', '#22c55e');
+    } catch(e) {
+        err.textContent = 'Something went wrong. Please try again.';
+        err.style.display = 'block';
+    }
+}
+
+document.getElementById('edit-prefs-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('edit-prefs-modal')) closeEditPrefsModal();
+});
+
+// ── Edit Race modal ───────────────────────────────────────────────────────────
+
+const DIST_TO_LABEL = {"3.107":"5K","6.214":"10K","13.1094":"Half Marathon","26.2188":"Marathon"};
+
+async function openEditRaceModal() {
+    document.getElementById('er-error').style.display = 'none';
+    try {
+        const res  = await fetch(`${API}/race`);
+        const race = await res.json();
+        document.getElementById('er-race-name').value  = race.race_type || '';
+        document.getElementById('er-goal-time').value  = race.goal_time || '';
+        if (race.race_date) {
+            document.getElementById('er-race-date').value = race.race_date.split('T')[0];
+        }
+        if (race.race_distance_miles) {
+            const key = Object.keys(DIST_TO_LABEL).find(k => Math.abs(parseFloat(k) - race.race_distance_miles) < 0.01);
+            if (key) {
+                document.getElementById('er-distance').value = key;
+            } else {
+                document.getElementById('er-distance').value = 'custom';
+                document.getElementById('er-custom-distance-field').style.display = 'block';
+                document.getElementById('er-custom-miles').value = race.race_distance_miles;
+            }
+        }
+    } catch(e) { /* open with empty fields if no race yet */ }
+    document.getElementById('edit-race-modal').classList.add('open');
+}
+
+function closeEditRaceModal() {
+    document.getElementById('edit-race-modal').classList.remove('open');
+}
+
+function toggleEditCustomDistance(val) {
+    document.getElementById('er-custom-distance-field').style.display = val === 'custom' ? 'block' : 'none';
+}
+
+async function saveEditedRace() {
+    const post = (url, body) => fetch(`${API}${url}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const err  = document.getElementById('er-error');
+    const distVal  = document.getElementById('er-distance').value;
+    const miles    = distVal === 'custom' ? parseFloat(document.getElementById('er-custom-miles').value) : parseFloat(distVal);
+    const raceName = document.getElementById('er-race-name').value.trim();
+    const goalTime = document.getElementById('er-goal-time').value.trim();
+    const raceDate = document.getElementById('er-race-date').value;
+
+    try {
+        const calls = [];
+        if (raceName) calls.push(post('/race/description', {race_description: raceName}));
+        if (goalTime) calls.push(post('/race/time',        {goal_time: goalTime}));
+        if (raceDate) calls.push(post('/race/date',        {race_date: raceDate}));
+        if (!isNaN(miles)) calls.push(post('/race/distance', {race_distance_miles: miles}));
+        await Promise.all(calls);
+        closeEditRaceModal();
+        showToast('Race updated', '#22c55e');
+    } catch(e) {
+        err.textContent = 'Something went wrong. Please try again.';
+        err.style.display = 'block';
+    }
+}
+
+document.getElementById('edit-race-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('edit-race-modal')) closeEditRaceModal();
+});
+
+// ── Plan modal ────────────────────────────────────────────────────────────────
+
+let _timeBased = false;
+
+function openPlanModal() {
+    document.getElementById('plan-modal').classList.add('open');
+    goToStep1();
+}
+
+function closePlanModal() {
+    document.getElementById('plan-modal').classList.remove('open');
+}
+
+function goToStep1() {
+    document.getElementById('plan-step-1').style.display = 'block';
+    document.getElementById('plan-step-2').style.display = 'none';
+    document.getElementById('modal-title').textContent = 'Set Up Your Race';
+    document.getElementById('modal-step-indicator').textContent = 'Step 1 of 2';
+}
+
+function goToStep2() {
+    const date = document.getElementById('p-race-date').value;
+    const dist = document.getElementById('p-distance').value;
+    const err  = document.getElementById('step1-error');
+    if (!date) { err.textContent = 'Please enter a race date.'; err.style.display = 'block'; return; }
+    if (!dist) { err.textContent = 'Please select a distance.'; err.style.display = 'block'; return; }
+    if (dist === 'custom' && !document.getElementById('p-custom-miles').value) {
+        err.textContent = 'Please enter the distance in miles.'; err.style.display = 'block'; return;
+    }
+    err.style.display = 'none';
+    document.getElementById('plan-step-1').style.display = 'none';
+    document.getElementById('plan-step-2').style.display = 'block';
+    document.getElementById('modal-title').textContent = 'Training Preferences';
+    document.getElementById('modal-step-indicator').textContent = 'Step 2 of 2';
+}
+
+function toggleCustomDistance(val) {
+    document.getElementById('custom-distance-field').style.display = val === 'custom' ? 'block' : 'none';
+}
+
+function toggleDay(el) {
+    el.classList.toggle('selected');
+}
+
+function setTimeBased(val) {
+    _timeBased = val;
+    document.getElementById('toggle-miles').classList.toggle('active', !val);
+    document.getElementById('toggle-time').classList.toggle('active', val);
+}
+
+async function submitPlan() {
+    const days = document.getElementById('p-days').value;
+    const err  = document.getElementById('step2-error');
+    if (!days) { err.textContent = 'Please enter days per week.'; err.style.display = 'block'; return; }
+    err.style.display = 'none';
+
+    const distVal = document.getElementById('p-distance').value;
+    const miles   = distVal === 'custom' ? parseFloat(document.getElementById('p-custom-miles').value) : parseFloat(distVal);
+    const prefDays = [...document.querySelectorAll('#p-pref-days .day-chip.selected')].map(d => d.textContent);
+
+    try {
+        const post = (url, body) => fetch(`${API}${url}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const goalTime = document.getElementById('p-goal-time').value.trim();
+        const raceName = document.getElementById('p-race-name').value.trim();
+        const avgMiles = parseFloat(document.getElementById('p-avg-miles').value);
+        const maxMiles = parseFloat(document.getElementById('p-max-miles').value);
+
+        const calls = [
+            post('/race/date',     {race_date: document.getElementById('p-race-date').value}),
+            post('/race/distance', {race_distance_miles: miles}),
+            post('/preferences/total-days',    {days_per_week: parseInt(days)}),
+            post('/preferences/time-based',    {time_based: _timeBased}),
+        ];
+        if (raceName)          calls.push(post('/race/description',        {race_description: raceName}));
+        if (goalTime)          calls.push(post('/race/time',               {goal_time: goalTime}));
+        if (!isNaN(avgMiles))  calls.push(post('/preferences/avg-miles',  {avg_miles: avgMiles}));
+        if (!isNaN(maxMiles))  calls.push(post('/preferences/max-miles',  {max_miles: maxMiles}));
+        if (prefDays.length)   calls.push(post('/preferences/preferred-days', {preferred_days: prefDays}));
+
+        await Promise.all(calls);
+        closePlanModal();
+        showToast('Race and preferences saved! Plan creation coming soon.', '#22c55e');
+    } catch(e) {
+        err.textContent = 'Something went wrong. Please try again.';
+        err.style.display = 'block';
+    }
+}
+
+document.getElementById('plan-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('plan-modal')) closePlanModal();
+});
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 loadHealthChart();

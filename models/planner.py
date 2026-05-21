@@ -33,6 +33,19 @@ class DataRequest(BaseModel):
     start_date: str = None
     end_date: str = None
 
+class RaceRequest(BaseModel):
+    race_description: str = None
+    goal_time: str = None
+    race_distance_miles: float = None
+    race_date: str = None
+
+class PreferencesRequest(BaseModel):
+    days_per_week: int = None
+    preferred_days: list = None
+    avg_miles: float = None
+    max_miles: float = None
+    time_based: bool = None
+
 @dataclass    
 class History:
     summary: str = ""

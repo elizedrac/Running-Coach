@@ -140,7 +140,7 @@ create table users (
 create table race (
     id                  uuid default gen_random_uuid() primary key,
     user_id             uuid references users(id) unique,
-    race_description    text,
+    race_type           text,
     goal_time           text,
     race_distance_miles integer,
     race_date           timestamptz,

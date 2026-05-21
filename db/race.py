@@ -21,9 +21,8 @@ def _set(user_id: str, col: str, val) -> dict:
         print(f"Error updating current race data: {e}")
         return {"status": "fail"}
 
-
-def set_race_description(user_id: str, race: str = None):
-    return _set(user_id, "race_description", race)
+def set_race_type(user_id: str, race: str = None):
+    return _set(user_id, "race_type", race)
 
 def set_goal_time(user_id: str, time: str = None):
     return _set(user_id, "goal_time", time)
