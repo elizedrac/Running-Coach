@@ -1,6 +1,8 @@
 # Read/write for the training_preferences table (days per week, preferred days, mileage caps, time vs mile based).
 from db.client import get_supabase_client
 
+def update_preferences(user_id, field, value) -> dict:
+    return _set(user_id, field, value)
 
 def get_preferences(user_id: str) -> dict:
     client = get_supabase_client()

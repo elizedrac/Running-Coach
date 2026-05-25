@@ -471,7 +471,15 @@ Question arrives
 - Past/future dates beyond today gracefully rejected with explanation
 - Hourly data passed to final LLM; TOOL_SNIPPETS guide the response (best time window, treadmill suggestion, what to wear)
 
-### 8. Search Race Info
+### 8. Update Preferences ✓
+- Updates a single training preference field when the user explicitly asks
+- Fields: `days_per_week` (int), `preferred_days` (list of day names), `avg_miles` (float), `max_miles` (float), `time_based` (bool)
+- Planner emits one `update_preferences` tool call per field; multiple changes in one message → multiple sequential calls
+- Writes via upsert on `training_preferences` table; returns `{"status": "success"}` or error dict
+- Final LLM confirms naturally ("Done, I've updated your training to 5 days a week")
+- If update fails, user directed to Edit Training Preferences button
+
+### 9. Search Race Info
 - Web search for time-sensitive race data: qualifying standards, registration dates/status, entry fees, lottery odds, race date
 - Do NOT rely on model knowledge for this — standards and dates change yearly
 - Always caveats results and directs user to verify on official race website
@@ -898,7 +906,7 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 
 6. **CLI implementation** — simple terminal interface to test LLM calls before building UI ✓
 7. **LLM flow implementation** — planner, tool routing, prompt snippets, final LLM call, coach orchestrator ✓
-8. **Tool implementation** — Get Weather ✓ → Query User Data ✓ → Garmin Sync ✓ → Trend Analysis ✓ → Body Battery ✓ → Training Load ✓ → Pacing Calculator ✓ → Get Course Details ✓ → Get Race Results → Plan tools
+8. **Tool implementation** — Get Weather ✓ → Query User Data ✓ → Garmin Sync ✓ → Trend Analysis ✓ → Body Battery ✓ → Training Load ✓ → Pacing Calculator ✓ → Get Course Details ✓ → Update Preferences ✓ → Get Race Results → Plan tools
 
 ### Phase 4 — Agent + Output (Week 2, Mon–Tue)
 

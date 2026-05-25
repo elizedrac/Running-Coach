@@ -877,6 +877,192 @@ def test_compute_load_high_acwr_when_spike(mock_get):
     assert result["acwr"] > 1.3  # above injury-risk threshold
 
 
+# ── update_preferences tests ─────────────────────────────────────────────────
+
+from db.preferences import update_preferences, get_preferences
+
+@patch("db.preferences.get_supabase_client")
+def test_update_preferences_days_per_week(mock_client):
+    chain = mock_client.return_value
+    chain.table.return_value.upsert.return_value.execute.return_value = MagicMock()
+    result = update_preferences("user1", "days_per_week", 5)
+    assert result == {"status": "success"}
+    chain.table.return_value.upsert.assert_called_once_with(
+        {"user_id": "user1", "days_per_week": 5}, on_conflict="user_id"
+    )
+
+@patch("db.preferences.get_supabase_client")
+def test_update_preferences_preferred_days(mock_client):
+    chain = mock_client.return_value
+    chain.table.return_value.upsert.return_value.execute.return_value = MagicMock()
+    result = update_preferences("user1", "preferred_days", ["MON", "WED", "FRI"])
+    assert result == {"status": "success"}
+
+@patch("db.preferences.get_supabase_client")
+def test_update_preferences_time_based(mock_client):
+    chain = mock_client.return_value
+    chain.table.return_value.upsert.return_value.execute.return_value = MagicMock()
+    result = update_preferences("user1", "time_based", True)
+    assert result == {"status": "success"}
+
+@patch("db.preferences.get_supabase_client")
+def test_update_preferences_db_error_returns_fail(mock_client):
+    mock_client.return_value.table.side_effect = Exception("db down")
+    result = update_preferences("user1", "days_per_week", 5)
+    assert result == {"status": "fail"}
+
+@patch("db.preferences.get_supabase_client")
+def test_get_preferences_returns_first_row(mock_client):
+    chain = mock_client.return_value
+    chain.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
+        {"user_id": "user1", "days_per_week": 4, "preferred_days": ["MON", "WED"]}
+    ]
+    result = get_preferences("user1")
+    assert result["days_per_week"] == 4
+    assert result["preferred_days"] == ["MON", "WED"]
+
+@patch("db.preferences.get_supabase_client")
+def test_get_preferences_empty_returns_empty_dict(mock_client):
+    chain = mock_client.return_value
+    chain.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
+    result = get_preferences("user1")
+    assert result == {}
+
+
+# ── db/plan tests ────────────────────────────────────────────────────────────
+
+from db.plan import (
+    get_current_plan, get_plan_id, get_plan_days, get_day_id,
+    get_plan_intervals, save_plan_intervals, save_plan_day, save_plan, delete_plan,
+)
+
+FAKE_PLAN = {"id": "plan-uuid", "user_id": "user1", "race_name": "marathon", "total_weeks": 16}
+FAKE_DAYS = [
+    {"id": "day-uuid-1", "plan_id": "plan-uuid", "plan_date": "2026-06-01", "week_number": 1, "workout_type": "EASY"},
+    {"id": "day-uuid-2", "plan_id": "plan-uuid", "plan_date": "2026-06-03", "week_number": 1, "workout_type": "INTERVAL"},
+]
+
+@patch("db.plan.get_supabase_client")
+def test_get_current_plan_returns_row(mock_client):
+    mock_client.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [FAKE_PLAN]
+    result = get_current_plan("user1")
+    assert result["id"] == "plan-uuid"
+
+@patch("db.plan.get_supabase_client")
+def test_get_current_plan_empty_returns_empty_dict(mock_client):
+    mock_client.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
+    result = get_current_plan("user1")
+    assert result == {}
+
+@patch("db.plan.get_current_plan", return_value={"id": "plan-uuid"})
+def test_get_plan_id_returns_id(mock_plan):
+    assert get_plan_id("user1") == "plan-uuid"
+
+@patch("db.plan.get_current_plan", return_value={})
+def test_get_plan_id_no_plan_returns_none(mock_plan):
+    assert get_plan_id("user1") is None
+
+
+# ── get_plan_days branching ───────────────────────────────────────────────────
+
+@patch("db.plan.get_supabase_client")
+def test_get_plan_days_by_week_number(mock_client):
+    chain = mock_client.return_value
+    chain.table.return_value.select.return_value.eq.return_value.eq.return_value.execute.return_value.data = FAKE_DAYS
+    result = get_plan_days("plan-uuid", week_number=1)
+    assert len(result) == 2
+    assert result[0]["week_number"] == 1
+
+@patch("db.plan.get_supabase_client")
+def test_get_plan_days_by_date_range(mock_client):
+    chain = mock_client.return_value
+    chain.table.return_value.select.return_value.eq.return_value.gte.return_value.lte.return_value.execute.return_value.data = [FAKE_DAYS[0]]
+    result = get_plan_days("plan-uuid", start_date="2026-06-01", end_date="2026-06-01")
+    assert len(result) == 1
+    assert result[0]["plan_date"] == "2026-06-01"
+
+@patch("db.plan.get_supabase_client")
+def test_get_plan_days_no_filter_returns_empty(mock_client):
+    result = get_plan_days("plan-uuid")
+    assert result == []
+
+@patch("db.plan.get_plan_days", return_value=[{"id": "day-uuid-1"}])
+def test_get_day_id_returns_id(mock_days):
+    assert get_day_id("plan-uuid", "2026-06-01") == "day-uuid-1"
+
+@patch("db.plan.get_plan_days", return_value=[])
+def test_get_day_id_no_match_returns_none(mock_days):
+    assert get_day_id("plan-uuid", "2026-06-01") is None
+
+
+# ── save_plan strips intervals and zips correctly ─────────────────────────────
+
+@patch("db.plan.save_plan_intervals")
+@patch("db.plan.save_plan_day")
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_race")
+def test_save_plan_strips_intervals_from_day_rows(mock_race, mock_client, mock_save_day, mock_save_intervals):
+    mock_race.return_value = {"race_type": "marathon", "race_date": "2026-10-01", "goal_time": "3:30:00"}
+    mock_client.return_value.table.return_value.upsert.return_value.execute.return_value.data = [{"id": "plan-uuid"}]
+    mock_save_day.return_value = [{"id": "day-uuid-1"}, {"id": "day-uuid-2"}]
+
+    days = [
+        {"plan_date": "2026-06-01", "workout_type": "EASY", "intervals": []},
+        {"plan_date": "2026-06-03", "workout_type": "INTERVAL", "intervals": [
+            {"interval_num": 1, "interval_type": "WARMUP"},
+            {"interval_num": 2, "interval_type": "WORK"},
+        ]},
+    ]
+    save_plan("user1", days)
+
+    inserted_days = mock_save_day.call_args[0][1]
+    assert all("intervals" not in d for d in inserted_days)
+
+@patch("db.plan.save_plan_intervals")
+@patch("db.plan.save_plan_day")
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_race")
+def test_save_plan_intervals_saved_with_correct_day_id(mock_race, mock_client, mock_save_day, mock_save_intervals):
+    mock_race.return_value = {"race_type": "marathon", "race_date": "2026-10-01", "goal_time": "3:30:00"}
+    mock_client.return_value.table.return_value.upsert.return_value.execute.return_value.data = [{"id": "plan-uuid"}]
+    mock_save_day.return_value = [{"id": "day-uuid-1"}, {"id": "day-uuid-2"}]
+
+    days = [
+        {"plan_date": "2026-06-01", "workout_type": "EASY", "intervals": []},
+        {"plan_date": "2026-06-03", "workout_type": "INTERVAL", "intervals": [
+            {"interval_num": 1, "interval_type": "WORK"},
+        ]},
+    ]
+    save_plan("user1", days)
+
+    mock_save_intervals.assert_called_once_with("day-uuid-2", [{"interval_num": 1, "interval_type": "WORK"}])
+
+@patch("db.plan.save_plan_intervals")
+@patch("db.plan.save_plan_day")
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_race")
+def test_save_plan_no_intervals_skips_interval_save(mock_race, mock_client, mock_save_day, mock_save_intervals):
+    mock_race.return_value = {"race_type": "marathon", "race_date": "2026-10-01", "goal_time": "3:30:00"}
+    mock_client.return_value.table.return_value.upsert.return_value.execute.return_value.data = [{"id": "plan-uuid"}]
+    mock_save_day.return_value = [{"id": "day-uuid-1"}]
+
+    days = [{"plan_date": "2026-06-01", "workout_type": "EASY", "intervals": []}]
+    save_plan("user1", days)
+    mock_save_intervals.assert_not_called()
+
+@patch("db.plan.get_supabase_client")
+def test_delete_plan_success(mock_client):
+    mock_client.return_value.table.return_value.delete.return_value.eq.return_value.execute.return_value = MagicMock()
+    result = delete_plan("user1")
+    assert result == {"status": "success"}
+
+@patch("db.plan.get_supabase_client")
+def test_delete_plan_error_returns_fail(mock_client):
+    mock_client.return_value.table.side_effect = Exception("db down")
+    result = delete_plan("user1")
+    assert result == {"status": "fail"}
+
+
 # ── end behavior tests ───────────────────────────────────────────────────────
 
 from services.end import is_end_message, detect_end

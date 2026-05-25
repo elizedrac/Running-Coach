@@ -8,6 +8,7 @@ from services.pacing import _time_to_mins, pacing_calculator
 from services.course_details import get_course_details
 from services.memory import compress_history
 from services.guardrails import input_check
+from db.preferences import update_preferences
 from datetime import date, timedelta
 from models.planner import History
 from pathlib import Path
@@ -30,6 +31,7 @@ TOOL_REGISTRY = {
     "trend_analysis": _query_data,
     "pacing_calculator": pacing_calculator,
     "get_course_details": get_course_details,
+    "update_preferences": update_preferences,
 }
 
 def call_tool(name: str, args: dict, user_id: str):
@@ -144,7 +146,8 @@ def orchestrate(user_query, user_id, hist = None):
     full_history = "\n".join(p for p in [hist.summary, recent_turns] if p)
 
     today_label = date.today().strftime("%A, %B %d %Y")
-    prompt = f"Today is {today_label}. Original user query: {user_query}, convo history: {full_history}"
+    context = f"\n\n[Conversation context]\n{full_history}" if full_history else ""
+    prompt = f"Today is {today_label}. Answer the user's most recent question: {user_query}{context}"
     
     full_response = []
     for chunk in final_output(prompt, planner_response, tool_results):

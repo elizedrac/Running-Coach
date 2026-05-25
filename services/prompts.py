@@ -22,6 +22,7 @@ TOOL_METADATA = {
     "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
     "get_race_results":   "Look up the user's finishing time in a specific race via Athlinks.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
+    "update_preferences": "Update a specific training preference when the user explicitly asks to change it — days per week, preferred training days, mileage targets, or time vs mileage based training.",
 }
 
 def build_planner_system() -> str:
@@ -63,6 +64,7 @@ Args contracts (only include args listed here):
     # start_date/end_date default to last 14 days if not specified. For trend questions, keep window ≤ 31 days.
     # prev_start/prev_end: Always include when querying "this week" data — set prev_start={last_week_monday.isoformat()}, prev_end={last_sunday.isoformat()} so the comparison is week-over-week, not the default 30-day shift which would find no data.
 - pacing_calculator: {{"goal_time": "HH:MM:SS or MM:SS", "distance": float (only in miles NOT km), "race_type": "string (optional)"}} if no distance is given, identify from race_type only from one of these options: {", ".join(RACE_DISTANCES_KNOWLEDGE.keys())}. Otherwise, leave blank.
+- update_preferences: {{"field": "days_per_week|preferred_days|avg_miles|max_miles|time_based", "value": <new value — int for days_per_week, list of day names for preferred_days, float for miles, bool for time_based>}}
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {{
@@ -127,6 +129,7 @@ TOOL_SNIPPETS = {
                           "- `current_easy_pace`: easy pace derived from the user's CURRENT VO2 max (~70% effort, ACSM formula). Compare to the goal-derived `easy_pace`: if they're close (within ~30s), the goal is well-matched to current fitness; if goal `easy_pace` is much slower than current_easy_pace, the goal is conservative; if goal `easy_pace` is much faster than current_easy_pace, the goal is aggressive and may not be realistic. Mention this comparison when relevant (e.g. user asks 'is this realistic?' or you spot a notable mismatch). May be null if no VO2 data available.",
     "get_weather":        "The weather API is only capable of fetching current day weather + 12 hour forecasts. Reference this data naturally when answering the user or advising them if they should run and when the best time is and give reasoning grounded in data (be sure to consider the 'feels like' as well). Suggest treadmill if conditions are poor (ie. too hot/humid (above 75°F), too cold (below 32°F)), or rainy). If they do prefer to go outside, suggest the best time window and what to wear based on the forecast. If they ask for weather data either from the past or more than 12 hours in the future, gracefully explain the limitations of the API and provide advice based on the current conditions.",
     "get_race_results":   "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",
+    "update_preferences": "Confirm the preference was updated naturally — e.g. 'Done, I've updated your training to 5 days a week.' If the update failed, let the user know and suggest using the Edit Training Preferences button at the top of the page.",
     "get_course_details": "Returns {{'query': <semantic label of what was extracted>, 'details': <3-5 sentence course summary>}}. Use `details` to answer the user, covering elevation, terrain, key sections, logistics. Connect to pacing strategy when relevant (e.g. 'go out conservative if there are early climbs'). Flag major climbs / technical sections. Lead with the direct answer if the user asked something specific. IMPORTANT: if `query` doesn't closely match what the user actually asked, caveat the response (e.g. 'I found general course info but not specifics on your question').",
     "query_data":         "Query results are provided — could be raw health/activity rows, trend comparisons (current vs previous window), training load (ACWR), or recovery readiness (body battery). Always ground your response in specific data points. \n\n"
                           "TIMEFRAMES: NEVER use vague words like 'this period' or 'last period'. Always name the timeframe explicitly using the actual dates or natural labels: 'this week (May 7-13)' vs 'the same week last month (Apr 7-13)', 'last 14 days' vs 'the 14 days before', etc. If the comparison window was 30 days back, say 'compared to the same X-day window 30 days earlier'. If the user explicitly asked for week-over-week, say 'this week vs last week' with dates.\n\n"
