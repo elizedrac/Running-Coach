@@ -2,8 +2,10 @@
 from fastapi import APIRouter, HTTPException
 from db.race import get_race, set_race_type, set_goal_time, set_race_distance, set_race_date
 from db.preferences import get_preferences, set_days_per_week, set_preferred_days, set_avg_miles, set_max_miles, set_time_based
-# from db.plan import get_current_plan, get_plan_days, save_plan, save_plan_day, save_plan_intervals, delete_plan
+from db.plan import get_plan_days, get_plan_intervals, get_plan_id
+from services.plan import create_plan
 from models.planner import RaceRequest, PreferencesRequest
+from datetime import date, timedelta
 from dotenv import load_dotenv
 import os
 
@@ -101,4 +103,29 @@ def time_based(body: PreferencesRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# plan routers
+@router.post("/plan/create")
+def new_plan():
+    try:
+        result = create_plan(USER_ID)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
+@router.get("/plan/days")
+def get_plan_days_route(start_date: str = None, end_date: str = None, week_number: int = None):
+    start = start_date or (date.today() - timedelta(days=7)).isoformat()
+    end = end_date or date.today().isoformat()
+    try:
+        plan_id = get_plan_id(USER_ID)
+        result = get_plan_days(plan_id, start_date=start, end_date=end, week_number=week_number)
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/plan/intervals/{day_id}")
+def get_intervals(day_id: str):
+    try:
+        return get_plan_intervals(day_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))

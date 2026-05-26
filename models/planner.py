@@ -46,6 +46,25 @@ class PreferencesRequest(BaseModel):
     max_miles: float = None
     time_based: bool = None
 
+class PlanInterval(BaseModel):
+    interval_num: int
+    interval_type: Literal["WARMUP", "WORK", "REST", "COOLDOWN"]
+    distance: str = None       # e.g. "400m", "1mi"
+    target_pace: str = None    # e.g. "7:00/mi"
+    duration: str = None       # e.g. "10min" — alternative to distance
+    rest_duration: str = None  # e.g. "90sec jog"
+    notes: str = None
+
+class PlanDay(BaseModel):
+    plan_date: str             # YYYY-MM-DD
+    week_number: int
+    day_of_week: Literal["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
+    workout_type: Literal["EASY", "LONG", "TEMPO", "INTERVAL", "REST", "CROSS"]
+    target_miles: float = None
+    target_pace: str = None
+    notes: str = None
+    intervals: list[PlanInterval] = []
+
 @dataclass    
 class History:
     summary: str = ""

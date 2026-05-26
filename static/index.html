@@ -326,13 +326,6 @@
             <label>Max miles/week (peak week)</label>
             <input type="number" id="ep-max-miles" placeholder="e.g. 45" step="1"/>
         </div>
-        <div class="modal-field">
-            <label>Training style</label>
-            <div class="modal-toggle">
-                <button id="ep-toggle-miles" class="active" onclick="setEpTimeBased(false)">Mileage-based</button>
-                <button id="ep-toggle-time" onclick="setEpTimeBased(true)">Time-based</button>
-            </div>
-        </div>
         <div class="modal-error" id="ep-error"></div>
         <div class="modal-actions">
             <button class="modal-btn-secondary" onclick="closeEditPrefsModal()">Cancel</button>
@@ -454,13 +447,6 @@
             <div class="modal-field">
                 <label>Max miles/week (peak week)</label>
                 <input type="number" id="p-max-miles" placeholder="e.g. 45" step="1"/>
-            </div>
-            <div class="modal-field">
-                <label>Training style</label>
-                <div class="modal-toggle">
-                    <button id="toggle-miles" class="active" onclick="setTimeBased(false)">Mileage-based</button>
-                    <button id="toggle-time" onclick="setTimeBased(true)">Time-based</button>
-                </div>
             </div>
             <div class="modal-error" id="step2-error"></div>
             <div class="modal-actions">
@@ -873,14 +859,6 @@ async function loadMetricBadges() {
 
 // ── Edit Preferences modal ────────────────────────────────────────────────────
 
-let _epTimeBased = false;
-
-function setEpTimeBased(val) {
-    _epTimeBased = val;
-    document.getElementById('ep-toggle-miles').classList.toggle('active', !val);
-    document.getElementById('ep-toggle-time').classList.toggle('active', val);
-}
-
 async function openEditPrefsModal() {
     document.getElementById('ep-error').style.display = 'none';
     try {
@@ -889,7 +867,6 @@ async function openEditPrefsModal() {
         if (prefs.days_per_week) document.getElementById('ep-days').value     = prefs.days_per_week;
         if (prefs.avg_miles)     document.getElementById('ep-avg-miles').value = prefs.avg_miles;
         if (prefs.max_miles)     document.getElementById('ep-max-miles').value = prefs.max_miles;
-        if (prefs.time_based != null) setEpTimeBased(prefs.time_based);
         if (prefs.preferred_days) {
             document.querySelectorAll('#ep-pref-days .day-chip').forEach(chip => {
                 chip.classList.toggle('selected', prefs.preferred_days.includes(chip.textContent));
@@ -912,7 +889,7 @@ async function saveEditedPrefs() {
     const prefDays = [...document.querySelectorAll('#ep-pref-days .day-chip.selected')].map(d => d.textContent);
 
     try {
-        const calls = [post('/preferences/time-based', {time_based: _epTimeBased})];
+        const calls = [];
         if (!isNaN(days))     calls.push(post('/preferences/total-days',    {days_per_week: days}));
         if (!isNaN(avgMiles)) calls.push(post('/preferences/avg-miles',     {avg_miles: avgMiles}));
         if (!isNaN(maxMiles)) calls.push(post('/preferences/max-miles',     {max_miles: maxMiles}));
@@ -996,8 +973,6 @@ document.getElementById('edit-race-modal').addEventListener('click', e => {
 
 // ── Plan modal ────────────────────────────────────────────────────────────────
 
-let _timeBased = false;
-
 function openPlanModal() {
     document.getElementById('plan-modal').classList.add('open');
     goToStep1();
@@ -1038,12 +1013,6 @@ function toggleDay(el) {
     el.classList.toggle('selected');
 }
 
-function setTimeBased(val) {
-    _timeBased = val;
-    document.getElementById('toggle-miles').classList.toggle('active', !val);
-    document.getElementById('toggle-time').classList.toggle('active', val);
-}
-
 async function submitPlan() {
     const days = document.getElementById('p-days').value;
     const err  = document.getElementById('step2-error');
@@ -1065,7 +1034,6 @@ async function submitPlan() {
             post('/race/date',     {race_date: document.getElementById('p-race-date').value}),
             post('/race/distance', {race_distance_miles: miles}),
             post('/preferences/total-days',    {days_per_week: parseInt(days)}),
-            post('/preferences/time-based',    {time_based: _timeBased}),
         ];
         if (raceName)          calls.push(post('/race/description',        {race_description: raceName}));
         if (goalTime)          calls.push(post('/race/time',               {goal_time: goalTime}));

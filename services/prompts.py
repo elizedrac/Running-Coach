@@ -158,3 +158,216 @@ COURSE_DETAILS="""You are a JSON-only assistant. Return valid JSON, nothing else
 - "race": race type fully spelled out (e.g. "marathon", "half marathon", "10k") NOT abbreviations
 - "query": a short semantic label summarising what the user asked (used for search)
 - "details": a 3-5 sentence summary covering elevation, terrain/surface, notable sections, and race-day logistics"""
+
+_RACE_MILES_KNOWLEDGE = json.loads(
+    Path(__file__).parent.parent.joinpath("knowledge/race_miles.json").read_text()
+)
+
+CREATE_PLAN_SYSTEM = """You are a training plan generator for a running coach app. Use the available tools to gather context about the athlete, then call save_training_plan as your final action with the complete day-by-day plan.
+
+TOOL GUIDANCE:
+- pacing_calculator: call this first if goal_time and distance are available — you need pace zones to set correct target paces throughout the plan.
+- query_data (recent runs): call with query_intent "recent runs and weekly mileage", start_date 4 weeks ago. Use to calibrate starting mileage and see what the athlete has actually been doing.
+- query_data (training load): call with query_intent "training load and ACWR", no date args needed. Returns acute load (7d), chronic load (28d), and ACWR injury-risk ratio. Use to understand current training stress before building the plan — if ACWR is already high, start more conservatively.
+- query_data (pace trend): call with query_intent "average pace trend", start_date 4 weeks ago. Use to assess current fitness baseline.
+- get_course_details: call if course terrain is relevant (hilly → include hill workouts; trail → technical terrain work; flat and fast → pace-focused workouts).
+- save_training_plan: call last with the complete plan. This is the only output — do not return any text.
+
+TOOL ARGS:
+- pacing_calculator: {{"goal_time": "HH:MM:SS or MM:SS", "distance": <float, miles only>}}
+- query_data: {{"query_intent": "<description of what to fetch>", "start_date": "YYYY-MM-DD (omit for load/battery queries)", "end_date": "YYYY-MM-DD (omit for load/battery queries)"}}
+- get_course_details: {{"location": "city fully spelled out (e.g. Philadelphia NOT Philly)", "race": "race type fully spelled out (e.g. marathon NOT M)", "query": "elevation and terrain profile"}}
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+RACE DISTANCE KNOWLEDGE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+The user message contains a RACE DISTANCE KNOWLEDGE table. Match the athlete's race type to the closest entry (e.g. "Philadelphia Marathon" → "marathon"). Use its avg_miles, max_miles, lead_up, and max_weeks as fallback defaults when user preference data is missing.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+PLAN STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Generate one entry per calendar day from plan_start_date through race_date inclusive.
+
+TWO-PHASE PLANS (when total_weeks > max_weeks for this distance):
+- Phase 1 — Baseline (weeks 1 through total_weeks - max_weeks): build aerobic base. Allowed: EASY, LONG, TEMPO, aerobic runs. No INTERVAL workouts. Start mileage from lead_up (or recent avg from query_data if available). Ramp gently.
+- Phase 2 — Structured (remaining weeks): full training with all workout types including INTERVAL.
+- Output as one continuous plan — do not label or separate phases.
+
+MILEAGE PROGRESSION:
+- Starting mileage: use recent avg weekly miles from query_data if available; otherwise use lead_up from the distance knowledge table.
+- Ramp no more than 10-15% per week.
+- Never exceed max_miles ceiling (user preference takes priority over table default).
+- Recovery week every 3-4 weeks: cut ~20% from prior week's volume.
+- Peak week falls approximately 60% through the structured phase.
+
+TAPER (relative to peak mileage):
+- Marathon — 3-week taper: week -3 = peak × 0.85, week -2 = peak × 0.60, race week = peak × 0.40-0.50 (exclude race day)
+- Half marathon — ~2-week taper: last 2 weeks = peak × 0.50-0.70
+- 5K / 10K — ~1-week taper: last week = peak × 0.50-0.75
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+WEEKLY STRUCTURE
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+Preferred workout order within each week: INTERVAL → EASY → TEMPO → LONG
+
+Rules:
+- LONG run: last running day of the week (Saturday or Sunday preferred), always easy pace, highest mileage of the week.
+- INTERVAL and TEMPO are hard days — never on adjacent calendar days.
+- Place REST before or after hard efforts where possible.
+- EASY days act as buffers between hard days.
+- Remaining days after running days are REST or CROSS.
+- Honor preferred_days. If a preferred day conflicts with spacing rules, shift by one day.
+- When days_per_week is fewer than the full structure requires: prioritize LONG > TEMPO > INTERVAL > EASY.
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+WORKOUT DEFINITIONS
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+EASY: conversational, aerobic base. Target easy_pace from pacing zones.
+LONG: easy pace, week's longest run, builds endurance.
+TEMPO: lactate threshold, comfortably hard. Target threshold_pace. 20-40 min at effort.
+INTERVAL: VO2 max, short hard reps (400m-1200m) with jog recoveries. Always populate intervals[] with WARMUP, WORK reps, REST intervals between reps, and COOLDOWN.
+REST: no running.
+CROSS: non-impact aerobic (cycling, swimming, elliptical).
+
+INTERVAL structure:
+- WARMUP: 10-15min easy jog
+- WORK: the rep (scale rep count to week number and phase — more reps as plan progresses)
+- REST: jog recovery equal to rep duration for short reps, 50-75% for longer reps
+- COOLDOWN: 5-10min easy jog
+
+━━━━━━━━━━━━━━━━━━━━━━━━
+PRIORITIES
+━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Load safety: weekly ramp cap, no adjacent hard days, taper rules above.
+2. User preferences: days_per_week and preferred_days.
+3. Fallback defaults: race distance knowledge table."""
+
+
+PLAN_CREATOR_TOOLS = [
+    {
+        "name": "pacing_calculator",
+        "description": "Calculate training pace zones from a goal time and race distance. Returns easy, aerobic, marathon, threshold, interval, and repetition paces. Call this first.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_time": {"type": "string", "description": "Goal race time in HH:MM:SS or MM:SS"},
+                "distance":  {"type": "number", "description": "Race distance in miles"}
+            },
+            "required": ["goal_time", "distance"]
+        }
+    },
+    {
+        "name": "query_data",
+        "description": "Query the athlete's health and activity data. Call multiple times with different query_intent values: 'recent runs and weekly mileage' (start_date 4 weeks ago), 'training load and ACWR' (no dates needed), 'average pace trend' (start_date 4 weeks ago).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query_intent": {"type": "string", "description": "Description of what to fetch"},
+                "start_date":   {"type": "string", "description": "YYYY-MM-DD. Omit for training load / ACWR queries."},
+                "end_date":     {"type": "string", "description": "YYYY-MM-DD. Omit for training load / ACWR queries."}
+            },
+            "required": ["query_intent"]
+        }
+    },
+    {
+        "name": "get_course_details",
+        "description": "Get elevation profile and terrain info for the race course. Use to inform training specificity (hill workouts, trail running, etc.).",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {"type": "string", "description": "City or place, fully spelled out (e.g. 'Philadelphia' not 'Philly')"},
+                "race":     {"type": "string", "description": "Race type, fully spelled out (e.g. 'marathon' not 'M')"},
+                "query":    {"type": "string", "description": "What to look up, e.g. 'elevation and terrain profile'"}
+            },
+            "required": ["location", "race", "query"]
+        }
+    },
+    {
+        "name": "save_training_plan",
+        "description": "Save the complete generated training plan. Call this as your final action after gathering all context. Include every calendar day from plan start through race date.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "days": {
+                    "type": "array",
+                    "description": "Every calendar day from plan start through race date inclusive",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "plan_date":    {"type": "string", "description": "YYYY-MM-DD"},
+                            "week_number":  {"type": "integer"},
+                            "day_of_week":  {"type": "string", "enum": ["MON","TUE","WED","THU","FRI","SAT","SUN"]},
+                            "workout_type": {"type": "string", "enum": ["EASY","LONG","TEMPO","INTERVAL","REST","CROSS"]},
+                            "target_miles": {"type": ["number", "null"]},
+                            "target_pace":  {"type": ["string", "null"]},
+                            "notes":        {"type": ["string", "null"]},
+                            "intervals": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "interval_num":   {"type": "integer"},
+                                        "interval_type":  {"type": "string", "enum": ["WARMUP","WORK","REST","COOLDOWN"]},
+                                        "distance":       {"type": ["string", "null"]},
+                                        "target_pace":    {"type": ["string", "null"]},
+                                        "duration":       {"type": ["string", "null"]},
+                                        "rest_duration":  {"type": ["string", "null"]},
+                                        "notes":          {"type": ["string", "null"]}
+                                    },
+                                    "required": ["interval_num", "interval_type"]
+                                }
+                            }
+                        },
+                        "required": ["plan_date", "week_number", "day_of_week", "workout_type", "intervals"]
+                    }
+                }
+            },
+            "required": ["days"]
+        }
+    }
+]
+
+
+def build_create_plan_prompt(race: dict, prefs: dict, total_weeks: int) -> str:
+    today          = date.today().isoformat()
+    race_type      = race.get("race_type", "unknown")
+    race_date      = race.get("race_date", "")
+    goal_time      = race.get("goal_time", "not set")
+    race_dist      = race.get("race_distance_miles", "unknown")
+    days_per_week  = prefs.get("days_per_week") or 4
+    preferred_days = prefs.get("preferred_days") or []
+    avg_miles_user = prefs.get("avg_miles")
+    max_miles_user = prefs.get("max_miles")
+
+    user_miles_block = ""
+    if avg_miles_user or max_miles_user:
+        user_miles_block = "\nUSER MILEAGE OVERRIDES (take precedence over distance table defaults):"
+        if avg_miles_user:
+            user_miles_block += f"\n  current avg weekly miles: {avg_miles_user}"
+        if max_miles_user:
+            user_miles_block += f"\n  max weekly miles: {max_miles_user}"
+
+    return f"""Generate a training plan for the following athlete.
+
+RACE:
+  type: {race_type}
+  date: {race_date}
+  goal time: {goal_time}
+  distance: {race_dist} miles
+  plan start date: {today}
+  total weeks available: {total_weeks}
+
+USER PREFERENCES:
+  days per week: {days_per_week}
+  preferred training days: {preferred_days if preferred_days else "no preference"}
+{user_miles_block}
+
+RACE DISTANCE KNOWLEDGE (match race type to closest entry for fallback defaults):
+{json.dumps(_RACE_MILES_KNOWLEDGE, indent=2)}
+
+Use the available tools to gather pacing zones, recent training data, and course details as needed. Then call save_training_plan with the complete plan."""
