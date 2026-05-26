@@ -191,34 +191,55 @@ PLAN STRUCTURE
 Generate one entry per calendar day from plan_start_date through race_date inclusive.
 
 TWO-PHASE PLANS (when total_weeks > max_weeks for this distance):
-- Phase 1 — Baseline (weeks 1 through total_weeks - max_weeks): build aerobic base. Allowed: EASY, LONG, TEMPO, aerobic runs. No INTERVAL workouts. Start mileage from lead_up (or recent avg from query_data if available). Ramp gently.
-- Phase 2 — Structured (remaining weeks): full training with all workout types including INTERVAL.
+- Phase 1 — Baseline (weeks 1 through total_weeks - max_weeks): build aerobic base. Weekly mileage stays near lead_up from the distance knowledge table throughout — do NOT aggressively ramp in Phase 1. Allowed workouts: EASY, AEROBIC, LONG, TEMPO, STRENGTH. No INTERVAL. Vary workouts — avoid repeating the same type multiple days in a row. Include one TEMPO and one STRENGTH per week. Long run starts low (6-8 mi for marathon) and increases only gently, staying on the lower end.
+- Phase 2 — Structured (remaining weeks): full training with all workout types including INTERVAL. Ramp mileage using user preferences (avg_miles → max_miles). Easy runs ~6 miles.
 - Output as one continuous plan — do not label or separate phases.
 
 MILEAGE PROGRESSION:
-- Starting mileage: use recent avg weekly miles from query_data if available; otherwise use lead_up from the distance knowledge table.
-- Ramp no more than 10-15% per week.
+- Phase 1 weekly total: stay near lead_up miles. Ramp no more than 5-8% per week in Phase 1.
+- Phase 2 starting mileage: avg_miles from user preferences (or lead_up if not set). Ramp 10-15% per week toward max_miles.
 - Never exceed max_miles ceiling (user preference takes priority over table default).
 - Recovery week every 3-4 weeks: cut ~20% from prior week's volume.
-- Peak week falls approximately 60% through the structured phase.
+- Peak week falls approximately 60% through Phase 2 (structured phase).
+
+LONG RUN PROGRESSION:
+- Start at 6-8 miles for marathon, 4-6 miles for half marathon, 3-4 miles for 5K/10K.
+- Phase 1: increase by 0.5 miles every 2 weeks at most. Long runs should feel easy and controlled — stay in the 8-12 mile range for most of Phase 1 for a marathon plan. Do NOT push into 15+ mile territory during Phase 1.
+- Phase 2: increase by ~1 mile per week (or per non-recovery week). Ramp steadily toward peak.
+- Peak long run targets: marathon ~20 miles; half marathon ~10-12 miles; 10K ~7-8 miles; 5K ~5-6 miles.
+- MANDATORY: The plan MUST reach the peak long run distance before taper begins. Hit the peak 1-2 times (no more) in the 2-3 weeks leading into taper. Do not stall short of the peak, and do not repeat it more than twice.
+- After the peak week, long runs decrease each week through taper — this is the ONLY time long run is allowed to decrease outside recovery weeks.
+- LONG RUN MONOTONICITY — THIS IS A HARD CONSTRAINT: The long run distance must be flat or increasing every single week across the entire plan. The ONLY weeks where it may decrease are explicit taper weeks after the peak long run has been reached. Recovery weeks reduce OTHER workouts but NEVER the long run. If you find yourself writing a long run shorter than last week's (outside taper), you are making an error — increase it or keep it the same.
 
 TAPER (relative to peak mileage):
 - Marathon — 3-week taper: week -3 = peak × 0.85, week -2 = peak × 0.60, race week = peak × 0.40-0.50 (exclude race day)
 - Half marathon — ~2-week taper: last 2 weeks = peak × 0.50-0.70
 - 5K / 10K — ~1-week taper: last week = peak × 0.50-0.75
 
+PRE-RACE WEEK (marathon and half marathon only):
+- The week of the race should be very light. Replace the normal INTERVAL session with a light TEMPO (short, easy — e.g. 20 min at tempo pace with warmup/cooldown). No full interval sessions race week.
+- The day BEFORE the race: schedule an INTERVAL workout type with this exact structure:
+  - interval 1: WARMUP — 10 min easy jog
+  - interval 2: WORK — 10 min at goal race pace
+  - intervals 3-7: WORK — 5 × 100m strides/sprints (fast but controlled, not all-out), full rest between each
+  - interval 8: COOLDOWN — 5 min easy jog
+  - notes: "Race eve shakeout: loosen legs, confirm race pace feel. Keep effort controlled."
+
 ━━━━━━━━━━━━━━━━━━━━━━━━
 WEEKLY STRUCTURE
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
 Preferred workout order within each week: INTERVAL → EASY → TEMPO → LONG
+Include at least one STRENGTH session per week in every phase.
 
 Rules:
 - LONG run: last running day of the week (Saturday or Sunday preferred), always easy pace, highest mileage of the week.
 - INTERVAL and TEMPO are hard days — never on adjacent calendar days.
+- STRENGTH: schedule on a non-running day (REST day becomes STRENGTH) or after an easy run. Never the day before or after a hard effort (INTERVAL or TEMPO). If course is hilly, schedule a second STRENGTH per week and note hill-specific exercises (single-leg squats, step-ups, calf raises) in the notes field.
 - Place REST before or after hard efforts where possible.
-- EASY days act as buffers between hard days.
-- Remaining days after running days are REST or CROSS.
+- EASY days act as buffers between hard days — target ~6 miles in Phase 2. Phase 2 must never have more than one EASY run per week — use AEROBIC for additional non-hard running days instead.
+- In Phase 1, vary non-long-run days: mix EASY, AEROBIC, TEMPO, STRENGTH — avoid consecutive identical workout types.
+- Remaining days after running/strength days are REST or CROSS.
 - Honor preferred_days. If a preferred day conflicts with spacing rules, shift by one day.
 - When days_per_week is fewer than the full structure requires: prioritize LONG > TEMPO > INTERVAL > EASY.
 
@@ -226,26 +247,40 @@ Rules:
 WORKOUT DEFINITIONS
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
-EASY: conversational, aerobic base. Target easy_pace from pacing zones.
-LONG: easy pace, week's longest run, builds endurance.
-TEMPO: lactate threshold, comfortably hard. Target threshold_pace. 20-40 min at effort.
-INTERVAL: VO2 max, short hard reps (400m-1200m) with jog recoveries. Always populate intervals[] with WARMUP, WORK reps, REST intervals between reps, and COOLDOWN.
-REST: no running.
+EASY: conversational pace, aerobic base. Target easy_pace from pacing zones. ~6 miles in Phase 2.
+AEROBIC: comfortably hard aerobic effort, aerobic_pace from pacing zones. Good Phase 1 variety run.
+LONG: easy pace, week's longest run, builds endurance. Progresses each week per LONG RUN PROGRESSION above.
+TEMPO: lactate threshold. Set target_pace to threshold_pace. Do NOT use intervals[] for TEMPO. Notes must be ONLY: "10 min easy warmup, 5 min easy cooldown". Do not describe the tempo segment or mention pace in notes — target_pace and target_miles already convey that information.
+INTERVAL: See INTERVAL SESSION VARIETY below. Always populate intervals[] with WARMUP, WORK reps, REST intervals between reps, and COOLDOWN. Set target_pace to interval_pace as baseline.
+STRENGTH: gym or bodyweight strength session. No running. Use notes to describe exercises (e.g. "squats, lunges, deadlifts, core"). For hilly courses add hill-specific work (single-leg squats, step-ups, calf raises).
+REST: no running, no structured exercise.
 CROSS: non-impact aerobic (cycling, swimming, elliptical).
 
-INTERVAL structure:
-- WARMUP: 10-15min easy jog
-- WORK: the rep (scale rep count to week number and phase — more reps as plan progresses)
-- REST: jog recovery equal to rep duration for short reps, 50-75% for longer reps
-- COOLDOWN: 5-10min easy jog
+INTERVAL SESSION VARIETY — rotate through these types across the plan, NEVER repeating the same session two weeks in a row:
+
+1. Yasso 800s — 800m reps at interval_pace, equal jog recovery. STRICT LIMIT: use this session type at most TWICE in the entire plan. Do not exceed two Yasso sessions total.
+2. Race-pace miles — e.g. 5 × 1 mile at goal race pace, 400m jog recovery between. Good for marathon/half specificity.
+3. Pyramid — ascending then descending distances, e.g. 400-600-800-1000-800-600-400m. Pace must shift meaningfully with each step: 400m near repetition_pace, 600m near interval_pace, 800m between interval and threshold, 1000m near threshold_pace — then mirror back down. Each segment should be 15-20 sec/mi different from the adjacent one. Equal jog recoveries between segments.
+4. Cruise intervals — 3-5 × 1 mile at threshold_pace, 60-90 sec standing rest. Less intense, good for earlier Phase 2 weeks.
+5. Short speed — 6-10 × 200-400m at repetition_pace (faster than interval_pace), full rest (90 sec-2 min). Good late Phase 2 for leg turnover.
+6. Long reps — 3-4 × 1200m-1600m at slightly slower than interval_pace (between threshold and interval), 2-3 min jog recovery. Good mid-Phase 2.
+7. Broken tempo — 2 × 15-20 min at threshold_pace, 3 min easy jog between. Bridges TEMPO and INTERVAL.
+
+Scale rep count and total volume with week number — fewer reps early, more reps as plan progresses toward peak. Use notes to describe the session type and paces clearly.
+
+INTERVAL intervals[] structure:
+- interval 1: WARMUP — 10-15 min easy jog
+- intervals 2..N: alternating WORK and REST
+- final: COOLDOWN — 5-10 min easy jog
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
 PRIORITIES
 ━━━━━━━━━━━━━━━━━━━━━━━━
 
 1. Load safety: weekly ramp cap, no adjacent hard days, taper rules above.
-2. User preferences: days_per_week and preferred_days.
-3. Fallback defaults: race distance knowledge table."""
+2. Long run monotonicity: long run is flat or increasing every week — NEVER decreasing except during taper. This overrides all other considerations including recovery weeks.
+3. User preferences: days_per_week and preferred_days.
+4. Fallback defaults: race distance knowledge table."""
 
 
 PLAN_CREATOR_TOOLS = [
@@ -302,7 +337,7 @@ PLAN_CREATOR_TOOLS = [
                             "plan_date":    {"type": "string", "description": "YYYY-MM-DD"},
                             "week_number":  {"type": "integer"},
                             "day_of_week":  {"type": "string", "enum": ["MON","TUE","WED","THU","FRI","SAT","SUN"]},
-                            "workout_type": {"type": "string", "enum": ["EASY","LONG","TEMPO","INTERVAL","REST","CROSS"]},
+                            "workout_type": {"type": "string", "enum": ["EASY","AEROBIC","LONG","TEMPO","INTERVAL","STRENGTH","REST","CROSS"]},
                             "target_miles": {"type": ["number", "null"]},
                             "target_pace":  {"type": ["string", "null"]},
                             "notes":        {"type": ["string", "null"]},

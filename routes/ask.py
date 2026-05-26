@@ -44,3 +44,8 @@ def ask(body: AskRequest):
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
+@router.delete("/session/{session_id}")
+def clear_session(session_id: str):
+    session_memory.pop(session_id, None)
+    return {"status": "cleared"}

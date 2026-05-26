@@ -2,7 +2,7 @@
 from fastapi import APIRouter, HTTPException
 from db.race import get_race, set_race_type, set_goal_time, set_race_distance, set_race_date
 from db.preferences import get_preferences, set_days_per_week, set_preferred_days, set_avg_miles, set_max_miles, set_time_based
-from db.plan import get_plan_days, get_plan_intervals, get_plan_id
+from db.plan import get_plan_days, get_plan_intervals, get_plan_id, delete_plan
 from services.plan import create_plan
 from models.planner import RaceRequest, PreferencesRequest
 from datetime import date, timedelta
@@ -110,6 +110,7 @@ def new_plan():
         result = create_plan(USER_ID)
         return result
     except Exception as e:
+        import traceback; traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/plan/days")
@@ -129,3 +130,11 @@ def get_intervals(day_id: str):
         return get_plan_intervals(day_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/plan")
+def remove_plan():
+    try:
+        return delete_plan(USER_ID)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+

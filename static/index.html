@@ -163,6 +163,44 @@
 
         /* ── Resize handle hint ── */
         .chat-card::after { content: ''; display: block; height: 4px; background: linear-gradient(to right, #f0ece6, #e0d8d0, #f0ece6); border-radius: 2px; margin-top: 4px; cursor: ns-resize; flex-shrink: 0; }
+
+        /* ── Plan day cells ── */
+        .plan-day-cell { padding: 10px 6px; text-align: center; cursor: pointer; border-right: 1px solid #f0ece6; border-top: 1px solid #f0ece6; transition: background 0.15s; min-height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; }
+        .plan-day-cell:last-child { border-right: none; }
+        .plan-day-cell:hover { background: #f9f6f3; }
+        .plan-day-cell.today { background: #fff8f6; }
+        .plan-day-miles { font-size: 12px; font-weight: 500; color: #1a1a1a; }
+        .plan-day-pace  { font-size: 11px; color: #888; }
+        .plan-day-notes { font-size: 10px; color: #bbb; }
+
+        /* ── Workout type badges ── */
+        .workout-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; letter-spacing: 0.04em; }
+        .badge-EASY     { background: #dcfce7; color: #16a34a; }
+        .badge-AEROBIC  { background: #cffafe; color: #0e7490; }
+        .badge-LONG     { background: #dbeafe; color: #1d4ed8; }
+        .badge-TEMPO    { background: #fef3c7; color: #d97706; }
+        .badge-INTERVAL { background: #fee2e2; color: #dc2626; }
+        .badge-STRENGTH { background: #fce7f3; color: #be185d; }
+        .badge-REST     { background: #f3f4f6; color: #9ca3af; }
+        .badge-CROSS    { background: #ede9fe; color: #7c3aed; }
+
+        /* ── Plan generation progress bar ── */
+        .plan-generating { padding: 28px; text-align: center; }
+        .plan-generating-label { font-size: 13px; color: #555; margin-bottom: 12px; }
+        .plan-progress-track { background: #f0ece6; border-radius: 99px; height: 6px; overflow: hidden; }
+        .plan-progress-fill  { height: 100%; background: #c4614a; border-radius: 99px; width: 0%; transition: width 0.8s ease; }
+        .plan-generating-sub { font-size: 11px; color: #bbb; margin-top: 8px; }
+
+        /* ── Plan week nav ── */
+        .plan-week-nav  { display: flex; align-items: center; gap: 10px; }
+        .plan-week-btn  { background: none; border: 1px solid #e0d8d0; border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 13px; color: #555; transition: border-color 0.15s; }
+        .plan-week-btn:hover { border-color: #c4614a; color: #c4614a; }
+        .plan-week-label { font-size: 13px; color: #555; min-width: 160px; text-align: center; }
+
+        /* ── Interval table ── */
+        .interval-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 14px; }
+        .interval-table th { background: #f5f0eb; padding: 7px 10px; text-align: left; font-weight: 600; font-size: 11px; color: #777; }
+        .interval-table td { padding: 7px 10px; border-top: 1px solid #f0ece6; vertical-align: middle; }
     </style>
 </head>
 <body>
@@ -248,7 +286,15 @@
                 </svg>
                 Chatbot
             </div>
-            <div class="online-badge"><div class="online-dot"></div> Online</div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <div class="online-badge"><div class="online-dot"></div> Online</div>
+                <button onclick="clearChat()" title="Clear chat" style="background:none;border:none;cursor:pointer;padding:4px;color:#bbb;font-size:12px;display:flex;align-items:center;gap:4px;">
+                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                    Clear
+                </button>
+            </div>
         </div>
 
         <div class="chat-messages" id="chat-messages"></div>
@@ -286,11 +332,35 @@
                 <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="#1a1a1a" stroke-width="2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
                 </svg>
-                Weekly Training Plan
+                Training Plan
             </div>
-            <button class="plan-view-btn" onclick="notImplemented('Race Plan')">View Full Month →</button>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <div class="plan-week-nav">
+                    <button class="plan-week-btn" onclick="shiftWeek(-1)">← Prev</button>
+                    <span class="plan-week-label" id="plan-week-label"></span>
+                    <button class="plan-week-btn" onclick="shiftWeek(1)">Next →</button>
+                    <button class="plan-week-btn" id="jump-today-btn" onclick="jumpToToday()" style="display:none;">Today</button>
+                </div>
+                <button id="delete-plan-btn" onclick="confirmDeletePlan()" title="Delete plan" style="background:none;border:none;cursor:pointer;padding:4px;display:none;">
+                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#999" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+                    </svg>
+                </button>
+            </div>
         </div>
         <div class="plan-grid" id="plan-grid"></div>
+    </div>
+</div>
+
+<!-- Delete plan confirmation modal -->
+<div id="delete-plan-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;display:none;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:16px;padding:28px 24px;max-width:320px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+        <div style="font-size:17px;font-weight:600;margin-bottom:8px;">Delete training plan?</div>
+        <div style="font-size:14px;color:#666;margin-bottom:24px;">This will remove your current plan. You can generate a new one anytime.</div>
+        <div style="display:flex;gap:10px;justify-content:center;">
+            <button onclick="closeDeleteModal()" style="flex:1;padding:10px;border:1px solid #ddd;border-radius:10px;background:#fff;cursor:pointer;font-size:14px;">Cancel</button>
+            <button onclick="deletePlan()" style="flex:1;padding:10px;border:none;border-radius:10px;background:#e53935;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">Delete</button>
+        </div>
     </div>
 </div>
 
@@ -457,9 +527,23 @@
     </div>
 </div>
 
+<!-- Day detail modal -->
+<div class="modal-overlay" id="day-modal">
+    <div class="modal" style="max-width:520px;width:90vw">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title" id="day-modal-title"></div>
+                <div style="font-size:12px;color:#aaa;margin-top:3px" id="day-modal-date"></div>
+            </div>
+            <button class="modal-close" onclick="closeDayModal()">×</button>
+        </div>
+        <div id="day-modal-body"></div>
+    </div>
+</div>
+
 <script>
 const API   = "http://localhost:8000";
-const SID   = crypto.randomUUID();
+let   SID   = crypto.randomUUID();
 const DAYS  = ["M","T","W","T","F","S","S"];
 const TODAY = new Date().getDay();
 let   abortController = null;
@@ -762,6 +846,12 @@ function createCoachMessage() {
     return div.querySelector('.msg-bubble');
 }
 
+async function clearChat() {
+    await fetch(`${API}/session/${SID}`, { method: 'DELETE' });
+    SID = crypto.randomUUID();
+    document.getElementById('chat-messages').innerHTML = '';
+}
+
 async function sendMessage() {
     const input = document.getElementById('chat-input');
     const text  = input.value.trim();
@@ -973,9 +1063,43 @@ document.getElementById('edit-race-modal').addEventListener('click', e => {
 
 // ── Plan modal ────────────────────────────────────────────────────────────────
 
-function openPlanModal() {
+async function openPlanModal() {
     document.getElementById('plan-modal').classList.add('open');
     goToStep1();
+
+    const DIST_OPTIONS = [3.107, 6.214, 13.1094, 26.2188];
+
+    try {
+        const [race, prefs] = await Promise.all([
+            fetch(`${API}/race`).then(r => r.json()),
+            fetch(`${API}/preferences`).then(r => r.json())
+        ]);
+
+        if (race.race_type)  document.getElementById('p-race-name').value  = race.race_type;
+        if (race.race_date)  document.getElementById('p-race-date').value  = race.race_date.split('T')[0];
+        if (race.goal_time)  document.getElementById('p-goal-time').value  = race.goal_time;
+
+        if (race.race_distance_miles) {
+            const dist = parseFloat(race.race_distance_miles);
+            const match = DIST_OPTIONS.find(o => Math.abs(o - dist) < 0.01);
+            if (match) {
+                document.getElementById('p-distance').value = match;
+            } else {
+                document.getElementById('p-distance').value = 'custom';
+                document.getElementById('p-custom-miles').value = dist;
+                document.getElementById('custom-distance-field').style.display = 'block';
+            }
+        }
+
+        if (prefs.days_per_week) document.getElementById('p-days').value      = prefs.days_per_week;
+        if (prefs.avg_miles)     document.getElementById('p-avg-miles').value  = prefs.avg_miles;
+        if (prefs.max_miles)     document.getElementById('p-max-miles').value  = prefs.max_miles;
+        if (prefs.preferred_days) {
+            document.querySelectorAll('#p-pref-days .day-chip').forEach(chip =>
+                chip.classList.toggle('selected', prefs.preferred_days.includes(chip.textContent))
+            );
+        }
+    } catch(e) { /* silently skip prefill if fetch fails */ }
 }
 
 function closePlanModal() {
@@ -1019,9 +1143,13 @@ async function submitPlan() {
     if (!days) { err.textContent = 'Please enter days per week.'; err.style.display = 'block'; return; }
     err.style.display = 'none';
 
-    const distVal = document.getElementById('p-distance').value;
-    const miles   = distVal === 'custom' ? parseFloat(document.getElementById('p-custom-miles').value) : parseFloat(distVal);
+    const distVal  = document.getElementById('p-distance').value;
+    const miles    = distVal === 'custom' ? parseFloat(document.getElementById('p-custom-miles').value) : parseFloat(distVal);
     const prefDays = [...document.querySelectorAll('#p-pref-days .day-chip.selected')].map(d => d.textContent);
+    const btn      = document.querySelector('#plan-step-2 .modal-btn-primary');
+
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
 
     try {
         const post = (url, body) => fetch(`${API}${url}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
@@ -1033,22 +1161,222 @@ async function submitPlan() {
         const calls = [
             post('/race/date',     {race_date: document.getElementById('p-race-date').value}),
             post('/race/distance', {race_distance_miles: miles}),
-            post('/preferences/total-days',    {days_per_week: parseInt(days)}),
+            post('/preferences/total-days', {days_per_week: parseInt(days)}),
         ];
-        if (raceName)          calls.push(post('/race/description',        {race_description: raceName}));
-        if (goalTime)          calls.push(post('/race/time',               {goal_time: goalTime}));
-        if (!isNaN(avgMiles))  calls.push(post('/preferences/avg-miles',  {avg_miles: avgMiles}));
-        if (!isNaN(maxMiles))  calls.push(post('/preferences/max-miles',  {max_miles: maxMiles}));
-        if (prefDays.length)   calls.push(post('/preferences/preferred-days', {preferred_days: prefDays}));
+        if (raceName)         calls.push(post('/race/description',        {race_description: raceName}));
+        if (goalTime)         calls.push(post('/race/time',               {goal_time: goalTime}));
+        if (!isNaN(avgMiles)) calls.push(post('/preferences/avg-miles',  {avg_miles: avgMiles}));
+        if (!isNaN(maxMiles)) calls.push(post('/preferences/max-miles',  {max_miles: maxMiles}));
+        if (prefDays.length)  calls.push(post('/preferences/preferred-days', {preferred_days: prefDays}));
 
         await Promise.all(calls);
+
         closePlanModal();
-        showToast('Race and preferences saved! Plan creation coming soon.', '#22c55e');
+        showPlanGenerating();
+
+        const planRes = await fetch(`${API}/plan/create`, { method: 'POST' });
+        hidePlanGenerating();
+
+        const planData = await planRes.json();
+        if (!planRes.ok || planData.status !== 'success') throw new Error(planData.detail || planData.status);
+        showToast('Training plan created!', '#22c55e');
+        _planWeekOffset = 0;
+        loadPlan();
     } catch(e) {
-        err.textContent = 'Something went wrong. Please try again.';
-        err.style.display = 'block';
+        hidePlanGenerating();
+        showToast('Failed to create plan. Please try again.', '#c4614a');
+        btn.disabled = false;
+        btn.textContent = 'Create Plan';
     }
 }
+
+// ── Plan display ──────────────────────────────────────────────────────────────
+
+let _progressInterval = null;
+
+function showPlanGenerating() {
+    const grid = document.getElementById('plan-grid');
+    grid.innerHTML = `<div class="plan-generating" style="grid-column:span 7">
+        <div class="plan-generating-label">Building your training plan...</div>
+        <div class="plan-progress-track"><div class="plan-progress-fill" id="plan-progress-fill"></div></div>
+        <div class="plan-generating-sub">Analyzing your race goal, fitness data, and course details</div>
+    </div>`;
+    // animate progress bar slowly up to ~90% over 3 minutes, never reaching 100 until done
+    let pct = 0;
+    _progressInterval = setInterval(() => {
+        pct = Math.min(pct + (90 - pct) * 0.015, 90);
+        const el = document.getElementById('plan-progress-fill');
+        if (el) el.style.width = pct + '%';
+    }, 800);
+}
+
+function hidePlanGenerating() {
+    clearInterval(_progressInterval);
+    _progressInterval = null;
+    const el = document.getElementById('plan-progress-fill');
+    if (el) el.style.width = '100%';
+}
+
+let _planWeekOffset = 0;
+let _planDays = {};
+const DOW_ORDER = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
+
+function getWeekMonday(offsetWeeks = 0) {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff + offsetWeeks * 7);
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+function isoFromDate(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+async function loadPlan() {
+    const grid   = document.getElementById('plan-grid');
+    const monday = getWeekMonday(_planWeekOffset);
+    const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
+
+    const fmt = d => d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+    document.getElementById('plan-week-label').textContent = `${fmt(monday)} – ${fmt(sunday)}`;
+
+    const todayDow     = (() => { const t = new Date().getDay(); return t === 0 ? 6 : t - 1; })();
+    const isCurrentWeek = _planWeekOffset === 0;
+
+    const headerHtml = DOW_ORDER.map((d, i) =>
+        `<div class="plan-day-header${isCurrentWeek && i === todayDow ? ' today' : ''}">${d[0]}</div>`
+    ).join('');
+
+    grid.innerHTML = headerHtml + `<div class="plan-placeholder">Loading...</div>`;
+
+    try {
+        const res  = await fetch(`${API}/plan/days?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`);
+        const days = await res.json();
+
+        if (!days || !days.length) {
+            if (_planWeekOffset === 0) {
+                grid.innerHTML = headerHtml + `<div class="plan-placeholder">No training plan yet.<br><button class="create-plan-btn" onclick="openPlanModal()">+ Create Training Plan</button></div>`;
+            } else {
+                grid.innerHTML = headerHtml + `<div class="plan-placeholder">No workouts scheduled for this week.</div>`;
+            }
+            return;
+        }
+
+        _planDays = {};
+        const dayMap = {};
+        days.forEach(d => { _planDays[d.id] = d; dayMap[d.day_of_week] = d; });
+
+
+        const cellsHtml = DOW_ORDER.map((dow, i) => {
+            const day    = dayMap[dow];
+            const today  = isCurrentWeek && i === todayDow;
+            if (!day) return `<div class="plan-day-cell${today ? ' today' : ''}"></div>`;
+            const type  = day.workout_type;
+            const miles = day.target_miles ? `${day.target_miles.toFixed(1)} mi` : '';
+            const pace  = day.target_pace  || '';
+            return `<div class="plan-day-cell${today ? ' today' : ''}" onclick="openDayModal('${day.id}')">
+                <div class="workout-badge badge-${type}">${type}</div>
+                ${miles ? `<div class="plan-day-miles">${miles}</div>` : ''}
+                ${pace  ? `<div class="plan-day-pace">${pace}</div>`  : ''}
+                ${type === 'INTERVAL' ? `<div class="plan-day-notes">tap for intervals</div>` : ''}
+            </div>`;
+        }).join('');
+
+        grid.innerHTML = headerHtml + cellsHtml;
+        document.getElementById('delete-plan-btn').style.display = 'block';
+    } catch(e) {
+        grid.innerHTML = headerHtml + `<div class="plan-placeholder">Could not load plan.</div>`;
+    }
+}
+
+function shiftWeek(dir) {
+    _planWeekOffset += dir;
+    document.getElementById('jump-today-btn').style.display = _planWeekOffset !== 0 ? 'inline-block' : 'none';
+    loadPlan();
+}
+
+function jumpToToday() {
+    _planWeekOffset = 0;
+    document.getElementById('jump-today-btn').style.display = 'none';
+    loadPlan();
+}
+
+function confirmDeletePlan() {
+    document.getElementById('delete-plan-modal').style.display = 'flex';
+}
+
+function closeDeleteModal() {
+    document.getElementById('delete-plan-modal').style.display = 'none';
+}
+
+async function deletePlan() {
+    closeDeleteModal();
+    await fetch('/plan', { method: 'DELETE' });
+    document.getElementById('delete-plan-btn').style.display = 'none';
+    _planWeekOffset = 0;
+    document.getElementById('jump-today-btn').style.display = 'none';
+    loadPlan();
+}
+
+async function openDayModal(dayId) {
+    const day = _planDays[dayId];
+    if (!day) return;
+
+    const modal  = document.getElementById('day-modal');
+    const body   = document.getElementById('day-modal-body');
+    const [y, m, d] = day.plan_date.split('-');
+    const dateStr = new Date(+y, +m-1, +d).toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'});
+
+    document.getElementById('day-modal-title').innerHTML =
+        `<span class="workout-badge badge-${day.workout_type}" style="font-size:13px;padding:4px 10px">${day.workout_type}</span>`;
+    document.getElementById('day-modal-date').textContent = dateStr;
+
+    let html = '';
+    if (day.target_miles) html += `<div class="stat-row"><span class="stat-label">Target Miles</span><span class="stat-value">${day.target_miles.toFixed(1)} mi</span></div>`;
+    if (day.target_pace)  html += `<div class="stat-row"><span class="stat-label">Target Pace</span><span class="stat-value">${day.target_pace}</span></div>`;
+    if (day.notes)        html += `<div style="font-size:13px;color:#555;margin-top:12px;line-height:1.5">${day.notes}</div>`;
+    if (!html)            html  = `<div class="placeholder-text" style="padding:12px 0">Rest day.</div>`;
+
+    body.innerHTML = html;
+    modal.classList.add('open');
+
+    if (day.workout_type === 'INTERVAL') {
+        body.innerHTML += `<div id="intervals-loading" style="font-size:12px;color:#aaa;margin-top:16px">Loading intervals...</div>`;
+        try {
+            const res       = await fetch(`${API}/plan/intervals/${day.id}`);
+            const intervals = await res.json();
+            document.getElementById('intervals-loading')?.remove();
+            if (intervals && intervals.length) {
+                const rows = intervals.map(iv => `
+                    <tr>
+                        <td>${iv.interval_num}</td>
+                        <td><span style="font-size:10px;font-weight:600;background:#f5f0eb;color:#555;padding:2px 6px;border-radius:8px">${iv.interval_type}</span></td>
+                        <td>${iv.distance || iv.duration || '—'}</td>
+                        <td>${iv.target_pace || '—'}</td>
+                        <td>${iv.rest_duration || '—'}</td>
+                    </tr>`).join('');
+                body.innerHTML += `
+                    <table class="interval-table">
+                        <thead><tr><th>#</th><th>Type</th><th>Dist / Duration</th><th>Pace</th><th>Recovery</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>`;
+            }
+        } catch(e) {
+            document.getElementById('intervals-loading')?.remove();
+            body.innerHTML += `<div style="font-size:12px;color:#aaa;margin-top:12px">Could not load intervals.</div>`;
+        }
+    }
+}
+
+function closeDayModal() {
+    document.getElementById('day-modal').classList.remove('open');
+}
+
+document.getElementById('day-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('day-modal')) closeDayModal();
+});
 
 document.getElementById('plan-modal').addEventListener('click', e => {
     if (e.target === document.getElementById('plan-modal')) closePlanModal();
@@ -1058,7 +1386,7 @@ document.getElementById('plan-modal').addEventListener('click', e => {
 loadHealthChart();
 loadActivity();
 loadWeather();
-renderPlanGrid();
+loadPlan();
 </script>
 </body>
 </html>

@@ -69,25 +69,30 @@ def save_plan(user_id, days: list):
     name = race.get("race_type")
     race_date = race.get("race_date")
     time = race.get("goal_time")
-    elapsed = date.fromisoformat(race.get("race_date")) - date.today()
+    elapsed = date.fromisoformat(race.get("race_date")[:10]) - date.today()
     weeks = elapsed.days // 7
 
     try:
         response = client.table("current_plan")\
             .upsert({"user_id": user_id, "race_name": name, "race_date": race_date, "goal_time": time, "total_weeks": weeks}, on_conflict="user_id")\
             .execute()
+        print(f"[save_plan] upsert current_plan: {response.data}")
 
         plan_id = response.data[0]["id"]
         day_rows = [{k: v for k, v in day.items() if k != "intervals"} for day in days]
         response_days = save_plan_day(plan_id, day_rows)
-        
+        print(f"[save_plan] inserted {len(response_days)} days")
+
         for og_day, in_day in zip(days, response_days):
             intervals = og_day.get("intervals", [])
             if intervals:
-                save_plan_intervals(in_day["id"], intervals)
+                result = save_plan_intervals(in_day["id"], intervals)
+                print(f"[save_plan] intervals for {in_day['id']}: {result}")
 
         return {"status": "success"}
     except Exception as e:
+        print(f"[save_plan] ERROR: {e}")
+        import traceback; traceback.print_exc()
         return {"status": "fail"}
 
 def delete_plan(user_id) -> dict:

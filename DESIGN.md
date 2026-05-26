@@ -250,7 +250,7 @@ create table plan_days (
     plan_date       date,
     week_number     integer,
     day_of_week     text,                                           -- MON | TUE | WED | etc
-    workout_type    text,                                           -- EASY | LONG | TEMPO | INTERVAL | REST | CROSS
+    workout_type    text,                                           -- EASY | AEROBIC | LONG | TEMPO | INTERVAL | STRENGTH | REST | CROSS
     target_miles    float,
     target_pace     text,                                           -- e.g. "8:30-8:45/mi"
     notes           text,

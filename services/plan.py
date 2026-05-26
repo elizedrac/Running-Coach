@@ -19,31 +19,37 @@ def create_plan(user_id: str) -> dict:
     race = get_race(user_id)
     prefs = get_preferences(user_id)
 
-    total_weeks = (date.fromisoformat(race["race_date"]) - date.today()).days // 7
+    total_weeks = (date.fromisoformat(race["race_date"][:10]) - date.today()).days // 7
 
     messages = [{"role": "user", "content": build_create_plan_prompt(race, prefs, total_weeks)}]
 
-    for _ in range(10):
-        response = client.messages.create(
+    for i in range(20):
+        with client.messages.stream(
             model="claude-opus-4-7",
             system=[{"type": "text", "text": CREATE_PLAN_SYSTEM, "cache_control": {"type": "ephemeral"}}],
             tools=PLAN_CREATOR_TOOLS,
             messages=messages,
-            max_tokens=16000
-        )
+            max_tokens=32768
+        ) as stream:
+            response = stream.get_final_message()
 
+        print(f"[plan] iter {i+1}: stop_reason={response.stop_reason}, blocks={[b.type for b in response.content]}")
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":
+            print(f"[plan] loop ended without save_training_plan, stop_reason={response.stop_reason}")
             break
 
         tool_results = []
         for block in response.content:
             if block.type != "tool_use":
                 continue
+            print(f"[plan] tool call: {block.name}")
             if block.name == "save_training_plan":
-                save_plan(user_id, block.input["days"])
-                return {"status": "success"}
+                print(f"[plan] save_training_plan called with {len(block.input.get('days', []))} days")
+                result = save_plan(user_id, block.input["days"])
+                print(f"[plan] save_plan result: {result}")
+                return result
             fn = PLAN_TOOL_REGISTRY.get(block.name)
             result = fn(user_id, **block.input) if fn else f"Tool {block.name} not found"
             tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(result)})
