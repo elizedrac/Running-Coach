@@ -8,6 +8,7 @@ from services.pacing import _time_to_mins, pacing_calculator
 from services.course_details import get_course_details
 from services.memory import compress_history
 from services.guardrails import input_check
+from db.plan import get_plan_days as get_plan, get_plan_id, get_current_plan
 from db.preferences import update_preferences
 from datetime import date, timedelta
 from models.planner import History
@@ -32,6 +33,7 @@ TOOL_REGISTRY = {
     "pacing_calculator": pacing_calculator,
     "get_course_details": get_course_details,
     "update_preferences": update_preferences,
+    "get_plan": get_plan,
 }
 
 def call_tool(name: str, args: dict, user_id: str):
@@ -53,6 +55,13 @@ def call_tool(name: str, args: dict, user_id: str):
 
         args["day_iso_start"] = start_date
         args["day_iso_end"] = end_date
+
+    if name == "get_plan":
+        if "start_date" not in args or "end_date" not in args:
+            today = date.today()
+            monday = today - timedelta(days=today.weekday())
+            args["start_date"] = monday.isoformat()
+            args["end_date"] = (monday + timedelta(days=6)).isoformat()
 
     if name == "pacing_calculator":
         if "distance" not in args or not args["distance"]:
@@ -133,7 +142,11 @@ def orchestrate(user_query, user_id, hist = None):
                 continue
             if name != "garmin_sync":
                 try:
-                    tool_results[name] = call_tool(name, tool.args, user_id)
+                    if name == 'get_plan':
+                        input_id = get_plan_id(user_id)
+                    else:
+                        input_id = user_id
+                    tool_results[name] = call_tool(name, tool.args, input_id)
                 except Exception as e:
                     tool_results[name] = f"Error running {name}: {e}"
         if not tool_results:
@@ -150,7 +163,7 @@ def orchestrate(user_query, user_id, hist = None):
     prompt = f"Today is {today_label}. Answer the user's most recent question: {user_query}{context}"
     
     full_response = []
-    for chunk in final_output(prompt, planner_response, tool_results):
+    for chunk in final_output(prompt, planner_response, tool_results, user_id):
         yield ("chunk", chunk)
         full_response.append(chunk)
 

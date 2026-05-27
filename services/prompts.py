@@ -14,13 +14,9 @@ RACE_DISTANCES_KNOWLEDGE = json.loads(
 TOOL_METADATA = {
     "garmin_sync":        "Sync latest Garmin activity and health data into the DB. Use if user mentions a recent run that may not be recorded yet or if user wants to update their data.",
     "query_data":         "Query the user's data — handles raw values, trend comparisons (improving/declining/stable), training load (ACWR / injury risk), and recovery readiness (body battery). Use for ANY question about steps, sleep, HRV, stress, runs, pace, mileage, HR, body battery, how they're feeling, whether to run, etc. The internal selector picks the right function based on intent.",
-    "create_plan":        "Generate a full week-by-week training plan leading to the user's target race date.",
-    "get_plan":           "Retrieve the user's current training plan for a given week.",
-    "clear_plan":         "Delete the user's active training plan.",
-    "update_plan":        "Modify the plan due to injury, a skipped workout, or schedule changes.",
+    "get_plan":           "Retrieve the user's current training plan for a date range. Use whenever the user asks about their training plan, upcoming workouts, what's on the schedule, this week's plan, a specific day's workout, etc. Defaults to the current week if no dates specified.",
     "pacing_calculator":  "Calculate target paces for easy, tempo, threshold, interval, and repetition workouts given a goal race time and distance. Use whenever the user asks about training paces, workout paces, or race pace for a goal time/distance — even if they only specify a distance (e.g. 'what's a good easy pace for a half marathon') OR only a goal time without distance. The system will prompt the user for any missing required args, so prefer invoking this tool over giving generic verbal advice.",
     "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
-    "get_race_results":   "Look up the user's finishing time in a specific race via Athlinks.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
     "update_preferences": "Update a specific training preference when the user explicitly asks to change it — days per week, preferred training days, mileage targets, or time vs mileage based training.",
 }
@@ -64,6 +60,7 @@ Args contracts (only include args listed here):
     # start_date/end_date default to last 14 days if not specified. For trend questions, keep window ≤ 31 days.
     # prev_start/prev_end: Always include when querying "this week" data — set prev_start={last_week_monday.isoformat()}, prev_end={last_sunday.isoformat()} so the comparison is week-over-week, not the default 30-day shift which would find no data.
 - pacing_calculator: {{"goal_time": "HH:MM:SS or MM:SS", "distance": float (only in miles NOT km), "race_type": "string (optional)"}} if no distance is given, identify from race_type only from one of these options: {", ".join(RACE_DISTANCES_KNOWLEDGE.keys())}. Otherwise, leave blank.
+- get_plan: {{"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}}  # default to current week: start_date={this_week_monday.isoformat()}, end_date={(this_week_monday + timedelta(days=6)).isoformat()}. Use the date interpretation rules above to set the range. For a specific day, set start_date = end_date = that date.
 - update_preferences: {{"field": "days_per_week|preferred_days|avg_miles|max_miles|time_based", "value": <new value — int for days_per_week, list of day names for preferred_days, float for miles, bool for time_based>}}
 
 Return ONLY valid JSON — no extra text, no markdown fences:
@@ -79,6 +76,7 @@ tools must be an empty list [] when path is not "tools"."""
 BASE_COACH = """You are an experienced, encouraging running coach. \
 You give specific, actionable advice grounded in the athlete's actual data. \
 Be concise. Never make up data you were not given. \
+Weeks start on Monday. Only label a date with a weekday name if you are completely certain of it — when in doubt, use the date itself (e.g. "May 18") rather than risk a wrong day name. \
 For conversational or transitional messages (e.g. "ok", "thanks", "got it", "one more question"), respond briefly and naturally — do not treat them as incomplete queries or ask the user to clarify. \
 Available data fields — health: stress, active_minutes, total_steps, sleep_score, total_sleep, rhr, total_kcal, vo2_max, hrv, body_battery (0-100 recovery score). \
 Activities: calories_burned, activity_type, miles, avg_hr, max_hr, total_time, average_pace. \
@@ -111,7 +109,7 @@ TOOL_SNIPPETS = {
     "garmin_sync":        "If the data says the user needs to enter a date range: do NOT say sync failed or that something went wrong. Simply ask the user which dates they'd like to sync (e.g. 'which dates would you like me to pull?') and mention they can also use the Garmin Sync button at the top of the page. "
                           "If the data has status='success': confirm their data is updated and they can ask about recent runs or health metrics. "
                           "If the data has status='error': acknowledge something went wrong and suggest using the Garmin Sync button.",
-    "get_plan":           "When presenting the plan: state the week number, list each day's workout type and target miles. Flag any hard days back-to-back.",
+    "get_plan":           "Data is a list of plan days. If the list is empty, the plan has no scheduled workouts for that period — say so directly (e.g. 'your plan doesn't cover that week' or 'your training plan started on X, so there are no planned workouts before then'). Do NOT say you can't find the data or that it's unavailable. The plan_overview block has race metadata including when the plan was created — use it to explain why a past period has no entries. If days are returned: for each day include date/day of week, workout type, target miles (if set), target pace (if set), and notes (if set). For INTERVAL days mention the session type from notes. For TEMPO days state the pace from target_pace. Keep it scannable — short list format.",
     "create_plan":        "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
     "update_plan":        "Acknowledge what changed and why. If injury severity was high, include a note to consult a medical professional.",
     "clear_plan":         "Confirm the plan was cleared and ask if the user wants to create a new one.",
@@ -158,6 +156,30 @@ COURSE_DETAILS="""You are a JSON-only assistant. Return valid JSON, nothing else
 - "race": race type fully spelled out (e.g. "marathon", "half marathon", "10k") NOT abbreviations
 - "query": a short semantic label summarising what the user asked (used for search)
 - "details": a 3-5 sentence summary covering elevation, terrain/surface, notable sections, and race-day logistics"""
+
+PLAN_CHECKER_SYSTEM = """You are a training plan validator for a running coach app. Review the provided plan and return ONLY valid JSON — no extra text, no markdown.
+
+Check for ALL of the following rules and report every violation found:
+
+HARD RULES (must never be broken):
+1. Adjacent hard days — INTERVAL or TEMPO must never fall on consecutive calendar days. A REST, EASY, AEROBIC, STRENGTH, or CROSS day must separate them.
+2. Long run monotonicity — long run distance must be flat or increasing every week through the plan. It may only decrease during taper weeks (the final weeks after peak mileage is reached). Recovery weeks cut other workouts but NOT the long run.
+3. Mileage ramp — weekly total mileage must not increase more than 20% week-over-week outside of the first week.
+4. Peak long run reached — the plan must include at least one long run at or near the target peak distance BEFORE taper begins: marathon ~20 mi, half marathon ~10-12 mi, 10K ~7-8 mi, 5K ~5-6 mi.
+5. Taper structure — after the peak week, overall weekly mileage must decrease each week through race day (no increases during taper).
+
+QUALITY RULES (flag if violated):
+6. Strength frequency — every week must include at least one STRENGTH day. Flag any week missing it.
+7. Interval variety — INTERVAL session type must not repeat in consecutive weeks. Flag if the same session type (e.g. Yasso 800s) appears back-to-back.
+8. Yasso cap — Yasso 800 sessions must appear at most twice in the entire plan. Flag if exceeded.
+9. Phase 2 easy runs — Phase 2 (structured phase) must never have more than one EASY run per week. Use AEROBIC for additional easy-effort days.
+10. Phase 1 long run — in Phase 1 (baseline phase), long runs must stay in the 8-12 mile range for marathon plans. Flag if any Phase 1 long run exceeds 13 miles.
+11. Peak long run repetition — peak distance long runs (within 1-2 miles of the maximum) should appear at most 2-3 times total. Flag if the same peak distance appears more than 3 times.
+
+Return ONLY:
+{"violations": ["clear description of each issue, including week number and specific values where relevant"]}
+
+Return {"violations": []} if no issues are found."""
 
 _RACE_MILES_KNOWLEDGE = json.loads(
     Path(__file__).parent.parent.joinpath("knowledge/race_miles.json").read_text()
@@ -207,7 +229,8 @@ LONG RUN PROGRESSION:
 - Phase 1: increase by 0.5 miles every 2 weeks at most. Long runs should feel easy and controlled — stay in the 8-12 mile range for most of Phase 1 for a marathon plan. Do NOT push into 15+ mile territory during Phase 1.
 - Phase 2: increase by ~1 mile per week (or per non-recovery week). Ramp steadily toward peak.
 - Peak long run targets: marathon ~20 miles; half marathon ~10-12 miles; 10K ~7-8 miles; 5K ~5-6 miles.
-- MANDATORY: The plan MUST reach the peak long run distance before taper begins. Hit the peak 1-2 times (no more) in the 2-3 weeks leading into taper. Do not stall short of the peak, and do not repeat it more than twice.
+- MANDATORY: The plan MUST reach the peak long run distance before taper begins. Hit the peak distance AT MOST 2 TIMES total — no more. Running 19-20 miles 3, 4, 5, or 6 times is WRONG and will be rejected. If you write the same peak distance 3 or more times you are making an error. Reach it once or twice, then taper immediately.
+- MARATHON TIMING: The peak long run (~20 miles) must fall approximately 3 weeks before race day — i.e. in the last week before the 3-week taper begins. Do not schedule the peak long run earlier than that.
 - After the peak week, long runs decrease each week through taper — this is the ONLY time long run is allowed to decrease outside recovery weeks.
 - LONG RUN MONOTONICITY — THIS IS A HARD CONSTRAINT: The long run distance must be flat or increasing every single week across the entire plan. The ONLY weeks where it may decrease are explicit taper weeks after the peak long run has been reached. Recovery weeks reduce OTHER workouts but NEVER the long run. If you find yourself writing a long run shorter than last week's (outside taper), you are making an error — increase it or keep it the same.
 
@@ -251,14 +274,14 @@ EASY: conversational pace, aerobic base. Target easy_pace from pacing zones. ~6 
 AEROBIC: comfortably hard aerobic effort, aerobic_pace from pacing zones. Good Phase 1 variety run.
 LONG: easy pace, week's longest run, builds endurance. Progresses each week per LONG RUN PROGRESSION above.
 TEMPO: lactate threshold. Set target_pace to threshold_pace. Do NOT use intervals[] for TEMPO. Notes must be ONLY: "10 min easy warmup, 5 min easy cooldown". Do not describe the tempo segment or mention pace in notes — target_pace and target_miles already convey that information.
-INTERVAL: See INTERVAL SESSION VARIETY below. Always populate intervals[] with WARMUP, WORK reps, REST intervals between reps, and COOLDOWN. Set target_pace to interval_pace as baseline.
+INTERVAL: See INTERVAL SESSION VARIETY below. Always populate intervals[] with WARMUP, WORK reps, REST intervals between reps, and COOLDOWN. Set target_pace to interval_pace as baseline. Always set target_miles to the estimated total distance of the session (warmup + all reps + cooldown) for mileage tracking purposes.
 STRENGTH: gym or bodyweight strength session. No running. Use notes to describe exercises (e.g. "squats, lunges, deadlifts, core"). For hilly courses add hill-specific work (single-leg squats, step-ups, calf raises).
 REST: no running, no structured exercise.
 CROSS: non-impact aerobic (cycling, swimming, elliptical).
 
 INTERVAL SESSION VARIETY — rotate through these types across the plan, NEVER repeating the same session two weeks in a row:
 
-1. Yasso 800s — 800m reps at interval_pace, equal jog recovery. STRICT LIMIT: use this session type at most TWICE in the entire plan. Do not exceed two Yasso sessions total.
+1. Yasso 800s — 800m reps at interval_pace, equal jog recovery. MANDATORY: include this session EXACTLY TWICE in the plan — once in early Phase 2 and once in late Phase 2 (4-6 weeks before taper). Do not skip it and do not exceed two sessions.
 2. Race-pace miles — e.g. 5 × 1 mile at goal race pace, 400m jog recovery between. Good for marathon/half specificity.
 3. Pyramid — ascending then descending distances, e.g. 400-600-800-1000-800-600-400m. Pace must shift meaningfully with each step: 400m near repetition_pace, 600m near interval_pace, 800m between interval and threshold, 1000m near threshold_pace — then mirror back down. Each segment should be 15-20 sec/mi different from the adjacent one. Equal jog recoveries between segments.
 4. Cruise intervals — 3-5 × 1 mile at threshold_pace, 60-90 sec standing rest. Less intense, good for earlier Phase 2 weeks.

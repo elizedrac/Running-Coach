@@ -4,9 +4,11 @@ from services.llm import client
 from services.pacing import pacing_calculator
 from services.sql_selector import execute_query
 from services.course_details import get_course_details
+from services.guardrails import challenger
 from db.race import get_race
 from db.preferences import get_preferences
 from db.plan import save_plan
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date
 
 PLAN_TOOL_REGISTRY = {
@@ -23,7 +25,8 @@ def create_plan(user_id: str) -> dict:
 
     messages = [{"role": "user", "content": build_create_plan_prompt(race, prefs, total_weeks)}]
 
-    for i in range(20):
+    validated = False
+    for i in range(10):
         with client.messages.stream(
             model="claude-opus-4-7",
             system=[{"type": "text", "text": CREATE_PLAN_SYSTEM, "cache_control": {"type": "ephemeral"}}],
@@ -40,19 +43,36 @@ def create_plan(user_id: str) -> dict:
             print(f"[plan] loop ended without save_training_plan, stop_reason={response.stop_reason}")
             break
 
-        tool_results = []
-        for block in response.content:
-            if block.type != "tool_use":
-                continue
+        save_block = next((b for b in response.content if b.type == "tool_use" and b.name == "save_training_plan"), None)
+        other_blocks = [b for b in response.content if b.type == "tool_use" and b.name != "save_training_plan"]
+
+        def run_tool(block):
             print(f"[plan] tool call: {block.name}")
-            if block.name == "save_training_plan":
-                print(f"[plan] save_training_plan called with {len(block.input.get('days', []))} days")
-                result = save_plan(user_id, block.input["days"])
-                print(f"[plan] save_plan result: {result}")
-                return result
             fn = PLAN_TOOL_REGISTRY.get(block.name)
             result = fn(user_id, **block.input) if fn else f"Tool {block.name} not found"
-            tool_results.append({"type": "tool_result", "tool_use_id": block.id, "content": str(result)})
+            return {"type": "tool_result", "tool_use_id": block.id, "content": str(result)}
+
+        tool_results = []
+        if other_blocks:
+            with ThreadPoolExecutor() as executor:
+                tool_results = list(executor.map(run_tool, other_blocks))
+
+        if save_block:
+            days = save_block.input["days"]
+            print(f"[plan] save_training_plan called with {len(days)} days")
+            violations = [] if validated else challenger(days, user_id, race.get("race_type", ""))
+            if violations:
+                validated = True
+                print(f"[plan] violations found: {violations}")
+                tool_results.append({
+                    "type": "tool_result",
+                    "tool_use_id": save_block.id,
+                    "content": "Plan not saved. Fix these issues and call save_training_plan again:\n" + "\n".join(f"- {v}" for v in violations)
+                })
+            else:
+                result = save_plan(user_id, days)
+                print(f"[plan] save_plan result: {result}")
+                return result
 
         messages.append({"role": "user", "content": tool_results})
 

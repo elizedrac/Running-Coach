@@ -10,7 +10,7 @@ load_dotenv()
 DEFAULT_MODEL = "claude-sonnet-4-6"
 MAX_RETRIES = 3
 
-client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"), timeout=600.0)
 
 
 def call_llm(system_prompt: str, user_prompt: str = None, model: str = DEFAULT_MODEL, max_tokens: int = 1024, cache_system: bool = False) -> str:

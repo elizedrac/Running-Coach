@@ -1,6 +1,6 @@
 # Hardcoded queries for the activity_history table (per-activity rows from Garmin).
 import sys
-from datetime import datetime
+from datetime import datetime, date as date_type
 
 from db.client import get_supabase_client
 from services.cache import get_cached, set_cached
@@ -17,6 +17,18 @@ def insert_activities(rows: list[dict]) -> None:
         if "--debug" in sys.argv: print(f"Inserted/updated {len(rows)} activities into activity_history.")
     except Exception as e:
         print(f"Error inserting activities: {e}")
+
+def get_avg_weekly_miles(user_id: str, weeks: int = 4) -> float:
+    end = date_type.today().isoformat()
+    start = date_type.fromisoformat(end)
+    from datetime import timedelta
+    start = (date_type.today() - timedelta(weeks=weeks)).isoformat()
+    activities = get_activities(user_id, start, end)
+    running = [a for a in activities if a.get("distance_miles")]
+    if not running:
+        return 0.0
+    total = sum(a["distance_miles"] for a in running)
+    return round(total / weeks, 1)
 
 def get_activities(user_id: str, start_date: str, end_date: str) -> list[dict]:
     if end_date < MIN_DATE:

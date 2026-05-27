@@ -183,6 +183,13 @@
         .badge-STRENGTH { background: #fce7f3; color: #be185d; }
         .badge-REST     { background: #f3f4f6; color: #9ca3af; }
         .badge-CROSS    { background: #ede9fe; color: #7c3aed; }
+        .month-cell { min-height: 64px; border-radius: 10px; padding: 6px; background: #fafafa; border: 1px solid #f0ece6; cursor: pointer; transition: background 0.15s; }
+        .month-cell:hover { background: #f5f0eb; }
+        .month-cell.empty { background: transparent; border-color: transparent; cursor: default; }
+        .month-cell.today { border-color: #1a1a1a; }
+        .month-cell-date { font-size: 11px; color: #999; margin-bottom: 4px; }
+        .month-cell.today .month-cell-date { color: #1a1a1a; font-weight: 600; }
+        .month-day-header { font-size: 11px; color: #bbb; text-align: center; padding-bottom: 4px; font-weight: 500; }
 
         /* ── Plan generation progress bar ── */
         .plan-generating { padding: 28px; text-align: center; }
@@ -328,11 +335,14 @@
 <div class="plan-section">
     <div class="plan-card">
         <div class="plan-header">
-            <div class="plan-title">
-                <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="#1a1a1a" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
-                </svg>
-                Training Plan
+            <div style="display:flex;align-items:center;gap:10px;">
+                <div class="plan-title">
+                    <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="#1a1a1a" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    Training Plan
+                </div>
+                <button id="month-view-btn" onclick="openMonthModal()" style="background:none;border:1px solid #ddd;border-radius:8px;cursor:pointer;padding:4px 10px;font-size:12px;color:#666;display:none;">View Full Month</button>
             </div>
             <div style="display:flex;align-items:center;gap:10px;">
                 <div class="plan-week-nav">
@@ -349,6 +359,21 @@
             </div>
         </div>
         <div class="plan-grid" id="plan-grid"></div>
+    </div>
+</div>
+
+<!-- Month view modal -->
+<div id="month-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;">
+    <div style="background:#fff;border-radius:20px;width:100%;max-width:700px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,0.18);margin:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <button onclick="shiftMonth(-1)" style="background:none;border:1px solid #eee;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;">← Prev</button>
+            <div style="font-weight:600;font-size:15px;" id="month-modal-label"></div>
+            <div style="display:flex;gap:8px;">
+                <button onclick="shiftMonth(1)" style="background:none;border:1px solid #eee;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;">Next →</button>
+                <button onclick="closeMonthModal()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#999;line-height:1;">×</button>
+            </div>
+        </div>
+        <div id="month-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;"></div>
     </div>
 </div>
 
@@ -531,9 +556,12 @@
 <div class="modal-overlay" id="day-modal">
     <div class="modal" style="max-width:520px;width:90vw">
         <div class="modal-header">
-            <div>
-                <div class="modal-title" id="day-modal-title"></div>
-                <div style="font-size:12px;color:#aaa;margin-top:3px" id="day-modal-date"></div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <button id="day-modal-back" onclick="backToMonth()" style="display:none;background:none;border:none;cursor:pointer;font-size:13px;color:#888;padding:0;">← Month</button>
+                <div>
+                    <div class="modal-title" id="day-modal-title"></div>
+                    <div style="font-size:12px;color:#aaa;margin-top:3px" id="day-modal-date"></div>
+                </div>
             </div>
             <button class="modal-close" onclick="closeDayModal()">×</button>
         </div>
@@ -1284,8 +1312,11 @@ async function loadPlan() {
             </div>`;
         }).join('');
 
+        const totalMiles = days.reduce((sum, d) => sum + (d.target_miles || 0), 0);
+        if (totalMiles > 0) document.getElementById('plan-week-label').textContent += ` (${totalMiles.toFixed(1)} mi)`;
         grid.innerHTML = headerHtml + cellsHtml;
         document.getElementById('delete-plan-btn').style.display = 'block';
+        document.getElementById('month-view-btn').style.display = 'block';
     } catch(e) {
         grid.innerHTML = headerHtml + `<div class="plan-placeholder">Could not load plan.</div>`;
     }
@@ -1303,6 +1334,90 @@ function jumpToToday() {
     loadPlan();
 }
 
+let _monthOffset = 0;
+
+function openMonthModal() {
+    _monthOffset = 0;
+    document.getElementById('month-modal').style.display = 'flex';
+    loadMonthView();
+}
+
+function closeMonthModal() {
+    document.getElementById('month-modal').style.display = 'none';
+}
+
+function shiftMonth(dir) {
+    _monthOffset += dir;
+    loadMonthView();
+}
+
+async function loadMonthView() {
+    const grid = document.getElementById('month-grid');
+    const today = new Date();
+    const target = new Date(today.getFullYear(), today.getMonth() + _monthOffset, 1);
+    const year = target.getFullYear();
+    const month = target.getMonth();
+
+    document.getElementById('month-modal-label').textContent =
+        target.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    const firstDay = new Date(year, month, 1);
+    const lastDay  = new Date(year, month + 1, 0);
+    const startDow = (firstDay.getDay() + 6) % 7; // 0=Mon
+    const totalDays = lastDay.getDate();
+
+    const start = isoFromDate(firstDay);
+    const end   = isoFromDate(lastDay);
+
+    grid.innerHTML = ['M','T','W','T','F','S','S']
+        .map(d => `<div class="month-day-header">${d}</div>`).join('');
+
+    // empty leading cells
+    for (let i = 0; i < startDow; i++) {
+        grid.innerHTML += `<div class="month-cell empty"></div>`;
+    }
+
+    grid.innerHTML += `<div class="month-cell empty" style="grid-column:1/-1;text-align:center;padding:8px;color:#bbb;font-size:12px;">Loading...</div>`;
+
+    try {
+        const res  = await fetch(`${API}/plan/days?start_date=${start}&end_date=${end}`);
+        const days = await res.json();
+
+        const dayMap = {};
+        (days || []).forEach(d => {
+            dayMap[d.plan_date?.slice(0,10) || d.plan_date] = d;
+            _planDays[d.id] = d;
+        });
+
+        // re-render without loading placeholder
+        grid.innerHTML = ['M','T','W','T','F','S','S']
+            .map(d => `<div class="month-day-header">${d}</div>`).join('');
+        for (let i = 0; i < startDow; i++) {
+            grid.innerHTML += `<div class="month-cell empty"></div>`;
+        }
+
+        const todayIso = isoFromDate(today);
+        for (let day = 1; day <= totalDays; day++) {
+            const iso  = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+            const data = dayMap[iso];
+            const isToday = iso === todayIso;
+            if (data) {
+                const type  = data.workout_type;
+                const miles = data.target_miles ? `${data.target_miles.toFixed(1)} mi` : '';
+                grid.innerHTML += `<div class="month-cell${isToday ? ' today' : ''}" onclick="openDayModal('${data.id}', true)">
+                    <div class="month-cell-date">${day}</div>
+                    <div class="workout-badge badge-${type}" style="font-size:9px;padding:2px 5px;">${type}</div>
+                    ${miles ? `<div style="font-size:10px;color:#888;margin-top:2px;">${miles}</div>` : ''}
+                </div>`;
+            } else {
+                grid.innerHTML += `<div class="month-cell empty${isToday ? ' today' : ''}"><div class="month-cell-date">${day}</div></div>`;
+            }
+        }
+    } catch(e) {
+        grid.innerHTML += `<div style="grid-column:1/-1;text-align:center;color:#999;padding:16px;font-size:13px;">Could not load month.</div>`;
+    }
+}
+
 function confirmDeletePlan() {
     document.getElementById('delete-plan-modal').style.display = 'flex';
 }
@@ -1315,15 +1430,21 @@ async function deletePlan() {
     closeDeleteModal();
     await fetch('/plan', { method: 'DELETE' });
     document.getElementById('delete-plan-btn').style.display = 'none';
+    document.getElementById('month-view-btn').style.display = 'none';
     _planWeekOffset = 0;
     document.getElementById('jump-today-btn').style.display = 'none';
     loadPlan();
 }
 
-async function openDayModal(dayId) {
+let _dayModalFromMonth = false;
+
+async function openDayModal(dayId, fromMonth = false) {
     const day = _planDays[dayId];
     if (!day) return;
 
+    _dayModalFromMonth = fromMonth;
+    document.getElementById('day-modal-back').style.display = fromMonth ? 'block' : 'none';
+    closeMonthModal();
     const modal  = document.getElementById('day-modal');
     const body   = document.getElementById('day-modal-body');
     const [y, m, d] = day.plan_date.split('-');
@@ -1372,6 +1493,13 @@ async function openDayModal(dayId) {
 
 function closeDayModal() {
     document.getElementById('day-modal').classList.remove('open');
+    _dayModalFromMonth = false;
+}
+
+function backToMonth() {
+    document.getElementById('day-modal').classList.remove('open');
+    _dayModalFromMonth = false;
+    document.getElementById('month-modal').style.display = 'flex';
 }
 
 document.getElementById('day-modal').addEventListener('click', e => {
