@@ -117,7 +117,10 @@ def orchestrate(user_query, user_id, hist = None):
         yield("done", hist)
         return 
     
-    recent_context = "\n".join(f"{m['role']}: {m['content']}" for m in hist.recent[-4:])
+    def _truncate(msg):
+        content = msg['content'] if isinstance(msg['content'], str) else str(msg['content'])
+        return content[:300] + "..." if len(content) > 300 else content
+    recent_context = "\n".join(f"{m['role']}: {_truncate(m)}" for m in hist.recent[-8:])
     planner_prompt = f"User query: {user_query}"
     if hist.summary or recent_context:
         context = f"{hist.summary}\n{recent_context}".strip()

@@ -165,13 +165,19 @@
         .chat-card::after { content: ''; display: block; height: 4px; background: linear-gradient(to right, #f0ece6, #e0d8d0, #f0ece6); border-radius: 2px; margin-top: 4px; cursor: ns-resize; flex-shrink: 0; }
 
         /* ── Plan day cells ── */
-        .plan-day-cell { padding: 10px 6px; text-align: center; cursor: pointer; border-right: 1px solid #f0ece6; border-top: 1px solid #f0ece6; transition: background 0.15s; min-height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; }
+        .plan-day-cell { padding: 10px 6px; text-align: center; cursor: pointer; border-right: 1px solid #f0ece6; border-top: 1px solid #f0ece6; transition: background 0.15s; min-height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; position: relative; }
         .plan-day-cell:last-child { border-right: none; }
         .plan-day-cell:hover { background: #f9f6f3; }
         .plan-day-cell.today { background: #fff8f6; }
         .plan-day-miles { font-size: 12px; font-weight: 500; color: #1a1a1a; }
         .plan-day-pace  { font-size: 11px; color: #888; }
         .plan-day-notes { font-size: 10px; color: #bbb; }
+        .activity-logged-btn { position: absolute; bottom: 5px; right: 5px; background: none; border: none; padding: 0; font-size: 9px; font-weight: 500; color: #bbb; cursor: pointer; letter-spacing: 0.02em; }
+        .activity-logged-btn:hover { color: #888; }
+        .plan-day-cell.completed { background: #f0fdf4; }
+        .plan-check { position: absolute; top: 5px; right: 6px; font-size: 11px; color: #16a34a; font-weight: 700; line-height: 1; pointer-events: none; }
+        .activity-divider { border: none; border-top: 1px solid #f0ece6; margin: 12px 0 10px; }
+        .activity-section-label { font-size: 11px; font-weight: 600; color: #aaa; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px; }
 
         /* ── Workout type badges ── */
         .workout-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; letter-spacing: 0.04em; }
@@ -666,27 +672,59 @@ async function loadHealthChart() {
 
 // ── Activity card ─────────────────────────────────────────────────────────────
 
-async function loadActivity() {
+let _allActivities = [];
+let _activityWeekView = false;
+
+function _fmtActivityType(t) {
+    return t ? t.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Run';
+}
+
+function _renderActivityCard() {
     const card = document.getElementById('activity-card');
-    try {
-        const res  = await fetch(`${API}/activities/recent?start_date=${localOffset(-7)}&end_date=${localToday()}`);
-        const rows = await res.json();
-        const sorted = rows && rows.length ? rows.slice().sort((a, b) => a.calendar_date > b.calendar_date ? 1 : -1) : [];
-        const a    = sorted.length ? sorted[sorted.length - 1] : null;
-        if (!a) { card.innerHTML = '<div class="card-title">Most Recent Activity</div><div class="placeholder-text">No recent activity found.</div>'; return; }
+    const toggleBtn = `<button onclick="toggleActivityView()" style="background:none;border:1px solid #e0d8d0;border-radius:8px;padding:3px 10px;font-size:11px;cursor:pointer;color:#555;">${_activityWeekView ? 'Latest' : 'This week'}</button>`;
+    const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="card-title" style="margin:0">${_activityWeekView ? 'This Week\'s Activities' : 'Most Recent Activity'}</div>${toggleBtn}</div>`;
+
+    if (!_allActivities.length) {
+        card.innerHTML = header + '<div class="placeholder-text">No recent activity found.</div>';
+        return;
+    }
+
+    if (_activityWeekView) {
+        const rows = _allActivities.slice().reverse().map(a => {
+            const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
+            const d = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+            return `<div class="stat-row">
+                <span class="stat-label" style="flex:1">${d} · ${_fmtActivityType(a.activity_type)}</span>
+                <span class="stat-value" style="white-space:nowrap">${a.miles ? a.miles.toFixed(1)+' mi' : '—'} · ${a.average_pace || '—'}</span>
+            </div>`;
+        }).join('');
+        card.innerHTML = header + rows;
+    } else {
+        const a = _allActivities[_allActivities.length - 1];
         const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
-        const date = new Date(+ay, +am - 1, +ad).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
-        const type = a.activity_type
-            ? a.activity_type.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ')
-            : 'Run';
-        card.innerHTML = `
-            <div class="card-title">Most Recent Activity</div>
-            <div class="activity-name">${type}</div>
+        const date = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
+        card.innerHTML = header +
+            `<div class="activity-name">${_fmtActivityType(a.activity_type)}</div>
             <div class="activity-date">${date}</div>
             <div class="stat-row"><span class="stat-label">Total Mileage</span><span class="stat-value">${a.miles ? a.miles.toFixed(1)+' mi' : '—'}</span></div>
             <div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${a.average_pace || '—'}</span></div>
             <div class="stat-row"><span class="stat-label">Avg HR</span><span class="stat-value">${a.avg_hr ? Math.round(a.avg_hr)+' bpm' : '—'}</span></div>
             <div class="stat-row"><span class="stat-label">Kcals Burned</span><span class="stat-value">${a.calories_burned ? Math.round(a.calories_burned) : '—'}</span></div>`;
+    }
+}
+
+function toggleActivityView() {
+    _activityWeekView = !_activityWeekView;
+    _renderActivityCard();
+}
+
+async function loadActivity() {
+    const card = document.getElementById('activity-card');
+    try {
+        const res  = await fetch(`${API}/activities/recent?start_date=${localOffset(-7)}&end_date=${localToday()}`);
+        const rows = await res.json();
+        _allActivities = rows && rows.length ? rows.slice().sort((a, b) => a.calendar_date > b.calendar_date ? 1 : -1) : [];
+        _renderActivityCard();
     } catch(e) {
         card.innerHTML = '<div class="card-title">Most Recent Activity</div><div class="placeholder-text">Could not load activity.</div>';
     }
@@ -1249,6 +1287,9 @@ function hidePlanGenerating() {
 
 let _planWeekOffset = 0;
 let _planDays = {};
+let _weekActivities = {};
+let _matchedActivities = {};
+const RUNNING_TYPES = new Set(['EASY', 'AEROBIC', 'LONG', 'TEMPO', 'INTERVAL']);
 const DOW_ORDER = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
 
 function getWeekMonday(offsetWeeks = 0) {
@@ -1282,8 +1323,33 @@ async function loadPlan() {
     grid.innerHTML = headerHtml + `<div class="plan-placeholder">Loading...</div>`;
 
     try {
-        const res  = await fetch(`${API}/plan/days?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`);
-        const days = await res.json();
+        const [daysRes, actsRes] = await Promise.all([
+            fetch(`${API}/plan/days?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`),
+            fetch(`${API}/activities/recent?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`)
+        ]);
+        const days = await daysRes.json();
+        const acts = await actsRes.json().catch(() => []);
+        _weekActivities = {};
+        (acts || []).forEach(a => { _weekActivities[a.calendar_date.split('T')[0]] = a; });
+
+        // Match activities to plan days — same-day first, then float to adjacent running days
+        _matchedActivities = {};
+        days.forEach(d => { if (_weekActivities[d.plan_date]) _matchedActivities[d.plan_date] = _weekActivities[d.plan_date]; });
+        Object.entries(_weekActivities).forEach(([actDate, act]) => {
+            if (_matchedActivities[actDate]) return; // already matched same-day
+            const planDay = days.find(d => d.plan_date === actDate);
+            if (!planDay || RUNNING_TYPES.has(planDay.workout_type)) return;
+            // Try yesterday then tomorrow
+            for (const offset of [-1, 1]) {
+                const adj = new Date(actDate + 'T12:00:00'); adj.setDate(adj.getDate() + offset);
+                const adjIso = isoFromDate(adj);
+                const adjPlan = days.find(d => d.plan_date === adjIso);
+                if (adjPlan && RUNNING_TYPES.has(adjPlan.workout_type) && !_matchedActivities[adjIso]) {
+                    _matchedActivities[adjIso] = act;
+                    break;
+                }
+            }
+        });
 
         if (!days || !days.length) {
             if (_planWeekOffset === 0) {
@@ -1306,11 +1372,17 @@ async function loadPlan() {
             const type  = day.workout_type;
             const miles = day.target_miles ? `${day.target_miles.toFixed(1)} mi` : '';
             const pace  = day.target_pace  || '';
-            return `<div class="plan-day-cell${today ? ' today' : ''}" onclick="openDayModal('${day.id}')">
+            const matched   = _matchedActivities[day.plan_date];
+            const isRunning = RUNNING_TYPES.has(type);
+            const completed = isRunning && matched && (!day.target_miles || (matched.miles || 0) >= day.target_miles);
+            const stateClass = completed ? ' completed' : '';
+            return `<div class="plan-day-cell${today ? ' today' : ''}${stateClass}" onclick="openDayModal('${day.id}')">
+                ${completed ? '<span class="plan-check">✓</span>' : ''}
                 <div class="workout-badge badge-${type}">${type}</div>
                 ${miles ? `<div class="plan-day-miles">${miles}</div>` : ''}
                 ${pace  ? `<div class="plan-day-pace">${pace}</div>`  : ''}
                 ${type === 'INTERVAL' ? `<div class="plan-day-notes">tap for intervals</div>` : ''}
+                ${matched ? `<button class="activity-logged-btn" onclick="event.stopPropagation();openDayModal('${day.id}')">Activity</button>` : ''}
             </div>`;
         }).join('');
 
@@ -1461,6 +1533,18 @@ async function openDayModal(dayId, fromMonth = false) {
     if (day.target_pace)  html += `<div class="stat-row"><span class="stat-label">Target Pace</span><span class="stat-value">${day.target_pace}</span></div>`;
     if (day.notes)        html += `<div style="font-size:13px;color:#555;margin-top:12px;line-height:1.5">${day.notes}</div>`;
     if (!html)            html  = `<div class="placeholder-text" style="padding:12px 0">Rest day.</div>`;
+
+    const act = _matchedActivities[day.plan_date];
+    if (act) {
+        const actType = _fmtActivityType(act.activity_type);
+        html += `<hr class="activity-divider">
+            <div class="activity-section-label">Logged Activity</div>
+            <div class="stat-row"><span class="stat-label">Type</span><span class="stat-value">${actType}</span></div>
+            ${act.miles ? `<div class="stat-row"><span class="stat-label">Miles</span><span class="stat-value">${act.miles.toFixed(1)} mi</span></div>` : ''}
+            ${act.average_pace ? `<div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${act.average_pace}</span></div>` : ''}
+            ${act.avg_hr ? `<div class="stat-row"><span class="stat-label">Avg HR</span><span class="stat-value">${Math.round(act.avg_hr)} bpm</span></div>` : ''}
+            ${act.calories_burned ? `<div class="stat-row"><span class="stat-label">Calories</span><span class="stat-value">${Math.round(act.calories_burned)}</span></div>` : ''}`;
+    }
 
     body.innerHTML = html;
     modal.classList.add('open');

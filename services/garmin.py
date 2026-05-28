@@ -107,17 +107,44 @@ def extract_activities(client: Garmin, day_iso: str) -> list[dict]:
     raw = _call(client, "get_activities_by_date", day_iso, day_iso)
     if not raw:
         return []
-    return [{
-        "garmin_activity_id":    a.get("activityId"),
-        "calendar_date":  day_iso,
-        "activity_type":  a.get("activityType", {}).get("typeKey"),
-        "calories_burned": a.get("calories"),
-        "miles":          (a.get("distance") or 0) / 1609.34,
-        "avg_hr":         a.get("averageHR"),
-        "max_hr":         a.get("maxHR"),
-        "total_time":     _seconds_to_interval(a.get("duration")),
-        "average_pace":   _mps_to_pace(a.get("averageSpeed")),
-    } for a in raw]
+    activities = []
+    for a in raw:
+        activity_id = a.get("activityId")
+        splits = None
+        if activity_id:
+            sleep(CALL_PAUSE)
+            splits = _parse_splits(_call(client, "get_activity_splits", activity_id))
+        activities.append({
+            "garmin_activity_id": activity_id,
+            "calendar_date":      day_iso,
+            "activity_type":      a.get("activityType", {}).get("typeKey"),
+            "calories_burned":    a.get("calories"),
+            "miles":              (a.get("distance") or 0) / 1609.34,
+            "avg_hr":             a.get("averageHR"),
+            "max_hr":             a.get("maxHR"),
+            "total_time":         _seconds_to_interval(a.get("duration")),
+            "average_pace":       _mps_to_pace(a.get("averageSpeed")),
+            "splits":             splits,
+        })
+    return activities
+
+def _parse_splits(raw) -> list[dict] | None:
+    if not isinstance(raw, dict):
+        return None
+    laps = raw.get("lapDTOs") or raw.get("laps") or []
+    if not laps:
+        return None
+    result = []
+    for i, lap in enumerate(laps):
+        dist_m = lap.get("distance") or 0
+        result.append({
+            "lap":      i + 1,
+            "miles":    round(dist_m / 1609.34, 2),
+            "pace":     _mps_to_pace(lap.get("averageSpeed")),
+            "avg_hr":   _to_int(lap.get("averageHR")),
+            "duration": _seconds_to_interval(lap.get("duration")),
+        })
+    return result or None
 
 
 def _to_int(v) -> int | None:

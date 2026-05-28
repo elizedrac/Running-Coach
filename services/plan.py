@@ -85,13 +85,22 @@ def update_plan(user_id, intent) -> dict:
     debug = "--debug" in sys.argv
     plan_id = get_plan_id(user_id)
     today = date.today()
+    start_date = today - timedelta(days=7)
     end_date = today + timedelta(days=7)
-    plan = get_plan_days(plan_id, start_date=today.isoformat(), end_date=end_date.isoformat())
+    plan = get_plan_days(plan_id, start_date=start_date.isoformat(), end_date=end_date.isoformat())
     if debug:
         print(f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}")
 
     prefs = get_preferences(user_id)
-    prompt = f"User intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (today + next 7 days): {plan}"
+    race = get_race(user_id)
+    pacing_data = None
+    if race.get("goal_time") and race.get("race_distance_miles"):
+        try:
+            pacing_data = pacing_calculator(user_id, race["goal_time"], race["race_distance_miles"])
+        except Exception:
+            pass
+    pacing_block = f"\nPacing zones: {pacing_data}" if pacing_data else ""
+    prompt = f"User intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (today + next 7 days): {plan}{pacing_block}"
     response = call_llm(system_prompt=UPDATE_PLAN_SYSTEM, user_prompt=prompt)
     if debug:
         print(f"[update_plan] LLM response: {response}")
