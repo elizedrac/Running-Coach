@@ -116,7 +116,7 @@ def check_peak_long_run_repetition(days: list, violations: list) -> None:
     peak_count = sum(1 for m in long_runs if m >= peak - 1.5)
     print(f"[guardrails] peak long run: {peak} mi, count within 1.5 mi: {peak_count}")
     if peak_count > 2:
-        violations.append(f"Peak long run ({peak} mi) repeated {peak_count} times — max 2 allowed before taper")
+        violations.append(f"Peak long run ({peak} mi) repeated {peak_count} times — max 2 of peak +- 1.5 miles allowed before taper")
 
 def check_phase2_variety(days: list, violations: list, race_type: str) -> None:
     weeks = _get_weeks(days)

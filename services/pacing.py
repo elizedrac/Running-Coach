@@ -83,6 +83,7 @@ def pacing_calculator(user_id: str, goal_time: str, distance: float) -> dict:
     vo2 = health[0].get("vo2_max") if health else None
 
     return {
+        "goal_time":         goal_time,
         "goal_pace":         _min_to_pace(goal_pace),
         "gps_adjusted_pace": _min_to_pace(gps_adjusted_pace),
         "current_easy_pace": _min_to_pace(_pace_from_vo2(vo2)) if vo2 else None,

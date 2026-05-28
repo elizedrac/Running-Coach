@@ -85,12 +85,13 @@ def update_plan(user_id, intent) -> dict:
     debug = "--debug" in sys.argv
     plan_id = get_plan_id(user_id)
     today = date.today()
-    end_date = today + timedelta(days=14)
+    end_date = today + timedelta(days=7)
     plan = get_plan_days(plan_id, start_date=today.isoformat(), end_date=end_date.isoformat())
     if debug:
         print(f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}")
 
-    prompt = f"User intent: {intent}\nCurrent plan (today + next 14 days): {plan}"
+    prefs = get_preferences(user_id)
+    prompt = f"User intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (today + next 7 days): {plan}"
     response = call_llm(system_prompt=UPDATE_PLAN_SYSTEM, user_prompt=prompt)
     if debug:
         print(f"[update_plan] LLM response: {response}")
@@ -101,8 +102,9 @@ def update_plan(user_id, intent) -> dict:
     response = response[start:end]
     try:
         parsed = UpdatePlanOutput.model_validate_json(response)
-        update_plan_day(plan_id, [c.model_dump() for c in parsed.changes])
-        return {"status": "success"}
+        changes = [c.model_dump() for c in parsed.changes]
+        update_plan_day(plan_id, changes)
+        return {"status": "success", "changes": changes}
     except Exception as e:
         print(f"[update_plan] ERROR: {e}")
         return {"status": f"fail with error {e}"}

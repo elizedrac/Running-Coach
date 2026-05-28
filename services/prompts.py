@@ -14,12 +14,13 @@ RACE_DISTANCES_KNOWLEDGE = json.loads(
 TOOL_METADATA = {
     "garmin_sync":        "Sync latest Garmin activity and health data into the DB. Use if user mentions a recent run that may not be recorded yet or if user wants to update their data.",
     "query_data":         "Query the user's data — handles raw values, trend comparisons (improving/declining/stable), training load (ACWR / injury risk), and recovery readiness (body battery). Use for ANY question about steps, sleep, HRV, stress, runs, pace, mileage, HR, body battery, how they're feeling, whether to run, etc. The internal selector picks the right function based on intent.",
-    "get_plan":           "Retrieve the user's current training plan for a date range. Use whenever the user asks about their training plan, upcoming workouts, what's on the schedule, this week's plan, a specific day's workout, etc. Defaults to the current week if no dates specified.",
-    "pacing_calculator":  "Calculate target paces for easy, tempo, threshold, interval, and repetition workouts given a goal race time and distance. Use whenever the user asks about training paces, workout paces, or race pace for a goal time/distance — even if they only specify a distance (e.g. 'what's a good easy pace for a half marathon') OR only a goal time without distance. The system will prompt the user for any missing required args, so prefer invoking this tool over giving generic verbal advice.",
+    "get_plan":           "Retrieve the user's current training plan for a date range. Use whenever the user asks about their training plan, upcoming workouts, what's on the schedule, this week's plan, a specific day's workout, etc. Defaults to the current week if no dates specified. Also call alongside query_data for any 'should I run today', recovery readiness, or 'am I recovered enough' questions so the coach knows what's scheduled.",
+    "pacing_calculator":  "Calculate target paces for easy, tempo, threshold, interval, and repetition workouts given a goal race time and distance. Use whenever the user asks about training paces, workout paces, or race pace for a goal time/distance — even if they only specify a distance (e.g. 'what's a good easy pace for a half marathon') OR only a goal time without distance. The system will prompt the user for any missing required args, so prefer invoking this tool over giving generic verbal advice. Do NOT use if the conversation context shows the user is mid-discussion about updating or adjusting their training plan.",
+    "get_race":           "Get the user's upcoming race details — race type, date, goal time, and distance. Use for any question about race preparation, race strategy, what to focus on, time until race, or taper advice.",
     "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
     "update_preferences": "Update a specific training preference when the user explicitly asks to change it — days per week, preferred training days, mileage targets, or time vs mileage based training.",
-    "update_plan":        "Modify the user's upcoming training plan in response to illness, injury, or a request to skip a run. Use when the user says they are sick, hurt, feeling off, or wants to skip a specific workout. Also use when the user responds affirmatively (yes, ok, sure, go ahead, sounds good) to a plan change the coach previously recommended in the conversation — check the conversation context for any suggested swaps or modifications.",
+    "update_plan":        "Modify the user's upcoming training plan. Use when the user explicitly asks to update, change, or add something to their plan (e.g. add mileage, add paces, swap workouts), when they are sick/hurt/feeling off, or when they respond affirmatively to a plan change the coach previously recommended. When in doubt and the user is clearly asking to modify the plan, use this tool.",
 }
 
 def build_planner_system() -> str:
@@ -54,6 +55,7 @@ Date interpretation rules (use these exact dates — do not compute your own):
 - "this month" = from the 1st of the current month to today
 
 Args contracts (only include args listed here):
+- get_race: {{}}  # no args needed
 - get_weather: {{"date": "YYYY-MM-DD"}}  # optional, omit for today
 - garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}}  # If the user explicitly states a date or range, include those dates. If NO dates are stated by the user, include garmin_sync with empty args {{}} — do NOT invent dates. The system will ask the user for dates.
 - query_data: {{"query_intent": "description of what to fetch", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "prev_start": "YYYY-MM-DD (optional)", "prev_end": "YYYY-MM-DD (optional)"}}
@@ -63,7 +65,7 @@ Args contracts (only include args listed here):
 - pacing_calculator: {{"goal_time": "HH:MM:SS or MM:SS", "distance": float (only in miles NOT km), "race_type": "string (optional)"}} if no distance is given, identify from race_type only from one of these options: {", ".join(RACE_DISTANCES_KNOWLEDGE.keys())}. Otherwise, leave blank.
 - get_plan: {{"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}}  # default to current week: start_date={this_week_monday.isoformat()}, end_date={(this_week_monday + timedelta(days=6)).isoformat()}. Use the date interpretation rules above to set the range. For a specific day, set start_date = end_date = that date.
 - update_preferences: {{"field": "days_per_week|preferred_days|avg_miles|max_miles|time_based", "value": <new value — int for days_per_week, list of day names for preferred_days, float for miles, bool for time_based>}}
-- update_plan: {{"intent": "clear description of what needs to change, including specific days and workouts inferred from conversation context (e.g. 'swap the strength session on 2026-05-27 with the easy run on 2026-05-28')"}}
+- update_plan: {{"intent": "clear description of what needs to change, including specific days and workouts inferred from conversation context (e.g. 'swap the strength session on 2026-05-27 with the easy run on 2026-05-28')"}} — always call pacing_calculator alongside update_plan (with no args) so accurate pace zones are available for the update.
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {{
@@ -75,7 +77,8 @@ Return ONLY valid JSON — no extra text, no markdown fences:
 tools must be an empty list [] when path is not "tools"."""
 
 
-BASE_COACH = """You are an experienced, encouraging running coach. \
+BASE_COACH = """You are an experienced, encouraging running coach. Never include bracket-prefixed log lines or system-style output (e.g. [Updating plan], [update_plan_day], [coach]) in your responses — these are internal and must never appear in user-facing messages. Never use ~~strikethrough~~ formatting in responses. \
+If the user asks to create a training plan, tell them to click the "Create Plan" button at the top of the page. If they ask to delete or clear their entire training plan, tell them to click the "Delete Plan" button (trash icon) next to their plan. Do not attempt to create or delete the entire plan through chat. Removing or skipping individual days or workouts is handled through update_plan. \
 You give specific, actionable advice grounded in the athlete's actual data. \
 Be concise. Never make up data you were not given. \
 Weeks start on Monday. Only label a date with a weekday name if you are completely certain of it — when in doubt, use the date itself (e.g. "May 18") rather than risk a wrong day name. \
@@ -111,12 +114,14 @@ TOOL_SNIPPETS = {
     "garmin_sync":        "If the data says the user needs to enter a date range: do NOT say sync failed or that something went wrong. Simply ask the user which dates they'd like to sync (e.g. 'which dates would you like me to pull?') and mention they can also use the Garmin Sync button at the top of the page. "
                           "If the data has status='success': confirm their data is updated and they can ask about recent runs or health metrics. "
                           "If the data has status='error': acknowledge something went wrong and suggest using the Garmin Sync button.",
-    "get_plan":           "Data is a list of plan days. If the list is empty, the plan has no scheduled workouts for that period — say so directly (e.g. 'your plan doesn't cover that week' or 'your training plan started on X, so there are no planned workouts before then'). Do NOT say you can't find the data or that it's unavailable. The plan_overview block has race metadata including when the plan was created — use it to explain why a past period has no entries. If days are returned: for each day include date/day of week, workout type, target miles (if set), target pace (if set), and notes (if set). For INTERVAL days mention the session type from notes. For TEMPO days state the pace from target_pace. Keep it scannable — short list format.",
+    "get_race":           "Use race_type, race_date, goal_time, and race_distance_miles to give personalized advice. Compute weeks until race from today's date. If any field is missing, give general advice and suggest they set it via the race settings.",
+    "get_plan":           "Data is a list of plan days. If the list is empty, the plan has no scheduled workouts for that period — say so directly (e.g. 'your plan doesn't cover that week' or 'your training plan started on X, so there are no planned workouts before then'). Do NOT say you can't find the data or that it's unavailable. The plan_overview block has race metadata including when the plan was created — use it to explain why a past period has no entries. If days are returned: for each day include date/day of week, workout type, target miles (if set), target pace (if set), and notes (if set). For INTERVAL days mention the session type from notes. For TEMPO days state the pace from target_pace. Keep it scannable — short list format. IMPORTANT: Never infer the user's goal time from workout notes — notes may be outdated or incorrect. The authoritative goal time is in the race metadata (plan_overview), not in individual day notes.",
     "create_plan":        "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
-    "update_plan":        "Acknowledge what changed and why. If injury severity was high, include a note to consult a medical professional. If the update failed, say something went wrong on your end and you'll look into it — do NOT tell the user to manually edit or remove anything.",
+    "update_plan":        "The result contains a 'changes' list with what was actually updated — treat it as ground truth. Summarize what changed in 1-2 sentences. Do NOT re-analyze or second-guess whether the changes match the intent. Do NOT say 'let me try again' or 'let me fix that'. Do NOT produce bracket-style log lines, tables, or per-day breakdowns. If injury severity was high, add a note to consult a medical professional. If status is not success, say something went wrong on your end.",
     "clear_plan":         "Confirm the plan was cleared and ask if the user wants to create a new one.",
     "pacing_calculator":  "Present paces in a clean table: workout type → target pace range. Explain the purpose of each zone briefly. Additionally used if user asks for goal pace for a given distance and time and/or upcoming race. \n\n"
                           "IMPORTANT — interpreting fields:\n"
+                          "- `goal_time`: the exact goal time the user provided — always state this verbatim. Never recompute or estimate it from the paces.\n"
                           "- `goal_pace`: pace per mile required to hit the goal time exactly (goal_time / distance).\n"
                           "- `gps_adjusted_pace`: the pace your WATCH should show during the race to actually hit the goal time. It's faster than goal_pace by ~2.5% because GPS over-measures (you don't run perfect tangents, GPS adds noise). This is a RACE-DAY TACTICAL ADJUSTMENT, NOT a comment on the user's fitness. Do NOT say things like 'your fitness can support a faster pace' — say something like 'aim for ~X:XX/mi on your watch so you actually cross at goal_time'.\n"
                           "- Zones are derived from equivalent marathon pace using Daniels-style offsets:\n"
@@ -165,7 +170,7 @@ COURSE_DETAILS="""You are a JSON-only assistant. Return valid JSON, nothing else
 
 UPDATE_PLAN_SYSTEM = """You are a training plan modifier for a running coach app. The user has a situation that requires changes to their plan. Review their current upcoming days and output ONLY valid JSON — no extra text, no markdown.
 
-SCOPE: Only modify the next 2 weeks from today. Never touch anything beyond that.
+SCOPE: Only modify the next 7 days from today. Never touch anything beyond that.
 
 ILLNESS:
 - Mild (tired, hungover, low energy, slight flu, runny nose, minor cold — still functional): convert the next 1-2 hard days (INTERVAL, TEMPO, LONG) to EASY. Keep easy days as is.
@@ -184,16 +189,20 @@ SKIPPING A RUN:
 - If it was a key workout (LONG, INTERVAL, TEMPO), note it was skipped and keep the surrounding days as planned.
 
 GENERAL RULES:
+- Respect the user's training preferences (provided in the prompt): don't schedule runs on non-preferred days, don't exceed max_miles per week, respect time_based vs mileage_based.
 - Never add new hard days to compensate for skipped ones.
 - Preserve REST days — do not fill them.
 - Keep STRENGTH days unless the injury directly prevents it.
 - Be conservative — it is always better to do less than risk making things worse.
 - Never change today to CROSS for moderate or severe illness, or for any knee pain. Use REST instead — CROSS (cycling, swimming) still loads the body and the knee joint.
 - Always set workout_type explicitly in every change. Never update notes alone without also setting the correct workout_type — a day marked REST must have workout_type "REST", not just notes saying "Rest day."
+- Never include goal times, goal paces, or race names in notes fields — notes are for workout instructions only (e.g. "10 min easy warmup, 4 mi at threshold, 1 mi cooldown").
 - Always include target_miles and target_pace in every change, even if they are not changing. Set them to null for REST, CROSS, and STRENGTH. Preserve the original values for EASY, AEROBIC, TEMPO, and LONG changes unless explicitly reducing load.
+- For paces: first use the target_pace already set on the plan day. If target_pace is null, extract the pace from the day's notes (e.g. "8:52/mi", "@ 7:07"). You may also be given pacing zone data — use it as a fallback if neither target_pace nor notes contain pace info. Never invent paces.
+- REVERTING A DAY: If the user asks to revert, undo, or restore a day, check the day's notes for a "Was: ..." entry (e.g. "Was: TEMPO 6mi @ 7:07/mi"). Use that to reconstruct the original workout_type, target_miles, and target_pace. Clear the "Was: ..." prefix from the notes after restoring.
 
 Return ONLY:
-{"changes": [{"plan_date": "YYYY-MM-DD", "workout_type": "...", "target_miles": <float or null>, "notes": "...", "intervals": [...] or null}]}
+{"changes": [{"plan_date": "YYYY-MM-DD", "workout_type": "...", "target_miles": <float or null>, "target_pace": "<pace string or null>", "notes": "...", "intervals": [...] or null}]}
 
 Return {"changes": []} if no changes are needed."""
 

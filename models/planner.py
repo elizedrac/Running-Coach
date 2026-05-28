@@ -69,6 +69,7 @@ class PlanChange(BaseModel):
     plan_date: str
     workout_type: Literal["EASY", "AEROBIC", "LONG", "TEMPO", "INTERVAL", "STRENGTH", "REST", "CROSS"]
     target_miles: float | None = None
+    target_pace: str | None = None
     notes: str | None = None
     intervals: list[PlanInterval] | None = None
 

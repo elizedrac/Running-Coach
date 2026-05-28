@@ -931,7 +931,7 @@ async function sendMessage() {
                     document.getElementById('chat-messages').scrollTop = 999999;
 
                 } else if (event.type === 'done') {
-                    if (bubble) bubble.innerHTML = marked.parse(fullText);
+                    if (bubble) bubble.innerHTML = marked.parse(fullText.replace(/~~([^~]+)~~/g, '$1'));
 
                 } else if (event.type === 'ended') {
                     setAnalyzing(false);
@@ -950,7 +950,7 @@ async function sendMessage() {
         setAnalyzing(false);
         if (e.name !== 'AbortError') addMessage('coach', 'Sorry, I had trouble connecting. Please check the server is running.');
     } finally {
-        if (bubble && fullText) bubble.innerHTML = marked.parse(fullText);
+        if (bubble && fullText) bubble.innerHTML = marked.parse(fullText.replace(/~~([^~]+)~~/g, '$1'));
         setAnalyzing(false);
         abortController = null;
         input.focus();
