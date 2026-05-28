@@ -938,6 +938,8 @@ async function sendMessage() {
                     addMessage('coach', 'Great chatting! Here are some things to explore:');
                     if (event.follow_ups && event.follow_ups.length) showFollowUpChips(event.follow_ups);
 
+                } else if (event.type === 'plan_updated') {
+                    loadPlan();
                 } else if (event.type === 'error') {
                     setAnalyzing(false);
                     addMessage('coach', 'Sorry, something went wrong. Please try again.');

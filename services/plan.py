@@ -1,15 +1,17 @@
 # Training plan creation, update, injury logic.
-from services.prompts import CREATE_PLAN_SYSTEM, PLAN_CREATOR_TOOLS, build_create_plan_prompt
-from services.llm import client
+import sys
+from services.prompts import CREATE_PLAN_SYSTEM, UPDATE_PLAN_SYSTEM, PLAN_CREATOR_TOOLS, build_create_plan_prompt
+from services.llm import client, call_llm
 from services.pacing import pacing_calculator
 from services.sql_selector import execute_query
 from services.course_details import get_course_details
 from services.guardrails import challenger
 from db.race import get_race
 from db.preferences import get_preferences
-from db.plan import save_plan
+from db.plan import save_plan, get_plan_days, get_plan_id, update_plan_day
+from models.planner import UpdatePlanOutput
 from concurrent.futures import ThreadPoolExecutor
-from datetime import date
+from datetime import date, timedelta
 
 PLAN_TOOL_REGISTRY = {
     "pacing_calculator": pacing_calculator,
@@ -77,3 +79,32 @@ def create_plan(user_id: str) -> dict:
         messages.append({"role": "user", "content": tool_results})
 
     return {"status": "fail"}
+
+
+def update_plan(user_id, intent) -> dict:
+    debug = "--debug" in sys.argv
+    plan_id = get_plan_id(user_id)
+    today = date.today()
+    end_date = today + timedelta(days=14)
+    plan = get_plan_days(plan_id, start_date=today.isoformat(), end_date=end_date.isoformat())
+    if debug:
+        print(f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}")
+
+    prompt = f"User intent: {intent}\nCurrent plan (today + next 14 days): {plan}"
+    response = call_llm(system_prompt=UPDATE_PLAN_SYSTEM, user_prompt=prompt)
+    if debug:
+        print(f"[update_plan] LLM response: {response}")
+
+    response = response.strip()
+    start = response.find("{")
+    end = response.rfind("}") + 1
+    response = response[start:end]
+    try:
+        parsed = UpdatePlanOutput.model_validate_json(response)
+        update_plan_day(plan_id, [c.model_dump() for c in parsed.changes])
+        return {"status": "success"}
+    except Exception as e:
+        print(f"[update_plan] ERROR: {e}")
+        return {"status": f"fail with error {e}"}
+    
+

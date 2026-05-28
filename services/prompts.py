@@ -19,6 +19,7 @@ TOOL_METADATA = {
     "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
     "update_preferences": "Update a specific training preference when the user explicitly asks to change it — days per week, preferred training days, mileage targets, or time vs mileage based training.",
+    "update_plan":        "Modify the user's upcoming training plan in response to illness, injury, or a request to skip a run. Use when the user says they are sick, hurt, feeling off, or wants to skip a specific workout. Also use when the user responds affirmatively (yes, ok, sure, go ahead, sounds good) to a plan change the coach previously recommended in the conversation — check the conversation context for any suggested swaps or modifications.",
 }
 
 def build_planner_system() -> str:
@@ -62,6 +63,7 @@ Args contracts (only include args listed here):
 - pacing_calculator: {{"goal_time": "HH:MM:SS or MM:SS", "distance": float (only in miles NOT km), "race_type": "string (optional)"}} if no distance is given, identify from race_type only from one of these options: {", ".join(RACE_DISTANCES_KNOWLEDGE.keys())}. Otherwise, leave blank.
 - get_plan: {{"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}}  # default to current week: start_date={this_week_monday.isoformat()}, end_date={(this_week_monday + timedelta(days=6)).isoformat()}. Use the date interpretation rules above to set the range. For a specific day, set start_date = end_date = that date.
 - update_preferences: {{"field": "days_per_week|preferred_days|avg_miles|max_miles|time_based", "value": <new value — int for days_per_week, list of day names for preferred_days, float for miles, bool for time_based>}}
+- update_plan: {{"intent": "clear description of what needs to change, including specific days and workouts inferred from conversation context (e.g. 'swap the strength session on 2026-05-27 with the easy run on 2026-05-28')"}}
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {{
@@ -111,7 +113,7 @@ TOOL_SNIPPETS = {
                           "If the data has status='error': acknowledge something went wrong and suggest using the Garmin Sync button.",
     "get_plan":           "Data is a list of plan days. If the list is empty, the plan has no scheduled workouts for that period — say so directly (e.g. 'your plan doesn't cover that week' or 'your training plan started on X, so there are no planned workouts before then'). Do NOT say you can't find the data or that it's unavailable. The plan_overview block has race metadata including when the plan was created — use it to explain why a past period has no entries. If days are returned: for each day include date/day of week, workout type, target miles (if set), target pace (if set), and notes (if set). For INTERVAL days mention the session type from notes. For TEMPO days state the pace from target_pace. Keep it scannable — short list format.",
     "create_plan":        "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
-    "update_plan":        "Acknowledge what changed and why. If injury severity was high, include a note to consult a medical professional.",
+    "update_plan":        "Acknowledge what changed and why. If injury severity was high, include a note to consult a medical professional. If the update failed, say something went wrong on your end and you'll look into it — do NOT tell the user to manually edit or remove anything.",
     "clear_plan":         "Confirm the plan was cleared and ask if the user wants to create a new one.",
     "pacing_calculator":  "Present paces in a clean table: workout type → target pace range. Explain the purpose of each zone briefly. Additionally used if user asks for goal pace for a given distance and time and/or upcoming race. \n\n"
                           "IMPORTANT — interpreting fields:\n"
@@ -149,13 +151,51 @@ Keep each under 12 words. Return ONLY valid JSON in this format:
 {{"follow_ups": ["question 1", "question 2", "question 3"]}}"""
 
 END_DETECTION = """You are a JSON-only assistant for conversation end detection for a running coach agent. Based on the most recent conversation, determine if the user is likely done asking questions for now and ready to end the conversation. Return ONLY valid JSON in this format:
-{{"end_conversation": true}}  # or false"""
+{{"end_conversation": true}}  # or false
+
+Rules:
+- Short affirmatives ("ok", "ok agreed", "sounds good", "sure", "yeah") are NOT conversation-ending if the prior coach message contained a concrete recommendation (e.g. skip a run, rest today, swap a workout). The user is affirming the action, not signing off.
+- Only return true if the user is clearly wrapping up with no pending action (e.g. "thanks bye", "that's all", "got it thanks")."""
 
 COURSE_DETAILS="""You are a JSON-only assistant. Return valid JSON, nothing else. Extract key details about this running race course and return as JSON with FOUR fields:
 - "location": city/place fully spelled out (e.g. "New York City" NOT "NYC", "Philadelphia" NOT "Philly")
 - "race": race type fully spelled out (e.g. "marathon", "half marathon", "10k") NOT abbreviations
 - "query": a short semantic label summarising what the user asked (used for search)
 - "details": a 3-5 sentence summary covering elevation, terrain/surface, notable sections, and race-day logistics"""
+
+UPDATE_PLAN_SYSTEM = """You are a training plan modifier for a running coach app. The user has a situation that requires changes to their plan. Review their current upcoming days and output ONLY valid JSON — no extra text, no markdown.
+
+SCOPE: Only modify the next 2 weeks from today. Never touch anything beyond that.
+
+ILLNESS:
+- Mild (tired, hungover, low energy, slight flu, runny nose, minor cold — still functional): convert the next 1-2 hard days (INTERVAL, TEMPO, LONG) to EASY. Keep easy days as is.
+- Moderate (actually sick — fever, body aches, full flu): convert the rest of the current week to REST. Next week start with EASY before returning to structure.
+- Severe (completely bedridden, cannot function at all — rare): convert rest of current week and all of next week to REST. Add a note to check in before resuming.
+- Always: do not reschedule missed workouts further into the plan.
+
+INJURY:
+- Mild (soreness, tightness): swap hard days to EASY, keep volume low. Add notes about listening to body.
+- Moderate (pain during running): convert to REST and CROSS (cycling, swimming) for current week. Next week reintroduce with EASY only.
+- Severe (can't run): full REST for both weeks. In notes tell the user to update you on how they're feeling so you can ease them back into training gradually.
+- Always: add a note on the affected days reminding the user to check in if it still hurts so the plan can be updated further.
+
+SKIPPING A RUN:
+- Mark the specific day as REST.
+- If it was a key workout (LONG, INTERVAL, TEMPO), note it was skipped and keep the surrounding days as planned.
+
+GENERAL RULES:
+- Never add new hard days to compensate for skipped ones.
+- Preserve REST days — do not fill them.
+- Keep STRENGTH days unless the injury directly prevents it.
+- Be conservative — it is always better to do less than risk making things worse.
+- Never change today to CROSS for moderate or severe illness, or for any knee pain. Use REST instead — CROSS (cycling, swimming) still loads the body and the knee joint.
+- Always set workout_type explicitly in every change. Never update notes alone without also setting the correct workout_type — a day marked REST must have workout_type "REST", not just notes saying "Rest day."
+- Always include target_miles and target_pace in every change, even if they are not changing. Set them to null for REST, CROSS, and STRENGTH. Preserve the original values for EASY, AEROBIC, TEMPO, and LONG changes unless explicitly reducing load.
+
+Return ONLY:
+{"changes": [{"plan_date": "YYYY-MM-DD", "workout_type": "...", "target_miles": <float or null>, "notes": "...", "intervals": [...] or null}]}
+
+Return {"changes": []} if no changes are needed."""
 
 PLAN_CHECKER_SYSTEM = """You are a training plan validator for a running coach app. Review the provided plan and return ONLY valid JSON — no extra text, no markdown.
 

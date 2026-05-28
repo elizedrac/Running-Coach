@@ -36,6 +36,8 @@ def ask(body: AskRequest):
                     yield f"data: {json.dumps({'type': 'chunk', 'text': data})}\n\n"
                 elif event_type == "status":
                     yield f"data: {json.dumps({'type': 'status', 'text': data})}\n\n"
+                elif event_type == "plan_updated":
+                    yield f"data: {json.dumps({'type': 'plan_updated'})}\n\n"
                 elif event_type == "done":
                     session_memory[body.session_id] = data  # save hist
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"

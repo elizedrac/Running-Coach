@@ -49,23 +49,33 @@ class PreferencesRequest(BaseModel):
 class PlanInterval(BaseModel):
     interval_num: int
     interval_type: Literal["WARMUP", "WORK", "REST", "COOLDOWN"]
-    distance: str = None       # e.g. "400m", "1mi"
-    target_pace: str = None    # e.g. "7:00/mi"
-    duration: str = None       # e.g. "10min" — alternative to distance
-    rest_duration: str = None  # e.g. "90sec jog"
-    notes: str = None
+    distance: str | None = None
+    target_pace: str | None = None
+    duration: str | None = None
+    rest_duration: str | None = None
+    notes: str | None = None
 
 class PlanDay(BaseModel):
-    plan_date: str             # YYYY-MM-DD
+    plan_date: str
     week_number: int
     day_of_week: Literal["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"]
     workout_type: Literal["EASY", "LONG", "TEMPO", "INTERVAL", "REST", "CROSS"]
-    target_miles: float = None
-    target_pace: str = None
-    notes: str = None
+    target_miles: float | None = None
+    target_pace: str | None = None
+    notes: str | None = None
     intervals: list[PlanInterval] = []
 
-@dataclass    
+class PlanChange(BaseModel):
+    plan_date: str
+    workout_type: Literal["EASY", "AEROBIC", "LONG", "TEMPO", "INTERVAL", "STRENGTH", "REST", "CROSS"]
+    target_miles: float | None = None
+    notes: str | None = None
+    intervals: list[PlanInterval] | None = None
+
+class UpdatePlanOutput(BaseModel):
+    changes: list[PlanChange]
+
+@dataclass
 class History:
     summary: str = ""
     recent: list[dict] = field(default_factory=list)

@@ -8,6 +8,7 @@ from services.pacing import _time_to_mins, pacing_calculator
 from services.course_details import get_course_details
 from services.memory import compress_history
 from services.guardrails import input_check
+from services.plan import update_plan
 from db.plan import get_plan_days as get_plan, get_plan_id, get_current_plan
 from db.preferences import update_preferences
 from datetime import date, timedelta
@@ -34,6 +35,7 @@ TOOL_REGISTRY = {
     "get_course_details": get_course_details,
     "update_preferences": update_preferences,
     "get_plan": get_plan,
+    "update_plan": update_plan,
 }
 
 def call_tool(name: str, args: dict, user_id: str):
@@ -113,6 +115,7 @@ def orchestrate(user_query, user_id, hist = None):
     planner_response = planner(planner_prompt)
 
     if debug:
+        print(f"[coach] path={planner_response.path}, tools={[t.name for t in planner_response.tools]}")
         print("Planner response:", planner_response.model_dump_json(), file=sys.stderr)
 
     path = planner_response.path
@@ -139,6 +142,8 @@ def orchestrate(user_query, user_id, hist = None):
         for tool in planner_response.tools:
             name = tool.name.strip()
             if name not in TOOL_REGISTRY:
+                if debug:
+                    print(f"[coach] unknown tool: {name}")
                 continue
             if name != "garmin_sync":
                 try:
@@ -146,8 +151,17 @@ def orchestrate(user_query, user_id, hist = None):
                         input_id = get_plan_id(user_id)
                     else:
                         input_id = user_id
-                    tool_results[name] = call_tool(name, tool.args, input_id)
+                    if debug:
+                        print(f"[coach] calling {name} args={tool.args}")
+                    result = call_tool(name, tool.args, input_id)
+                    if debug:
+                        print(f"[coach] {name} result={str(result)[:200]}")
+                    tool_results[name] = result
+                    if name == "update_plan" and isinstance(result, dict) and result.get("status") == "success":
+                        yield ("plan_updated", None)
                 except Exception as e:
+                    if debug:
+                        print(f"[coach] {name} EXCEPTION: {e}")
                     tool_results[name] = f"Error running {name}: {e}"
         if not tool_results:
             planner_response.path = "no_tools"
