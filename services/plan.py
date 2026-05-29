@@ -9,6 +9,7 @@ from services.guardrails import challenger
 from db.race import get_race
 from db.preferences import get_preferences
 from db.plan import save_plan, get_plan_days, get_plan_id, update_plan_day
+from db.activity_history import get_activities
 from models.planner import UpdatePlanOutput
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -81,15 +82,13 @@ def create_plan(user_id: str) -> dict:
     return {"status": "fail"}
 
 
-def update_plan(user_id, intent) -> dict:
-    debug = "--debug" in sys.argv
+def update_plan(user_id, intent, include_activities: bool = False) -> dict:
     plan_id = get_plan_id(user_id)
     today = date.today()
     start_date = today - timedelta(days=7)
     end_date = today + timedelta(days=7)
     plan = get_plan_days(plan_id, start_date=start_date.isoformat(), end_date=end_date.isoformat())
-    if debug:
-        print(f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}")
+    print(f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}, include_activities={include_activities}")
 
     prefs = get_preferences(user_id)
     race = get_race(user_id)
@@ -100,18 +99,35 @@ def update_plan(user_id, intent) -> dict:
         except Exception:
             pass
     pacing_block = f"\nPacing zones: {pacing_data}" if pacing_data else ""
-    prompt = f"User intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (today + next 7 days): {plan}{pacing_block}"
-    response = call_llm(system_prompt=UPDATE_PLAN_SYSTEM, user_prompt=prompt)
-    if debug:
-        print(f"[update_plan] LLM response: {response}")
+
+    activities_block = ""
+    if include_activities:
+        try:
+            activities = get_activities(user_id, start_date.isoformat(), end_date.isoformat())
+            activity_fields = ["calendar_date", "activity_type", "miles", "avg_hr", "total_time", "average_pace"]
+            activities_slim = [{k: a.get(k) for k in activity_fields} for a in activities] if activities else []
+            if activities_slim:
+                activities_block = f"\nRecent activities (same window): {activities_slim}"
+        except Exception:
+            pass
+
+    prompt = f"User intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (±7 days): {plan}{pacing_block}{activities_block}"
+    response = call_llm(system_prompt=UPDATE_PLAN_SYSTEM, user_prompt=prompt, max_tokens=4096)
+    print(f"[update_plan] raw LLM response ({len(response)} chars): {response[:500]}")
 
     response = response.strip()
     start = response.find("{")
     end = response.rfind("}") + 1
+    if start == -1 or end <= start:
+        print(f"[update_plan] ERROR: no JSON found in response")
+        return {"status": "fail with error: LLM returned no valid JSON"}
     response = response[start:end]
     try:
         parsed = UpdatePlanOutput.model_validate_json(response)
         changes = [c.model_dump() for c in parsed.changes]
+        print(f"[update_plan] changes={changes}")
+        if not changes:
+            print("[update_plan] WARNING: LLM returned empty changes list")
         update_plan_day(plan_id, changes)
         return {"status": "success", "changes": changes}
     except Exception as e:

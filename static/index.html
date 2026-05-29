@@ -8,10 +8,10 @@
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f0eb; color: #1a1a1a; min-height: 100vh; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #FAFAF8; color: #1A1A1A; min-height: 100vh; }
 
         /* ── Header ── */
-        header { background: #1a1a1a; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 100; }
+        header { background: #1A1A1A; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 100; }
         .logo { display: flex; align-items: center; gap: 10px; color: white; font-size: 18px; font-weight: 600; }
         .header-btns { display: flex; gap: 10px; position: relative; }
         .header-btn { background: transparent; border: 1px solid #555; color: white; padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; transition: border-color 0.2s; display: flex; align-items: center; gap: 6px; }
@@ -20,74 +20,81 @@
         /* ── Garmin sync popover ── */
         .sync-popover { display: none; position: absolute; top: calc(100% + 10px); right: 0; background: white; border-radius: 12px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); width: 280px; z-index: 200; }
         .sync-popover.open { display: block; }
-        .sync-popover-title { font-size: 13px; font-weight: 600; color: #1a1a1a; margin-bottom: 12px; }
+        .sync-popover-title { font-size: 13px; font-weight: 600; color: #1A1A1A; margin-bottom: 12px; }
         .sync-field { margin-bottom: 10px; }
-        .sync-field label { display: block; font-size: 12px; color: #777; margin-bottom: 4px; }
-        .sync-field input { width: 100%; border: 1px solid #e0d8d0; border-radius: 8px; padding: 7px 10px; font-size: 13px; outline: none; color: #1a1a1a; }
-        .sync-field input:focus { border-color: #c4614a; }
+        .sync-field label { display: block; font-size: 12px; color: #7A7A7A; margin-bottom: 4px; }
+        .sync-field input { width: 100%; border: 1px solid #E8E4E0; border-radius: 8px; padding: 7px 10px; font-size: 13px; outline: none; color: #1A1A1A; }
+        .sync-field input:focus { border-color: #2D5A7B; }
         .sync-actions { display: flex; gap: 8px; margin-top: 12px; }
-        .sync-default-btn { flex: 1; background: #f5f0eb; border: none; border-radius: 8px; padding: 8px; font-size: 12px; cursor: pointer; color: #555; }
-        .sync-default-btn:hover { background: #ede8e2; }
-        .sync-go-btn { flex: 1; background: #c4614a; border: none; border-radius: 8px; padding: 8px; font-size: 12px; color: white; cursor: pointer; font-weight: 500; }
-        .sync-go-btn:hover { background: #b0523c; }
-        .sync-error { font-size: 11px; color: #c4614a; margin-top: 8px; display: none; }
+        .sync-default-btn { flex: 1; background: #F0EDE8; border: none; border-radius: 8px; padding: 8px; font-size: 12px; cursor: pointer; color: #7A7A7A; }
+        .sync-default-btn:hover { background: #E8E4E0; }
+        .sync-go-btn { flex: 1; background: #2D5A7B; border: none; border-radius: 8px; padding: 8px; font-size: 12px; color: white; cursor: pointer; font-weight: 500; }
+        .sync-go-btn:hover { background: #1E3E58; }
+        .sync-error { font-size: 11px; color: #3A8B8B; margin-top: 8px; display: none; }
 
         /* ── Layout ── */
-        .main { display: grid; grid-template-columns: 1fr 600px; gap: 16px; padding: 12px 16px; align-items: start; }
-        .left-col { display: flex; flex-direction: column; gap: 16px; }
-        .bottom-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .main { display: grid; grid-template-columns: minmax(0, 1fr) 620px; gap: 16px; padding: 28px 16px 12px; align-items: stretch; }
+        .left-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; overflow: hidden; }
+        .top-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-width: 0; }
+        .health-card { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .spark-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr; gap: 8px; min-height: 0; }
+        #mileage-card { display: flex; flex-direction: column; }
+        .mileage-card-inner { flex: 1; min-height: 0; }
 
         /* ── Cards ── */
-        .card { background: white; border-radius: 12px; padding: 14px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .card { background: white; border-radius: 12px; padding: 14px 16px; border: 1px solid #E8E4E0; min-width: 0; overflow: hidden; }
         .card-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
 
-        /* ── Health chart (compact) ── */
-        .chart-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-        .chart-legend { display: flex; gap: 16px; margin-top: 8px; }
-        .legend-item { display: flex; align-items: center; gap: 5px; font-size: 11px; color: #888; }
-        .legend-dot { width: 7px; height: 7px; border-radius: 50%; }
+        /* ── Health sparklines ── */
+        .spark-card { background: #F0EDE8; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+        .spark-label { font-size: 10px; font-weight: 600; color: #7A7A7A; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 4px; }
+        .spark-value { font-size: 22px; font-weight: 700; color: #1A1A1A; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .spark-trend { font-size: 10px; color: #7A7A7A; margin-bottom: 8px; min-height: 14px; }
+        .spark-wrap { position: relative; }
+        .metric-card { background: #F0EDE8; border-radius: 10px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; }
+        .metric-label { font-size: 11px; color: #7A7A7A; }
+        .metric-value { font-size: 22px; font-weight: 700; color: #1A1A1A; }
 
         /* ── Activity card ── */
         .activity-name { font-size: 17px; font-weight: 600; margin-bottom: 3px; }
-        .activity-date { font-size: 12px; color: #888; margin-bottom: 12px; }
-        .stat-row { display: flex; justify-content: space-between; font-size: 13px; padding: 5px 0; border-bottom: 1px solid #f5f0eb; }
+        .activity-date { font-size: 12px; color: #7A7A7A; margin-bottom: 12px; }
+        .stat-row { display: flex; justify-content: space-between; font-size: 13px; padding: 5px 0; border-bottom: 1px solid #F0EDE8; }
         .stat-row:last-child { border-bottom: none; }
-        .stat-label { color: #777; }
+        .stat-label { color: #7A7A7A; }
         .stat-value { font-weight: 500; }
-        .placeholder-text { color: #aaa; font-size: 13px; text-align: center; padding: 20px 0; }
+        .placeholder-text { color: #A8A8A8; font-size: 13px; text-align: center; padding: 20px 0; }
 
-        /* ── Weather card ── */
-        .weather-location { font-size: 12px; color: #888; margin-bottom: 2px; }
-        .weather-temp { font-size: 38px; font-weight: 300; line-height: 1.1; }
-        .weather-feels { font-size: 14px; margin-bottom: 12px; }
-        .weather-row { display: flex; justify-content: space-between; font-size: 13px; padding: 4px 0; color: #555; }
+        /* ── Weather pill ── */
+        .weather-corner { display: inline-flex; align-items: center; gap: 5px; background: #F0EDE8; border-radius: 6px; padding: 3px 8px; font-size: 11px; color: #7A7A7A; margin-top: 3px; }
+
+        /* ── Mileage chart card ── */
+        .mileage-card-inner { position: relative; }
+        .mileage-total { font-size: 11px; color: #A8A8A8; margin-top: 4px; text-align: right; }
 
         /* ── Chatbot ── */
         .chat-card {
             display: flex; flex-direction: column;
             overflow: hidden; min-height: 0;
-            height: calc(100vh - 120px);
-            max-height: calc(100vh - 120px);
+            height: calc(100vh - 136px);
+            max-height: calc(100vh - 136px);
         }
-        .chat-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid #f0ece6; margin-bottom: 14px; flex-shrink: 0; }
+        .chat-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid #E8E4E0; margin-bottom: 14px; flex-shrink: 0; }
         .chat-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-        .online-badge { display: flex; align-items: center; gap: 5px; font-size: 12px; color: #666; }
-        .online-dot { width: 7px; height: 7px; background: #22c55e; border-radius: 50%; }
 
         .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; min-height: 0; }
         .chat-messages::-webkit-scrollbar { width: 4px; }
-        .chat-messages::-webkit-scrollbar-thumb { background: #e0d8d0; border-radius: 2px; }
+        .chat-messages::-webkit-scrollbar-thumb { background: #E8E4E0; border-radius: 2px; }
 
         /* coach — plain text on white */
         .msg { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; }
-        .msg-label { font-size: 11px; font-weight: 600; color: #bbb; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 2px; }
-        .msg-bubble { font-size: 13.5px; line-height: 1.6; color: #1a1a1a; background: none; padding: 0; }
-        .msg-time { font-size: 11px; color: #ccc; }
+        .msg-label { font-size: 11px; font-weight: 600; color: #B0B0B0; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 2px; }
+        .msg-bubble { font-size: 13.5px; line-height: 1.6; color: #1A1A1A; background: none; padding: 0; }
+        .msg-time { font-size: 11px; color: #C8C8C8; }
 
         /* user — bubble */
         .msg.user { align-items: flex-end; }
-        .msg.user .msg-label { color: #c4614a; }
-        .msg.user .msg-bubble { background: #c4614a; color: white; padding: 10px 14px; border-radius: 14px; border-bottom-right-radius: 4px; max-width: 85%; }
+        .msg.user .msg-label { color: #2D5A7B; }
+        .msg.user .msg-bubble { background: #2D5A7B; color: white; padding: 10px 14px; border-radius: 14px; border-bottom-right-radius: 4px; max-width: 85%; }
         .msg.user .msg-time { text-align: right; }
 
         .msg.coach .msg-bubble strong { font-weight: 600; }
@@ -95,39 +102,39 @@
         .msg.coach .msg-bubble li { margin: 3px 0; }
         .msg.coach .msg-bubble h3, .msg.coach .msg-bubble h4 { margin: 8px 0 4px; font-size: 14px; }
         .msg.coach .msg-bubble table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
-        .msg.coach .msg-bubble td, .msg.coach .msg-bubble th { border: 1px solid #e8e0d8; padding: 5px 9px; }
-        .msg.coach .msg-bubble th { background: #f5f0eb; font-weight: 600; }
+        .msg.coach .msg-bubble td, .msg.coach .msg-bubble th { border: 1px solid #E8E4E0; padding: 5px 9px; }
+        .msg.coach .msg-bubble th { background: #F0EDE8; font-weight: 600; }
         .msg.coach .msg-bubble p { margin: 4px 0; }
-        .msg.coach .msg-bubble hr { border: none; border-top: 1px solid #eee; margin: 8px 0; }
+        .msg.coach .msg-bubble hr { border: none; border-top: 1px solid #E8E4E0; margin: 8px 0; }
 
         /* ── Analyzing dots (inline) ── */
         .dots { display: flex; gap: 4px; }
-        .dots span { width: 6px; height: 6px; background: #c4614a; border-radius: 50%; animation: bounce 1.2s infinite; }
+        .dots span { width: 6px; height: 6px; background: #2D5A7B; border-radius: 50%; animation: bounce 1.2s infinite; }
         .dots span:nth-child(2) { animation-delay: 0.2s; }
         .dots span:nth-child(3) { animation-delay: 0.4s; }
         @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-5px); } }
         .analyzing-inline { display: none; align-items: center; gap: 6px; padding: 6px 0 2px; flex-shrink: 0; }
-        .analyzing-inline span { font-size: 12px; color: #aaa; }
+        .analyzing-inline span { font-size: 12px; color: #A8A8A8; }
 
         /* ── Input row ── */
-        .chat-input-row { display: flex; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid #f0ece6; margin-top: 8px; flex-shrink: 0; }
-        .chat-input-wrap { flex: 1; display: flex; align-items: center; background: #f5f0eb; border-radius: 24px; padding: 4px 6px 4px 18px; gap: 6px; }
-        .chat-input { flex: 1; background: transparent; border: none; font-size: 13.5px; outline: none; color: #1a1a1a; padding: 7px 0; }
-        .chat-input::placeholder { color: #bbb; }
-        .stop-btn { display: none; width: 30px; height: 30px; background: #1a1a1a; border: none; border-radius: 50%; cursor: pointer; align-items: center; justify-content: center; flex-shrink: 0; }
-        .send-btn { width: 38px; height: 38px; background: #c4614a; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }
-        .send-btn:hover { background: #b0523c; }
+        .chat-input-row { display: flex; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid #E8E4E0; margin-top: 8px; flex-shrink: 0; }
+        .chat-input-wrap { flex: 1; display: flex; align-items: center; background: white; border: 1px solid #E8E4E0; border-radius: 24px; padding: 4px 6px 4px 18px; gap: 6px; }
+        .chat-input { flex: 1; background: transparent; border: none; font-size: 13.5px; outline: none; color: #1A1A1A; padding: 7px 0; }
+        .chat-input::placeholder { color: #B0B0B0; }
+        .stop-btn { display: none; width: 30px; height: 30px; background: #1A1A1A; border: none; border-radius: 50%; cursor: pointer; align-items: center; justify-content: center; flex-shrink: 0; }
+        .send-btn { width: 38px; height: 38px; background: #2D5A7B; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }
+        .send-btn:hover { background: #1E3E58; }
 
         /* ── Training plan ── */
         .plan-section { padding: 0 16px 20px; }
-        .plan-card { background: white; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+        .plan-card { background: white; border-radius: 12px; padding: 20px; border: 1px solid #E8E4E0; }
         .plan-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
         .plan-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
-        .plan-view-btn { background: #c4614a; color: white; border: none; padding: 8px 16px; border-radius: 20px; font-size: 13px; cursor: pointer; }
-        .plan-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid #f0ece6; border-radius: 8px; overflow: hidden; }
-        .plan-day-header { background: #1a1a1a; color: white; text-align: center; padding: 10px; font-size: 13px; font-weight: 500; }
-        .plan-day-header.today { background: #c4614a; }
-        .plan-placeholder { grid-column: span 7; text-align: center; padding: 28px; color: #bbb; font-size: 13px; border-top: 1px solid #f0ece6; }
+        .plan-view-btn { background: #2D5A7B; color: white; border: none; padding: 8px 16px; border-radius: 20px; font-size: 13px; cursor: pointer; }
+        .plan-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid #E8E4E0; border-radius: 8px; overflow: hidden; }
+        .plan-day-header { background: #F0EDE8; color: #7A7A7A; text-align: center; padding: 8px 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; border-bottom: 1px solid #E8E4E0; }
+        .plan-day-header.today { background: #2D5A7B; color: white; border-bottom-color: #2D5A7B; }
+        .plan-placeholder { grid-column: span 7; text-align: center; padding: 28px; color: #B0B0B0; font-size: 13px; border-top: 1px solid #E8E4E0; }
 
         /* ── Plan modal ── */
         .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 300; align-items: center; justify-content: center; }
@@ -135,85 +142,101 @@
         .modal { background: white; border-radius: 16px; padding: 28px; width: 460px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
         .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
         .modal-title { font-size: 16px; font-weight: 600; }
-        .modal-close { background: none; border: none; font-size: 20px; color: #aaa; cursor: pointer; line-height: 1; }
-        .modal-close:hover { color: #1a1a1a; }
-        .modal-step-indicator { font-size: 12px; color: #aaa; margin-bottom: 20px; }
+        .modal-close { background: none; border: none; font-size: 20px; color: #A8A8A8; cursor: pointer; line-height: 1; }
+        .modal-close:hover { color: #1A1A1A; }
+        .modal-step-indicator { font-size: 12px; color: #A8A8A8; margin-bottom: 20px; }
         .modal-field { margin-bottom: 14px; }
-        .modal-field label { display: block; font-size: 12px; color: #777; margin-bottom: 5px; font-weight: 500; }
-        .modal-field input, .modal-field select { width: 100%; border: 1px solid #e0d8d0; border-radius: 8px; padding: 9px 12px; font-size: 13.5px; outline: none; color: #1a1a1a; }
-        .modal-field input:focus, .modal-field select:focus { border-color: #c4614a; }
+        .modal-field label { display: block; font-size: 12px; color: #7A7A7A; margin-bottom: 5px; font-weight: 500; }
+        .modal-field input, .modal-field select { width: 100%; border: 1px solid #E8E4E0; border-radius: 8px; padding: 9px 12px; font-size: 13.5px; outline: none; color: #1A1A1A; }
+        .modal-field input:focus, .modal-field select:focus { border-color: #2D5A7B; }
         .modal-days { display: flex; gap: 6px; flex-wrap: wrap; }
-        .day-chip { padding: 6px 12px; border: 1px solid #e0d8d0; border-radius: 20px; font-size: 12px; cursor: pointer; color: #555; transition: all 0.15s; user-select: none; }
-        .day-chip.selected { background: #c4614a; border-color: #c4614a; color: white; }
-        .modal-toggle { display: flex; gap: 0; border: 1px solid #e0d8d0; border-radius: 8px; overflow: hidden; }
-        .modal-toggle button { flex: 1; background: none; border: none; padding: 8px; font-size: 13px; cursor: pointer; color: #555; transition: all 0.15s; }
-        .modal-toggle button.active { background: #c4614a; color: white; }
+        .day-chip { padding: 6px 12px; border: 1px solid #E8E4E0; border-radius: 20px; font-size: 12px; cursor: pointer; color: #7A7A7A; transition: all 0.15s; user-select: none; }
+        .day-chip.selected { background: #2D5A7B; border-color: #2D5A7B; color: white; }
+        .modal-toggle { display: flex; gap: 0; border: 1px solid #E8E4E0; border-radius: 8px; overflow: hidden; }
+        .modal-toggle button { flex: 1; background: none; border: none; padding: 8px; font-size: 13px; cursor: pointer; color: #7A7A7A; transition: all 0.15s; }
+        .modal-toggle button.active { background: #2D5A7B; color: white; }
         .modal-actions { display: flex; gap: 10px; margin-top: 22px; }
-        .modal-btn-secondary { flex: 1; background: #f5f0eb; border: none; border-radius: 8px; padding: 10px; font-size: 13px; cursor: pointer; color: #555; }
-        .modal-btn-primary { flex: 1; background: #c4614a; border: none; border-radius: 8px; padding: 10px; font-size: 13px; color: white; cursor: pointer; font-weight: 500; }
-        .modal-btn-primary:hover { background: #b0523c; }
-        .modal-error { font-size: 12px; color: #c4614a; margin-top: 8px; display: none; }
-        .create-plan-btn { background: #c4614a; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 500; margin-top: 8px; }
-        .create-plan-btn:hover { background: #b0523c; }
+        .modal-btn-secondary { flex: 1; background: #F0EDE8; border: none; border-radius: 8px; padding: 10px; font-size: 13px; cursor: pointer; color: #7A7A7A; }
+        .modal-btn-primary { flex: 1; background: #2D5A7B; border: none; border-radius: 8px; padding: 10px; font-size: 13px; color: white; cursor: pointer; font-weight: 500; }
+        .modal-btn-primary:hover { background: #1E3E58; }
+        .modal-error { font-size: 12px; color: #3A8B8B; margin-top: 8px; display: none; }
+        .create-plan-btn { background: #2D5A7B; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 500; margin-top: 8px; }
+        .create-plan-btn:hover { background: #1E3E58; }
 
         /* ── Follow-up chips ── */
         .followup-chips { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-width: 90%; }
-        .followup-chip { background: white; border: 1px solid #e0d8d0; border-radius: 16px; padding: 8px 14px; font-size: 13px; color: #555; cursor: pointer; text-align: left; transition: border-color 0.15s, color 0.15s; }
-        .followup-chip:hover { border-color: #c4614a; color: #c4614a; }
+        .followup-chip { background: white; border: 1px solid #E8E4E0; border-radius: 16px; padding: 8px 14px; font-size: 13px; color: #7A7A7A; cursor: pointer; text-align: left; transition: border-color 0.15s, color 0.15s; }
+        .followup-chip:hover { border-color: #2D5A7B; color: #2D5A7B; }
+
+        /* ── Chat empty state ── */
+        .chat-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; flex: 1; padding: 16px; text-align: center; min-height: 0; }
+        .chat-empty-brand { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+        .chat-empty-brand-name { font-size: 18px; font-weight: 700; color: #1A1A1A; }
+        .chat-empty-brand-sub { font-size: 12px; color: #A8A8A8; }
+        .chat-empty-health { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+        .chat-empty-pill { background: #F0EDE8; border-radius: 20px; padding: 5px 12px; font-size: 12px; color: #7A7A7A; }
+        .chat-empty-pill strong { color: #1A1A1A; font-weight: 600; }
+        .chat-empty-prompts { width: 100%; max-width: 380px; }
+        .chat-empty-prompts-label { font-size: 10px; color: #C8C8C8; letter-spacing: 0.06em; font-weight: 600; text-transform: uppercase; margin-bottom: 8px; }
+        .prompt-chip { display: block; width: 100%; background: white; border: 1px solid #E8E4E0; border-radius: 10px; padding: 10px 14px; font-size: 13px; color: #1A1A1A; cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s; margin-bottom: 6px; }
+        .prompt-chip:last-child { margin-bottom: 0; }
+        .prompt-chip:hover { border-color: #2D5A7B; background: #F5F8FC; }
 
         /* ── Resize handle hint ── */
-        .chat-card::after { content: ''; display: block; height: 4px; background: linear-gradient(to right, #f0ece6, #e0d8d0, #f0ece6); border-radius: 2px; margin-top: 4px; cursor: ns-resize; flex-shrink: 0; }
+        .chat-card::after { content: ''; display: block; height: 4px; background: linear-gradient(to right, #E8E4E0, #D8D4D0, #E8E4E0); border-radius: 2px; margin-top: 4px; cursor: ns-resize; flex-shrink: 0; }
 
         /* ── Plan day cells ── */
-        .plan-day-cell { padding: 10px 6px; text-align: center; cursor: pointer; border-right: 1px solid #f0ece6; border-top: 1px solid #f0ece6; transition: background 0.15s; min-height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; position: relative; }
+        .plan-day-cell { padding: 10px 6px; text-align: center; cursor: pointer; border-right: 1px solid #E8E4E0; border-top: 1px solid #E8E4E0; transition: background 0.15s; min-height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; position: relative; }
         .plan-day-cell:last-child { border-right: none; }
-        .plan-day-cell:hover { background: #f9f6f3; }
-        .plan-day-cell.today { background: #fff8f6; }
-        .plan-day-miles { font-size: 12px; font-weight: 500; color: #1a1a1a; }
-        .plan-day-pace  { font-size: 11px; color: #888; }
-        .plan-day-notes { font-size: 10px; color: #bbb; }
-        .activity-logged-btn { position: absolute; bottom: 5px; right: 5px; background: none; border: none; padding: 0; font-size: 9px; font-weight: 500; color: #bbb; cursor: pointer; letter-spacing: 0.02em; }
-        .activity-logged-btn:hover { color: #888; }
-        .plan-day-cell.completed { background: #f0fdf4; }
-        .plan-check { position: absolute; top: 5px; right: 6px; font-size: 11px; color: #16a34a; font-weight: 700; line-height: 1; pointer-events: none; }
-        .activity-divider { border: none; border-top: 1px solid #f0ece6; margin: 12px 0 10px; }
-        .activity-section-label { font-size: 11px; font-weight: 600; color: #aaa; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px; }
+        .plan-day-cell:hover { background: #F4F1EE; }
+        .plan-day-cell.today { background: #EDF3F8; }
+        .plan-day-cell.rest-day { background: #FAFAF8; opacity: 0.75; }
+        .plan-day-cell.rest-day:hover { opacity: 1; background: #F4F1EE; }
+        .plan-day-miles { font-size: 12px; font-weight: 500; color: #1A1A1A; }
+        .plan-day-pace  { font-size: 11px; color: #7A7A7A; }
+        .plan-day-notes { font-size: 10px; color: #B0B0B0; }
+        .activity-logged-btn { position: absolute; bottom: 5px; right: 5px; background: none; border: none; padding: 0; font-size: 9px; font-weight: 500; color: #B0B0B0; cursor: pointer; letter-spacing: 0.02em; }
+        .activity-logged-btn:hover { color: #3A8B8B; }
+        .plan-day-cell.completed { background: #E8F5EE; border-left: 3px solid #4A8B6E; }
+        .plan-check { position: absolute; top: 5px; right: 6px; font-size: 10px; color: #4A8B6E; font-weight: 700; line-height: 1; pointer-events: none; }
+        .activity-divider { border: none; border-top: 1px solid #E8E4E0; margin: 12px 0 10px; }
+        .activity-section-label { font-size: 11px; font-weight: 600; color: #A8A8A8; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px; }
 
         /* ── Workout type badges ── */
         .workout-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; letter-spacing: 0.04em; }
-        .badge-EASY     { background: #dcfce7; color: #16a34a; }
-        .badge-AEROBIC  { background: #cffafe; color: #0e7490; }
-        .badge-LONG     { background: #dbeafe; color: #1d4ed8; }
-        .badge-TEMPO    { background: #fef3c7; color: #d97706; }
-        .badge-INTERVAL { background: #fee2e2; color: #dc2626; }
-        .badge-STRENGTH { background: #fce7f3; color: #be185d; }
-        .badge-REST     { background: #f3f4f6; color: #9ca3af; }
-        .badge-CROSS    { background: #ede9fe; color: #7c3aed; }
-        .month-cell { min-height: 64px; border-radius: 10px; padding: 6px; background: #fafafa; border: 1px solid #f0ece6; cursor: pointer; transition: background 0.15s; }
-        .month-cell:hover { background: #f5f0eb; }
+        .badge-EASY     { background: #E8F5EE; color: #2D7A5A; }
+        .badge-AEROBIC  { background: #E8F5EE; color: #2D7A5A; }
+        .badge-LONG     { background: #E8EEF5; color: #1E3E58; }
+        .badge-TEMPO    { background: #FDF2E3; color: #A87828; }
+        .badge-INTERVAL { background: #FDEDEA; color: #B04030; }
+        .badge-STRENGTH { background: #DCE9F5; color: #2D5A7B; }
+        .badge-REST     { background: #EBEBEB; color: #A8A8A8; }
+        .badge-CROSS    { background: #EDE9FE; color: #7C3AED; }
+        .month-cell { min-height: 64px; border-radius: 10px; padding: 6px; background: #FAFAF8; border: 1px solid #E8E4E0; cursor: pointer; transition: background 0.15s; }
+        .month-cell:hover { background: #F0EDE8; }
         .month-cell.empty { background: transparent; border-color: transparent; cursor: default; }
-        .month-cell.today { border-color: #1a1a1a; }
+        .month-cell.today { border-color: #1A1A1A; }
         .month-cell-date { font-size: 11px; color: #999; margin-bottom: 4px; }
-        .month-cell.today .month-cell-date { color: #1a1a1a; font-weight: 600; }
-        .month-day-header { font-size: 11px; color: #bbb; text-align: center; padding-bottom: 4px; font-weight: 500; }
+        .month-cell.today .month-cell-date { color: #1A1A1A; font-weight: 600; }
+        .month-day-header { font-size: 11px; color: #B0B0B0; text-align: center; padding-bottom: 4px; font-weight: 500; }
 
         /* ── Plan generation progress bar ── */
         .plan-generating { padding: 28px; text-align: center; }
-        .plan-generating-label { font-size: 13px; color: #555; margin-bottom: 12px; }
-        .plan-progress-track { background: #f0ece6; border-radius: 99px; height: 6px; overflow: hidden; }
-        .plan-progress-fill  { height: 100%; background: #c4614a; border-radius: 99px; width: 0%; transition: width 0.8s ease; }
-        .plan-generating-sub { font-size: 11px; color: #bbb; margin-top: 8px; }
+        .plan-generating-label { font-size: 13px; color: #7A7A7A; margin-bottom: 12px; }
+        .plan-progress-track { background: #E8E4E0; border-radius: 99px; height: 6px; overflow: hidden; }
+        .plan-progress-fill  { height: 100%; background: #2D5A7B; border-radius: 99px; width: 0%; transition: width 0.8s ease; }
+        .plan-generating-sub { font-size: 11px; color: #B0B0B0; margin-top: 8px; }
 
         /* ── Plan week nav ── */
         .plan-week-nav  { display: flex; align-items: center; gap: 10px; }
-        .plan-week-btn  { background: none; border: 1px solid #e0d8d0; border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 13px; color: #555; transition: border-color 0.15s; }
-        .plan-week-btn:hover { border-color: #c4614a; color: #c4614a; }
-        .plan-week-label { font-size: 13px; color: #555; min-width: 160px; text-align: center; }
+        .plan-week-btn  { background: none; border: 1px solid #E8E4E0; border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 13px; color: #7A7A7A; transition: border-color 0.15s; }
+        .plan-week-btn:hover { border-color: #2D5A7B; color: #2D5A7B; }
+        .plan-week-label { font-size: 13px; color: #7A7A7A; min-width: 160px; text-align: center; }
 
         /* ── Interval table ── */
         .interval-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 14px; }
-        .interval-table th { background: #f5f0eb; padding: 7px 10px; text-align: left; font-weight: 600; font-size: 11px; color: #777; }
-        .interval-table td { padding: 7px 10px; border-top: 1px solid #f0ece6; vertical-align: middle; }
+        .interval-table th { background: #F0EDE8; padding: 7px 10px; text-align: left; font-weight: 600; font-size: 11px; color: #7A7A7A; }
+        .interval-table td { padding: 7px 10px; border-top: 1px solid #E8E4E0; vertical-align: middle; }
     </style>
 </head>
 <body>
@@ -221,7 +244,7 @@
 <!-- Header -->
 <header>
     <div class="logo">
-        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#c4614a" stroke-width="2.5">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#2D5A7B" stroke-width="2.5">
             <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l3-8 4 16 3-8 2 4 2-4h2"/>
         </svg>
         RunCoach
@@ -263,29 +286,54 @@
     <!-- Left column -->
     <div class="left-col">
 
-        <!-- Health chart (compact) -->
-        <div class="card">
-            <div class="chart-header">
-                <div class="card-title" style="margin-bottom:0;font-size:14px">Health Data (Past 7 Days)</div>
-                <div id="chart-averages" style="display:flex;gap:16px;font-size:12px;color:#666;"></div>
-            </div>
-            <canvas id="healthChart" height="120"></canvas>
-            <div class="chart-legend">
-                <div class="legend-item"><div class="legend-dot" style="background:#c4614a"></div> Steps (K)</div>
-                <div class="legend-item"><div class="legend-dot" style="background:#e8736a"></div> RHR</div>
-                <div class="legend-item"><div class="legend-dot" style="background:#2d7dd2"></div> Sleep (hrs)</div>
-            </div>
-        </div>
-
-        <!-- Activity + Weather -->
-        <div class="bottom-row">
+        <!-- Activity + Mileage (top) -->
+        <div class="top-row">
             <div class="card" id="activity-card">
                 <div class="card-title">Most Recent Activity</div>
                 <div class="placeholder-text">Loading...</div>
             </div>
-            <div class="card" id="weather-card">
-                <div class="weather-location">Loading...</div>
-                <div class="weather-temp">—</div>
+            <div class="card" id="mileage-card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                    <div class="card-title" style="margin:0;font-size:14px">Weekly Mileage</div>
+                    <span id="mileage-this-week" style="font-size:12px;color:#1A1A1A;font-weight:600;"></span>
+                </div>
+                <div class="mileage-card-inner" style="flex:1;min-height:0;"><canvas id="mileageChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Health data sparklines (bottom) -->
+        <div class="card health-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-shrink:0">
+                <div>
+                    <div style="font-size:14px;font-weight:600;margin-bottom:3px">Health Data</div>
+                    <div class="weather-corner" id="weather-corner">
+                        <span id="weather-mini-text">—</span>
+                    </div>
+                </div>
+            </div>
+            <div class="spark-grid">
+                <div class="spark-card">
+                    <div class="spark-label">Steps</div>
+                    <div class="spark-value" id="spark-steps-val">—</div>
+                    <div class="spark-trend" id="spark-steps-trend"></div>
+                    <div class="spark-wrap" style="flex:1;min-height:0;position:relative;"><canvas id="spark-steps-chart"></canvas></div>
+                </div>
+                <div class="spark-card">
+                    <div class="spark-label">Sleep</div>
+                    <div class="spark-value" id="spark-sleep-val">—</div>
+                    <div class="spark-trend" id="spark-sleep-trend"></div>
+                    <div class="spark-wrap" style="flex:1;min-height:0;position:relative;"><canvas id="spark-sleep-chart"></canvas></div>
+                </div>
+                <div class="spark-card">
+                    <div class="spark-label">Resting HR</div>
+                    <div class="spark-value" id="spark-rhr-val">—</div>
+                    <div class="spark-trend" id="spark-rhr-trend"></div>
+                    <div class="spark-wrap" style="flex:1;min-height:0;position:relative;"><canvas id="spark-rhr-chart"></canvas></div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;flex-shrink:0">
+                <div class="metric-card"><div class="metric-label">VO₂ Max</div><div class="metric-value" id="metric-vo2-val">—</div></div>
+                <div class="metric-card"><div class="metric-label">Body Battery</div><div class="metric-value" id="metric-bb-val">—</div></div>
             </div>
         </div>
     </div>
@@ -294,23 +342,31 @@
     <div class="card chat-card">
         <div class="chat-header">
             <div class="chat-title">
-                <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="#1a1a1a" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#2D5A7B" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l3-8 4 16 3-8 2 4 2-4h2"/>
                 </svg>
-                Chatbot
+                Coach
             </div>
-            <div style="display:flex;align-items:center;gap:10px;">
-                <div class="online-badge"><div class="online-dot"></div> Online</div>
-                <button onclick="clearChat()" title="Clear chat" style="background:none;border:none;cursor:pointer;padding:4px;color:#bbb;font-size:12px;display:flex;align-items:center;gap:4px;">
-                    <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                    </svg>
-                    Clear
-                </button>
+            <button onclick="clearChat()" title="New conversation" style="background:none;border:none;cursor:pointer;padding:4px 8px;color:#C8C8C8;font-size:11px;letter-spacing:0.02em;transition:color 0.15s;" onmouseover="this.style.color='#7A7A7A'" onmouseout="this.style.color='#C8C8C8'">New chat</button>
+        </div>
+
+        <!-- Empty state -->
+        <div class="chat-empty" id="chat-empty">
+            <div class="chat-empty-brand">
+                <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="#2D5A7B" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l3-8 4 16 3-8 2 4 2-4h2"/>
+                </svg>
+                <div class="chat-empty-brand-name">RunCoach</div>
+                <div class="chat-empty-brand-sub">Your personal running coach</div>
+            </div>
+            <div class="chat-empty-health" id="chat-empty-health"></div>
+            <div class="chat-empty-prompts">
+                <div class="chat-empty-prompts-label">Try asking</div>
+                <div id="chat-prompt-chips"></div>
             </div>
         </div>
 
-        <div class="chat-messages" id="chat-messages"></div>
+        <div class="chat-messages" id="chat-messages" style="display:none"></div>
 
         <div class="analyzing-inline" id="analyzing-bar">
             <div class="dots"><span></span><span></span><span></span></div>
@@ -357,11 +413,7 @@
                     <button class="plan-week-btn" onclick="shiftWeek(1)">Next →</button>
                     <button class="plan-week-btn" id="jump-today-btn" onclick="jumpToToday()" style="display:none;">Today</button>
                 </div>
-                <button id="delete-plan-btn" onclick="confirmDeletePlan()" title="Delete plan" style="background:none;border:none;cursor:pointer;padding:4px;display:none;">
-                    <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#999" stroke-width="2">
-                        <path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
-                    </svg>
-                </button>
+                <button id="delete-plan-btn" onclick="confirmDeletePlan()" title="Delete plan" style="background:none;border:none;cursor:pointer;padding:4px 8px;display:none;font-size:11px;color:#C8C8C8;letter-spacing:0.02em;transition:color 0.15s;" onmouseover="this.style.color='#7A7A7A'" onmouseout="this.style.color='#C8C8C8'">Delete plan</button>
             </div>
         </div>
         <div class="plan-grid" id="plan-grid"></div>
@@ -575,13 +627,41 @@
     </div>
 </div>
 
+<!-- Activity detail modal -->
+<div class="modal-overlay" id="activity-modal">
+    <div class="modal" style="max-width:480px;width:90vw">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title" id="activity-modal-title"></div>
+                <div style="font-size:12px;color:#aaa;margin-top:3px" id="activity-modal-date"></div>
+            </div>
+            <button class="modal-close" onclick="closeActivityModal()">×</button>
+        </div>
+        <div id="activity-modal-body"></div>
+    </div>
+</div>
+
 <script>
 const API   = "http://localhost:8000";
 let   SID   = crypto.randomUUID();
 const DAYS  = ["M","T","W","T","F","S","S"];
 const TODAY = new Date().getDay();
 let   abortController = null;
-let   healthChart     = null;
+let   _stepsChart = null, _sleepChart = null, _rhrChart = null;
+let   _latestHealth = {};
+
+const SUGGESTED_PROMPTS = [
+    "How did my training go this week?",
+    "What should my long run pace be?",
+    "Am I on track for my race goal?",
+    "Can you analyze my recent workout trends?",
+    "What are my heart rate zones based on my data?",
+    "How can I improve my race time?",
+    "Should I do a recovery run today?",
+    "What does my next week of training look like?",
+    "How is my sleep affecting my performance?",
+    "What's a good pre-race week plan?",
+];
 
 // ── Toast ─────────────────────────────────────────────────────────────────────
 
@@ -599,6 +679,50 @@ function showToast(msg, color = '#1a1a1a') {
 
 function notImplemented(name) { showToast(`${name} coming soon`); }
 
+// ── Chat empty state ──────────────────────────────────────────────────────────
+
+function renderEmptyState() {
+    const emptyEl = document.getElementById('chat-empty');
+    const msgsEl  = document.getElementById('chat-messages');
+    if (!emptyEl) return;
+
+    // Always update health pills (re-runs when health data loads)
+    const healthEl = document.getElementById('chat-empty-health');
+    const pills = [];
+    if (_latestHealth.rhr)   pills.push(`<div class="chat-empty-pill"><strong>${Math.round(_latestHealth.rhr)} bpm</strong> resting HR</div>`);
+    if (_latestHealth.sleep) pills.push(`<div class="chat-empty-pill"><strong>${_latestHealth.sleep}h</strong> sleep</div>`);
+    if (_latestHealth.steps) pills.push(`<div class="chat-empty-pill"><strong>${(_latestHealth.steps / 1000).toFixed(1)}K</strong> steps today</div>`);
+    if (healthEl) healthEl.innerHTML = pills.join('');
+
+    // Only show empty state if no messages exist
+    const hasMessages = msgsEl && msgsEl.children.length > 0;
+    if (hasMessages) return;
+
+    const shuffled = [...SUGGESTED_PROMPTS].sort(() => Math.random() - 0.5).slice(0, 3);
+    const chipsEl = document.getElementById('chat-prompt-chips');
+    if (chipsEl) {
+        chipsEl.innerHTML = shuffled.map(p => `<button class="prompt-chip">${p}</button>`).join('');
+        chipsEl.querySelectorAll('.prompt-chip').forEach((btn, i) => {
+            btn.addEventListener('click', () => sendPrompt(shuffled[i]));
+        });
+    }
+
+    emptyEl.style.display = 'flex';
+    if (msgsEl) msgsEl.style.display = 'none';
+}
+
+function hideEmptyState() {
+    const emptyEl = document.getElementById('chat-empty');
+    const msgsEl  = document.getElementById('chat-messages');
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (msgsEl)  msgsEl.style.display  = 'flex';
+}
+
+function sendPrompt(text) {
+    document.getElementById('chat-input').value = text;
+    sendMessage();
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function isoDate(offsetDays = 0) {
@@ -609,65 +733,105 @@ function fmtTime() {
     return new Date().toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
 }
 
-// ── Health chart ──────────────────────────────────────────────────────────────
+// ── Health sparklines ─────────────────────────────────────────────────────────
 
 async function loadHealthChart() {
     try {
         const res  = await fetch(`${API}/health/recent?start_date=${localOffset(-6)}&end_date=${localToday()}`);
         const rows = await res.json();
         if (!rows || !rows.length) return;
-        const labels = rows.map(r => {
-            const [y, m, d] = r.calendar_date.split('T')[0].split('-');
-            return new Date(+y, +m - 1, +d).toLocaleDateString('en-US', {weekday:'short'});
-        });
-        const steps  = rows.map(r => r.total_steps ? +(r.total_steps / 1000).toFixed(1) : 0);
-        const rhr    = rows.map(r => r.rhr || 0);
-        const sleep  = rows.map(r => {
-            if (!r.total_sleep) return 0;
+
+        const steps = rows.map(r => r.total_steps ? +(r.total_steps / 1000).toFixed(1) : null);
+        const rhr   = rows.map(r => r.rhr || null);
+        const sleep = rows.map(r => {
+            if (!r.total_sleep) return null;
             const [h, m] = r.total_sleep.split(':');
             return +(+h + +m / 60).toFixed(1);
         });
 
-        // Show averages
-        const avg = (arr) => { const v = arr.filter(x => x); return v.length ? (v.reduce((a,b) => a+b, 0) / v.length) : null; };
-        const avgSteps = avg(steps), avgRhr = avg(rhr), avgSleep = avg(sleep);
-        document.getElementById('chart-averages').innerHTML = [
-            avgSteps ? `<span>Steps: <strong>${avgSteps.toFixed(1)}K</strong></span>` : '',
-            avgRhr   ? `<span>RHR: <strong>${Math.round(avgRhr)} bpm</strong></span>` : '',
-            avgSleep ? `<span>Sleep: <strong>${avgSleep.toFixed(1)}h</strong></span>` : '',
-        ].join('');
-        loadMetricBadges();
-        if (healthChart) { healthChart.destroy(); healthChart = null; }
-        healthChart = new Chart(document.getElementById('healthChart'), {
-            data: { labels, datasets: [
-                { type:'bar',  label:'Steps (K)',  data:steps, backgroundColor:'#c4614a', borderRadius:3, yAxisID:'y', order:2 },
-                { type:'line', label:'RHR',         data:rhr,   borderColor:'#e8736a', backgroundColor:'transparent', pointBackgroundColor:'#e8736a', pointRadius:4, tension:0.3, yAxisID:'y2', order:1 },
-                { type:'line', label:'Sleep (hrs)', data:sleep, borderColor:'#2d7dd2', backgroundColor:'transparent', pointBackgroundColor:'#2d7dd2', pointRadius:4, tension:0.3, yAxisID:'ySleep', order:1 },
-            ]},
-            options: {
-                responsive:true, maintainAspectRatio:true,
-                plugins:{
-                    legend:{ display:false },
-                    tooltip:{
-                        mode:'index', intersect:false,
-                        callbacks:{
-                            label: ctx => {
-                                if (ctx.dataset.label === 'Sleep (hrs)') return ` Sleep: ${ctx.raw}h`;
-                                if (ctx.dataset.label === 'RHR') return ` RHR: ${ctx.raw} bpm`;
-                                return ` Steps: ${ctx.raw}K`;
-                            }
-                        }
-                    }
-                },
-                scales:{
-                    y:      { position:'left',  grid:{ color:'#f5f0eb' }, ticks:{ color:'#aaa', font:{size:10} } },
-                    y2:     { position:'right', grid:{ display:false },   ticks:{ color:'#aaa', font:{size:10} } },
-                    ySleep: { position:'right', display:false, min:0, max:24 },
-                    x:      { grid:{ display:false }, ticks:{ color:'#aaa', font:{size:10} } },
-                }
-            }
+        // Today's values (last row)
+        const last = rows[rows.length - 1];
+        const todaySteps = last.total_steps ? (last.total_steps / 1000).toFixed(1) + 'K' : '—';
+        const todaySleep = last.total_sleep ? (() => {
+            const [h, m] = last.total_sleep.split(':');
+            return (+h + +m / 60).toFixed(1) + 'h';
+        })() : '—';
+        const todayRhr = last.rhr ? Math.round(last.rhr) + ' bpm' : '—';
+        document.getElementById('spark-steps-val').textContent = todaySteps;
+        document.getElementById('spark-sleep-val').textContent = todaySleep;
+        document.getElementById('spark-rhr-val').textContent = todayRhr;
+
+        _latestHealth = {
+            steps: last.total_steps || null,
+            rhr:   last.rhr || null,
+            sleep: last.total_sleep ? (() => { const [h, m] = last.total_sleep.split(':'); return (+h + +m/60).toFixed(1); })() : null,
+        };
+        renderEmptyState();
+
+        // Trend arrows: compare recent half vs older half
+        function trendArrow(arr, lowerIsBetter = false) {
+            const valid = arr.filter(x => x != null);
+            if (valid.length < 4) return '';
+            const half = Math.floor(valid.length / 2);
+            const older  = valid.slice(0, half).reduce((a,b) => a+b, 0) / half;
+            const recent = valid.slice(half).reduce((a,b) => a+b, 0) / (valid.length - half);
+            const diff = recent - older;
+            if (Math.abs(diff) < 0.01 * Math.abs(older)) return '';
+            const pct = Math.abs(diff / older * 100).toFixed(0);
+            const up  = diff > 0;
+            const good = lowerIsBetter ? !up : up;
+            const color = good ? '#4A8B6E' : '#3A8B8B';
+            return `<span style="color:${color}">${up ? '↑' : '↓'} ${pct}%</span>`;
+        }
+        document.getElementById('spark-steps-trend').innerHTML = trendArrow(steps);
+        document.getElementById('spark-sleep-trend').innerHTML = trendArrow(sleep);
+        document.getElementById('spark-rhr-trend').innerHTML   = trendArrow(rhr, true);
+
+        const dayLabels = rows.map(r => {
+            const [y, m, d] = r.calendar_date.split('T')[0].split('-');
+            return new Date(+y, +m-1, +d).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
         });
-    } catch(e) { console.error('Health chart:', e); }
+
+        const sparkTip = (suffix) => ({
+            mode: 'index', intersect: false, displayColors: false,
+            backgroundColor: 'white', borderColor: '#E8E4E0', borderWidth: 1,
+            titleColor: '#1A1A1A', bodyColor: '#7A7A7A', padding: 8, cornerRadius: 8,
+            callbacks: { label: ctx => ctx.raw != null ? `${ctx.raw}${suffix}` : 'No data' }
+        });
+
+        const noAxes = { x: { display: false }, y: { display: false } };
+        const baseOpts = (suffix) => ({
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { display: false }, tooltip: sparkTip(suffix) },
+            scales: noAxes
+        });
+
+        if (_stepsChart) { _stepsChart.destroy(); }
+        _stepsChart = new Chart(document.getElementById('spark-steps-chart'), {
+            type: 'bar',
+            data: { labels: dayLabels, datasets: [{ data: steps, backgroundColor: '#2D5A7B', borderRadius: 2, barPercentage: 0.7 }] },
+            options: { ...baseOpts('K'), scales: { x: { display: false }, y: { display: false, beginAtZero: true } } }
+        });
+
+        const lineOpts = (color, suffix) => ({
+            ...baseOpts(suffix), spanGaps: true,
+            elements: { point: { radius: 3, hoverRadius: 5, backgroundColor: color, borderColor: color, borderWidth: 1 } }
+        });
+
+        if (_sleepChart) { _sleepChart.destroy(); }
+        _sleepChart = new Chart(document.getElementById('spark-sleep-chart'), {
+            type: 'line',
+            data: { labels: dayLabels, datasets: [{ data: sleep, borderColor: '#3A8B8B', backgroundColor: 'rgba(58,139,139,0.12)', fill: true, tension: 0.4, borderWidth: 2, spanGaps: true }] },
+            options: lineOpts('#3A8B8B', 'h')
+        });
+
+        if (_rhrChart) { _rhrChart.destroy(); }
+        _rhrChart = new Chart(document.getElementById('spark-rhr-chart'), {
+            type: 'line',
+            data: { labels: dayLabels, datasets: [{ data: rhr, borderColor: '#3A8B8B', backgroundColor: 'rgba(58,139,139,0.1)', fill: true, tension: 0.4, borderWidth: 2, spanGaps: true }] },
+            options: lineOpts('#3A8B8B', ' bpm')
+        });
+    } catch(e) { console.error('Health sparklines:', e); }
 }
 
 // ── Activity card ─────────────────────────────────────────────────────────────
@@ -679,9 +843,37 @@ function _fmtActivityType(t) {
     return t ? t.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Run';
 }
 
+function openActivityModal(a) {
+    const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
+    const dateStr = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'});
+    document.getElementById('activity-modal-title').textContent = _fmtActivityType(a.activity_type);
+    document.getElementById('activity-modal-date').textContent = dateStr;
+    let html = '';
+    if (a.miles)           html += `<div class="stat-row"><span class="stat-label">Miles</span><span class="stat-value">${a.miles.toFixed(1)} mi</span></div>`;
+    if (a.average_pace)    html += `<div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${a.average_pace}</span></div>`;
+    if (a.avg_hr)          html += `<div class="stat-row"><span class="stat-label">Avg HR</span><span class="stat-value">${Math.round(a.avg_hr)} bpm</span></div>`;
+    if (a.calories_burned) html += `<div class="stat-row"><span class="stat-label">Calories</span><span class="stat-value">${Math.round(a.calories_burned)}</span></div>`;
+    if (a.total_time)      html += `<div class="stat-row"><span class="stat-label">Duration</span><span class="stat-value">${a.total_time}</span></div>`;
+    if (a.splits && a.splits.length) {
+        html += `<div style="margin-top:14px">
+            <div class="activity-section-label" style="margin-bottom:6px">Splits</div>
+            <table class="interval-table">
+                <thead><tr><th>Lap</th><th>Miles</th><th>Pace</th><th>HR</th></tr></thead>
+                <tbody>${a.splits.map(s => `<tr><td>${s.lap}</td><td>${s.miles ?? '—'}</td><td>${s.pace || '—'}</td><td>${s.avg_hr ?? '—'}</td></tr>`).join('')}</tbody>
+            </table>
+        </div>`;
+    }
+    document.getElementById('activity-modal-body').innerHTML = html;
+    document.getElementById('activity-modal').classList.add('open');
+}
+
+function closeActivityModal() {
+    document.getElementById('activity-modal').classList.remove('open');
+}
+
 function _renderActivityCard() {
     const card = document.getElementById('activity-card');
-    const toggleBtn = `<button onclick="toggleActivityView()" style="background:none;border:1px solid #e0d8d0;border-radius:8px;padding:3px 10px;font-size:11px;cursor:pointer;color:#555;">${_activityWeekView ? 'Latest' : 'This week'}</button>`;
+    const toggleBtn = `<button onclick="toggleActivityView()" style="background:none;border:1px solid #E8E4E0;border-radius:8px;padding:3px 10px;font-size:11px;cursor:pointer;color:#7A7A7A;">${_activityWeekView ? 'Latest' : 'This week'}</button>`;
     const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="card-title" style="margin:0">${_activityWeekView ? 'This Week\'s Activities' : 'Most Recent Activity'}</div>${toggleBtn}</div>`;
 
     if (!_allActivities.length) {
@@ -690,10 +882,10 @@ function _renderActivityCard() {
     }
 
     if (_activityWeekView) {
-        const rows = _allActivities.slice().reverse().map(a => {
+        const rows = _allActivities.slice().reverse().map((a, i) => {
             const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
             const d = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
-            return `<div class="stat-row">
+            return `<div class="stat-row" style="cursor:pointer;" onclick="openActivityModal(_allActivities[${_allActivities.length - 1 - i}])">
                 <span class="stat-label" style="flex:1">${d} · ${_fmtActivityType(a.activity_type)}</span>
                 <span class="stat-value" style="white-space:nowrap">${a.miles ? a.miles.toFixed(1)+' mi' : '—'} · ${a.average_pace || '—'}</span>
             </div>`;
@@ -704,7 +896,7 @@ function _renderActivityCard() {
         const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
         const date = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
         card.innerHTML = header +
-            `<div class="activity-name">${_fmtActivityType(a.activity_type)}</div>
+            `<div class="activity-name" style="cursor:pointer" onclick="openActivityModal(_allActivities[_allActivities.length-1])">${_fmtActivityType(a.activity_type)}</div>
             <div class="activity-date">${date}</div>
             <div class="stat-row"><span class="stat-label">Total Mileage</span><span class="stat-value">${a.miles ? a.miles.toFixed(1)+' mi' : '—'}</span></div>
             <div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${a.average_pace || '—'}</span></div>
@@ -733,24 +925,102 @@ async function loadActivity() {
 // ── Weather card ──────────────────────────────────────────────────────────────
 
 async function loadWeather() {
-    const card = document.getElementById('weather-card');
+    const txt = document.getElementById('weather-mini-text');
     try {
         const res   = await fetch(`${API}/weather`);
         const hours = await res.json();
         const h     = hours && hours.length ? hours[0] : null;
-        if (!h) { card.innerHTML = '<div class="weather-location">Weather unavailable</div>'; return; }
-        const feelColor = (h.feels_like > 75 || h.feels_like < 32) ? '#c4614a' : '#22c55e';
-        card.innerHTML = `
-            <div class="weather-location">Your Location</div>
-            <div class="weather-temp">${Math.round(h.temperature)}°F</div>
-            <div class="weather-feels" style="color:${feelColor}">Feels like ${Math.round(h.feels_like)}°F</div>
-            <div class="weather-row"><span>Actual</span><span>${Math.round(h.temperature)}°F</span></div>
-            <div class="weather-row"><span>Wind</span><span>${h.wind_speed} mph ${h.wind_direction}</span></div>
-            <div class="weather-row"><span>Humidity</span><span>${h.humidity}%</span></div>
-            <div class="weather-row"><span>Rain chance</span><span>${h.chance_of_rain}%</span></div>`;
+        if (!h || !txt) return;
+        const bad = h.feels_like > 75 || h.feels_like < 32 || h.chance_of_rain > 50;
+        const feelColor = bad ? '#3A8B8B' : '#7A7A7A';
+        txt.innerHTML = `${Math.round(h.temperature)}°F &nbsp;·&nbsp; <span style="color:${feelColor}">Feels ${Math.round(h.feels_like)}°F</span> &nbsp;·&nbsp; ${h.wind_speed} mph &nbsp;·&nbsp; ${h.chance_of_rain}% rain`;
     } catch(e) {
-        card.innerHTML = '<div class="weather-location">Weather unavailable</div>';
+        if (txt) txt.textContent = 'Weather unavailable';
     }
+}
+
+// ── Weekly mileage chart ──────────────────────────────────────────────────────
+
+let _mileageChart = null;
+
+async function loadMileageChart() {
+    const canvas = document.getElementById('mileageChart');
+    if (!canvas) return;
+    try {
+        const start = isoFromDate(getWeekMonday(-7)); // 8 weeks back
+        const end   = isoFromDate(new Date());
+        const res   = await fetch(`${API}/activities/recent?start_date=${start}&end_date=${end}`);
+        const acts  = await res.json();
+
+        // Bucket running miles by week (Mon as start)
+        const weekMap = {};
+        (acts || []).forEach(a => {
+            if (!a.miles) return;
+            const d = new Date(a.calendar_date.split('T')[0] + 'T12:00:00');
+            const day = d.getDay();
+            d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+            const key = isoFromDate(d);
+            weekMap[key] = (weekMap[key] || 0) + a.miles;
+        });
+
+        // Build 8-week array (oldest → current)
+        const weeks = [];
+        for (let i = 7; i >= 0; i--) {
+            const mon = getWeekMonday(-i);
+            const key = isoFromDate(mon);
+            const label = mon.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+            weeks.push({ key, label, miles: +(weekMap[key] || 0).toFixed(1) });
+        }
+
+        const currentMiles = weeks[weeks.length - 1].miles;
+        const thisWeekEl = document.getElementById('mileage-this-week');
+        if (thisWeekEl && currentMiles > 0) thisWeekEl.textContent = `${currentMiles} mi this week`;
+
+        if (_mileageChart) _mileageChart.destroy();
+        _mileageChart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: weeks.map(w => w.label),
+                datasets: [{
+                    data: weeks.map(w => w.miles),
+                    borderColor: '#2D5A7B',
+                    borderWidth: 2,
+                    pointBackgroundColor: weeks.map((_, i) => i === 7 ? '#2D5A7B' : 'white'),
+                    pointBorderColor: '#2D5A7B',
+                    pointRadius: weeks.map((_, i) => i === 7 ? 5 : 3),
+                    pointHoverRadius: 5,
+                    tension: 0.35,
+                    fill: true,
+                    backgroundColor: (ctx) => {
+                        const gradient = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
+                        gradient.addColorStop(0, 'rgba(45,90,123,0.18)');
+                        gradient.addColorStop(1, 'rgba(45,90,123,0)');
+                        return gradient;
+                    },
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        displayColors: false,
+                        backgroundColor: 'white', borderColor: '#E8E4E0', borderWidth: 1,
+                        titleColor: '#1A1A1A', bodyColor: '#1A1A1A', padding: 8, cornerRadius: 8,
+                        callbacks: {
+                            title: ctx => ctx[0].label,
+                            label: ctx => `${ctx.raw} mi`
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: '#B0B0B0', font: { size: 9 } } },
+                    y: { grid: { color: '#F0EDE8' }, ticks: { color: '#B0B0B0', font: { size: 9 } }, beginAtZero: true }
+                }
+            }
+        });
+    } catch(e) { console.error('Mileage chart:', e); }
 }
 
 // ── Training plan ─────────────────────────────────────────────────────────────
@@ -815,11 +1085,11 @@ async function runSync() {
             body: JSON.stringify({ start_date: start, end_date: end })
         });
         btn.textContent = '✓ Synced';
-        showToast('Garmin sync complete', '#22c55e');
-        setTimeout(() => { btn.innerHTML = '↺ Garmin Sync'; btn.disabled = false; loadActivity(); loadHealthChart(); }, 2000);
+        showToast('Garmin sync complete', '#4A8B6E');
+        setTimeout(() => { btn.innerHTML = '↺ Garmin Sync'; btn.disabled = false; loadActivity(); loadHealthChart(); loadMileageChart(); }, 2000);
     } catch(e) {
         btn.textContent = 'Failed';
-        showToast('Sync failed — check your Garmin connection', '#c4614a');
+        showToast('Sync failed — check your Garmin connection', '#3A8B8B');
         setTimeout(() => { btn.textContent = 'Garmin Sync'; btn.disabled = false; }, 2000);
     }
 }
@@ -835,6 +1105,7 @@ document.addEventListener('click', e => {
 
 
 function addMessage(role, text, animate = false) {
+    hideEmptyState();
     const container = document.getElementById('chat-messages');
     const isUser    = role === 'user';
     const div       = document.createElement('div');
@@ -903,6 +1174,7 @@ function cancelRequest() {
 }
 
 function createCoachMessage() {
+    hideEmptyState();
     const container = document.getElementById('chat-messages');
     const div = document.createElement('div');
     div.className = 'msg coach';
@@ -916,6 +1188,7 @@ async function clearChat() {
     await fetch(`${API}/session/${SID}`, { method: 'DELETE' });
     SID = crypto.randomUUID();
     document.getElementById('chat-messages').innerHTML = '';
+    renderEmptyState();
 }
 
 async function sendMessage() {
@@ -999,19 +1272,18 @@ async function sendMessage() {
 // ── VO2 + Body Battery ────────────────────────────────────────────────────────
 
 async function loadMetricBadges() {
-    const el = document.getElementById('chart-averages');
     try {
         const vo2Res = await fetch(`${API}/health/v02`);
         const vo2    = await vo2Res.json();
         const vo2Num = Number(vo2);
-        if (!isNaN(vo2Num) && vo2Num > 0)
-            el.innerHTML += `<span>VO₂ Max: <strong>${Math.round(vo2Num)}</strong></span>`;
+        const vo2El  = document.getElementById('metric-vo2-val');
+        if (vo2El && !isNaN(vo2Num) && vo2Num > 0) vo2El.textContent = Math.round(vo2Num);
     } catch(e) { console.error('VO2:', e); }
     try {
         const bbRes = await fetch(`${API}/health/body-battery`);
         const bb    = await bbRes.json();
-        if (bb && bb.body_battery > 0)
-            el.innerHTML += `<span>Body Battery: <strong>${Math.round(bb.body_battery)}</strong></span>`;
+        const bbEl  = document.getElementById('metric-bb-val');
+        if (bbEl && bb && bb.body_battery > 0) bbEl.textContent = Math.round(bb.body_battery);
     } catch(e) { console.error('Body battery:', e); }
 }
 
@@ -1054,7 +1326,7 @@ async function saveEditedPrefs() {
         if (prefDays.length)  calls.push(post('/preferences/preferred-days', {preferred_days: prefDays}));
         await Promise.all(calls);
         closeEditPrefsModal();
-        showToast('Training preferences updated', '#22c55e');
+        showToast('Training preferences updated', '#4A8B6E');
     } catch(e) {
         err.textContent = 'Something went wrong. Please try again.';
         err.style.display = 'block';
@@ -1118,7 +1390,7 @@ async function saveEditedRace() {
         if (!isNaN(miles)) calls.push(post('/race/distance', {race_distance_miles: miles}));
         await Promise.all(calls);
         closeEditRaceModal();
-        showToast('Race updated', '#22c55e');
+        showToast('Race updated', '#4A8B6E');
     } catch(e) {
         err.textContent = 'Something went wrong. Please try again.';
         err.style.display = 'block';
@@ -1247,12 +1519,12 @@ async function submitPlan() {
 
         const planData = await planRes.json();
         if (!planRes.ok || planData.status !== 'success') throw new Error(planData.detail || planData.status);
-        showToast('Training plan created!', '#22c55e');
+        showToast('Training plan created!', '#4A8B6E');
         _planWeekOffset = 0;
         loadPlan();
     } catch(e) {
         hidePlanGenerating();
-        showToast('Failed to create plan. Please try again.', '#c4614a');
+        showToast('Failed to create plan. Please try again.', '#3A8B8B');
         btn.disabled = false;
         btn.textContent = 'Create Plan';
     }
@@ -1288,9 +1560,15 @@ function hidePlanGenerating() {
 let _planWeekOffset = 0;
 let _planDays = {};
 let _weekActivities = {};
-let _matchedActivities = {};
+let _effectiveMiles = {};
+let _strengthCompleted = new Set();
 const RUNNING_TYPES = new Set(['EASY', 'AEROBIC', 'LONG', 'TEMPO', 'INTERVAL']);
 const DOW_ORDER = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
+
+function isStrengthActivity(a) {
+    const t = (a.activity_type || '').toLowerCase();
+    return t.includes('strength') || t.includes('weight') || t.includes('resistance') || t.includes('gym') || t === 'fitness_equipment';
+}
 
 function getWeekMonday(offsetWeeks = 0) {
     const d = new Date();
@@ -1330,25 +1608,48 @@ async function loadPlan() {
         const days = await daysRes.json();
         const acts = await actsRes.json().catch(() => []);
         _weekActivities = {};
-        (acts || []).forEach(a => { _weekActivities[a.calendar_date.split('T')[0]] = a; });
+        (acts || []).forEach(a => {
+            const date = a.calendar_date.split('T')[0];
+            if (!_weekActivities[date]) _weekActivities[date] = [];
+            _weekActivities[date].push(a);
+        });
 
-        // Match activities to plan days — same-day first, then float to adjacent running days
-        _matchedActivities = {};
-        days.forEach(d => { if (_weekActivities[d.plan_date]) _matchedActivities[d.plan_date] = _weekActivities[d.plan_date]; });
-        Object.entries(_weekActivities).forEach(([actDate, act]) => {
-            if (_matchedActivities[actDate]) return; // already matched same-day
-            const planDay = days.find(d => d.plan_date === actDate);
-            if (!planDay || RUNNING_TYPES.has(planDay.workout_type)) return;
-            // Try yesterday then tomorrow
+        // Compute effective miles per running plan day (own miles + adjacent REST/CROSS/STRENGTH miles)
+        _effectiveMiles = {};
+        days.forEach(d => {
+            if (!RUNNING_TYPES.has(d.workout_type)) return;
+            let miles = (_weekActivities[d.plan_date] || []).reduce((s, a) => s + (a.miles || 0), 0);
             for (const offset of [-1, 1]) {
-                const adj = new Date(actDate + 'T12:00:00'); adj.setDate(adj.getDate() + offset);
+                const adj = new Date(d.plan_date + 'T12:00:00'); adj.setDate(adj.getDate() + offset);
                 const adjIso = isoFromDate(adj);
-                const adjPlan = days.find(d => d.plan_date === adjIso);
-                if (adjPlan && RUNNING_TYPES.has(adjPlan.workout_type) && !_matchedActivities[adjIso]) {
-                    _matchedActivities[adjIso] = act;
-                    break;
+                const adjPlan = days.find(p => p.plan_date === adjIso);
+                if (adjPlan && !RUNNING_TYPES.has(adjPlan.workout_type)) {
+                    miles += (_weekActivities[adjIso] || []).filter(a => !isStrengthActivity(a)).reduce((s, a) => s + (a.miles || 0), 0);
                 }
             }
+            _effectiveMiles[d.plan_date] = miles;
+        });
+
+        // Compute strength completion: exact match first, then float to first unclaimed STRENGTH plan day
+        _strengthCompleted = new Set();
+        const strengthPlanDays = days.filter(d => d.workout_type === 'STRENGTH').sort((a, b) => a.plan_date.localeCompare(b.plan_date));
+        const strengthActDates = Object.entries(_weekActivities)
+            .filter(([, acts]) => acts.some(isStrengthActivity))
+            .map(([date]) => date);
+
+        const claimedActDates = new Set();
+        // Pass 1: exact date matches
+        strengthPlanDays.forEach(d => {
+            if (strengthActDates.includes(d.plan_date)) {
+                _strengthCompleted.add(d.plan_date);
+                claimedActDates.add(d.plan_date);
+            }
+        });
+        // Pass 2: float remaining strength activities to first unclaimed STRENGTH plan day
+        const remainingActs = strengthActDates.filter(d => !claimedActDates.has(d));
+        const unclaimedPlanDays = strengthPlanDays.filter(d => !_strengthCompleted.has(d.plan_date));
+        remainingActs.forEach(() => {
+            if (unclaimedPlanDays.length) _strengthCompleted.add(unclaimedPlanDays.shift().plan_date);
         });
 
         if (!days || !days.length) {
@@ -1372,17 +1673,20 @@ async function loadPlan() {
             const type  = day.workout_type;
             const miles = day.target_miles ? `${day.target_miles.toFixed(1)} mi` : '';
             const pace  = day.target_pace  || '';
-            const matched   = _matchedActivities[day.plan_date];
-            const isRunning = RUNNING_TYPES.has(type);
-            const completed = isRunning && matched && (!day.target_miles || (matched.miles || 0) >= day.target_miles);
-            const stateClass = completed ? ' completed' : '';
+            const dayActs    = _weekActivities[day.plan_date] || [];
+            const isRunning  = RUNNING_TYPES.has(type);
+            const effMiles   = _effectiveMiles[day.plan_date] || 0;
+            const completed  = (isRunning && effMiles > 0 && (!day.target_miles || effMiles >= day.target_miles))
+                            || (type === 'STRENGTH' && _strengthCompleted.has(day.plan_date));
+            const isRest     = type === 'REST' || type === 'CROSS';
+            const stateClass = completed ? ' completed' : isRest ? ' rest-day' : '';
             return `<div class="plan-day-cell${today ? ' today' : ''}${stateClass}" onclick="openDayModal('${day.id}')">
                 ${completed ? '<span class="plan-check">✓</span>' : ''}
                 <div class="workout-badge badge-${type}">${type}</div>
                 ${miles ? `<div class="plan-day-miles">${miles}</div>` : ''}
                 ${pace  ? `<div class="plan-day-pace">${pace}</div>`  : ''}
                 ${type === 'INTERVAL' ? `<div class="plan-day-notes">tap for intervals</div>` : ''}
-                ${matched ? `<button class="activity-logged-btn" onclick="event.stopPropagation();openDayModal('${day.id}')">Activity</button>` : ''}
+                ${dayActs.length ? `<button class="activity-logged-btn" onclick="event.stopPropagation();openDayModal('${day.id}')">View run</button>` : ''}
             </div>`;
         }).join('');
 
@@ -1531,19 +1835,23 @@ async function openDayModal(dayId, fromMonth = false) {
     let html = '';
     if (day.target_miles) html += `<div class="stat-row"><span class="stat-label">Target Miles</span><span class="stat-value">${day.target_miles.toFixed(1)} mi</span></div>`;
     if (day.target_pace)  html += `<div class="stat-row"><span class="stat-label">Target Pace</span><span class="stat-value">${day.target_pace}</span></div>`;
-    if (day.notes)        html += `<div style="font-size:13px;color:#555;margin-top:12px;line-height:1.5">${day.notes}</div>`;
+    if (day.notes)        html += `<div style="font-size:13px;color:#7A7A7A;margin-top:12px;line-height:1.5">${day.notes}</div>`;
     if (!html)            html  = `<div class="placeholder-text" style="padding:12px 0">Rest day.</div>`;
 
-    const act = _matchedActivities[day.plan_date];
-    if (act) {
-        const actType = _fmtActivityType(act.activity_type);
-        html += `<hr class="activity-divider">
-            <div class="activity-section-label">Logged Activity</div>
-            <div class="stat-row"><span class="stat-label">Type</span><span class="stat-value">${actType}</span></div>
-            ${act.miles ? `<div class="stat-row"><span class="stat-label">Miles</span><span class="stat-value">${act.miles.toFixed(1)} mi</span></div>` : ''}
-            ${act.average_pace ? `<div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${act.average_pace}</span></div>` : ''}
-            ${act.avg_hr ? `<div class="stat-row"><span class="stat-label">Avg HR</span><span class="stat-value">${Math.round(act.avg_hr)} bpm</span></div>` : ''}
-            ${act.calories_burned ? `<div class="stat-row"><span class="stat-label">Calories</span><span class="stat-value">${Math.round(act.calories_burned)}</span></div>` : ''}`;
+    const dayActs = _weekActivities[day.plan_date] || [];
+    if (dayActs.length) {
+        html += `<hr class="activity-divider"><div class="activity-section-label">Logged Activity</div>`;
+        dayActs.forEach((act, idx) => {
+            if (idx > 0) html += `<div style="border-top:1px solid #F0EDE8;margin:10px 0"></div>`;
+            html += `<div style="cursor:pointer" onclick="openActivityModal(_weekActivities['${day.plan_date}'][${idx}])">
+                <div class="stat-row"><span class="stat-label">Type</span><span class="stat-value">${_fmtActivityType(act.activity_type)}</span></div>
+                ${act.miles ? `<div class="stat-row"><span class="stat-label">Miles</span><span class="stat-value">${act.miles.toFixed(1)} mi</span></div>` : ''}
+                ${act.average_pace ? `<div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${act.average_pace}</span></div>` : ''}
+                ${act.avg_hr ? `<div class="stat-row"><span class="stat-label">Avg HR</span><span class="stat-value">${Math.round(act.avg_hr)} bpm</span></div>` : ''}
+                ${act.calories_burned ? `<div class="stat-row"><span class="stat-label">Calories</span><span class="stat-value">${Math.round(act.calories_burned)}</span></div>` : ''}
+                <div style="font-size:10px;color:#bbb;margin-top:4px">tap for splits</div>
+                </div>`;
+        });
     }
 
     body.innerHTML = html;
@@ -1591,15 +1899,21 @@ function backToMonth() {
 document.getElementById('day-modal').addEventListener('click', e => {
     if (e.target === document.getElementById('day-modal')) closeDayModal();
 });
+document.getElementById('activity-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('activity-modal')) closeActivityModal();
+});
 
 document.getElementById('plan-modal').addEventListener('click', e => {
     if (e.target === document.getElementById('plan-modal')) closePlanModal();
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
+renderEmptyState();
 loadHealthChart();
+loadMetricBadges();
 loadActivity();
 loadWeather();
+loadMileageChart();
 loadPlan();
 </script>
 </body>
