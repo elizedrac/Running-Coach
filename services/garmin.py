@@ -100,6 +100,7 @@ def get_daily_stats(client: Garmin, day_iso: str) -> dict:
         "stress":         _to_int(_stress_value(stress)),
         "active_minutes": _to_int(_pick(stats, ("activeMinutes", "moderateIntensityMinutes"))),
         "total_kcal":     _to_int(_pick(stats, ("totalKilocalories",))),
+        "active_kcal":    _to_int(_pick(stats, ("activeKilocalories",))),
         "vo2_max":        _to_int(_vo2_max(vo2_raw))
     }
 

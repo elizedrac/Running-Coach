@@ -16,6 +16,5 @@ def planner(user_query: str) -> PlannerOutput:
         plan = PlannerOutput.model_validate_json(response)
         return plan
     except Exception as e:
-        print("Error parsing planner output:", e)
         if "--debug" in sys.argv: print("Raw response was:", response)
         raise

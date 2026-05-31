@@ -3,7 +3,7 @@ from fastapi import APIRouter, HTTPException
 from db.race import get_race, set_race_type, set_goal_time, set_race_distance, set_race_date
 from db.preferences import get_preferences, set_days_per_week, set_preferred_days, set_avg_miles, set_max_miles, set_time_based
 from db.plan import get_plan_days, get_plan_intervals, get_plan_id, delete_plan
-from services.plan import create_plan
+from services.plan import create_plan, update_plan
 from models.planner import RaceRequest, PreferencesRequest
 from datetime import date, timedelta
 from dotenv import load_dotenv
@@ -131,10 +131,20 @@ def get_intervals(day_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@router.delete("/plan")
+@router.delete("/plan/delete")
 def remove_plan():
     try:
         return delete_plan(USER_ID)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/plan/sync")
+def sync_plan():
+    try:
+        today = date.today().isoformat()
+        intent = f"Reconcile plan with actual Garmin activities. Only update days from the start of the current week up to and including today ({today}). Do not modify any future days that have not happened yet."
+        return update_plan(USER_ID, intent, include_activities=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

@@ -27,12 +27,12 @@ def sync_garmin(dates: DataRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/health/v02")
-def get_hrv():
+def get_vo2():
     try:
         today = date.today().isoformat()
         health = get_health_history(USER_ID, today, today)
-        vo2 = health[0].get("vo2_max")
-        return vo2 
+        vo2 = health[0].get("vo2_max") if health else None
+        return vo2
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

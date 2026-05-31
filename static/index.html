@@ -51,9 +51,9 @@
         .spark-value { font-size: 22px; font-weight: 700; color: #1A1A1A; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .spark-trend { font-size: 10px; color: #7A7A7A; margin-bottom: 8px; min-height: 14px; }
         .spark-wrap { position: relative; }
-        .metric-card { background: #F0EDE8; border-radius: 10px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; }
-        .metric-label { font-size: 11px; color: #7A7A7A; }
-        .metric-value { font-size: 22px; font-weight: 700; color: #1A1A1A; }
+        .metric-card { background: #F0EDE8; border-radius: 10px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; }
+        .metric-label { font-size: 10px; color: #7A7A7A; }
+        .metric-value { font-size: 20px; font-weight: 700; color: #1A1A1A; }
 
         /* ── Activity card ── */
         .activity-name { font-size: 17px; font-weight: 600; margin-bottom: 3px; }
@@ -169,7 +169,8 @@
         .followup-chip:hover { border-color: #2D5A7B; color: #2D5A7B; }
 
         /* ── Chat empty state ── */
-        .chat-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; flex: 1; padding: 16px; text-align: center; min-height: 0; }
+        .chat-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; flex: 1; padding: 16px; text-align: center; min-height: 0; }
+        .chat-empty-health:empty { display: none; }
         .chat-empty-brand { display: flex; flex-direction: column; align-items: center; gap: 6px; }
         .chat-empty-brand-name { font-size: 18px; font-weight: 700; color: #1A1A1A; }
         .chat-empty-brand-sub { font-size: 12px; color: #A8A8A8; }
@@ -274,6 +275,12 @@
                 </div>
             </div>
         </div>
+        <button class="header-btn" id="plan-sync-btn" onclick="runPlanSync()">
+            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+            Sync Plan
+        </button>
         <button class="header-btn" onclick="openEditRaceModal()">Edit Race</button>
         <button class="header-btn" onclick="openEditPrefsModal()">Edit Training Preferences</button>
         <button class="header-btn" onclick="notImplemented('Predictions')">Predictions</button>
@@ -331,9 +338,10 @@
                     <div class="spark-wrap" style="flex:1;min-height:0;position:relative;"><canvas id="spark-rhr-chart"></canvas></div>
                 </div>
             </div>
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:8px;flex-shrink:0">
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;flex-shrink:0">
                 <div class="metric-card"><div class="metric-label">VO₂ Max</div><div class="metric-value" id="metric-vo2-val">—</div></div>
                 <div class="metric-card"><div class="metric-label">Body Battery</div><div class="metric-value" id="metric-bb-val">—</div></div>
+                <div class="metric-card"><div class="metric-label">Active Cal</div><div class="metric-value" id="metric-kcal-val">—</div></div>
             </div>
         </div>
     </div>
@@ -686,14 +694,6 @@ function renderEmptyState() {
     const msgsEl  = document.getElementById('chat-messages');
     if (!emptyEl) return;
 
-    // Always update health pills (re-runs when health data loads)
-    const healthEl = document.getElementById('chat-empty-health');
-    const pills = [];
-    if (_latestHealth.rhr)   pills.push(`<div class="chat-empty-pill"><strong>${Math.round(_latestHealth.rhr)} bpm</strong> resting HR</div>`);
-    if (_latestHealth.sleep) pills.push(`<div class="chat-empty-pill"><strong>${_latestHealth.sleep}h</strong> sleep</div>`);
-    if (_latestHealth.steps) pills.push(`<div class="chat-empty-pill"><strong>${(_latestHealth.steps / 1000).toFixed(1)}K</strong> steps today</div>`);
-    if (healthEl) healthEl.innerHTML = pills.join('');
-
     // Only show empty state if no messages exist
     const hasMessages = msgsEl && msgsEl.children.length > 0;
     if (hasMessages) return;
@@ -766,6 +766,8 @@ async function loadHealthChart() {
             rhr:   last.rhr || null,
             sleep: last.total_sleep ? (() => { const [h, m] = last.total_sleep.split(':'); return (+h + +m/60).toFixed(1); })() : null,
         };
+        const kcalEl = document.getElementById('metric-kcal-val');
+        if (kcalEl && last.active_kcal) kcalEl.textContent = Math.round(last.active_kcal).toLocaleString();
         renderEmptyState();
 
         // Trend arrows: compare recent half vs older half
@@ -892,11 +894,13 @@ function _renderActivityCard() {
         }).join('');
         card.innerHTML = header + rows;
     } else {
-        const a = _allActivities[_allActivities.length - 1];
+        const runningActs = _allActivities.filter(a => (a.activity_type || '').toLowerCase().includes('run'));
+        const a = runningActs.length ? runningActs[runningActs.length - 1] : _allActivities[_allActivities.length - 1];
+        const aIdx = _allActivities.indexOf(a);
         const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
         const date = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
         card.innerHTML = header +
-            `<div class="activity-name" style="cursor:pointer" onclick="openActivityModal(_allActivities[_allActivities.length-1])">${_fmtActivityType(a.activity_type)}</div>
+            `<div class="activity-name" style="cursor:pointer" onclick="openActivityModal(_allActivities[${aIdx}])">${_fmtActivityType(a.activity_type)}</div>
             <div class="activity-date">${date}</div>
             <div class="stat-row"><span class="stat-label">Total Mileage</span><span class="stat-value">${a.miles ? a.miles.toFixed(1)+' mi' : '—'}</span></div>
             <div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${a.average_pace || '—'}</span></div>
@@ -1091,6 +1095,24 @@ async function runSync() {
         btn.textContent = 'Failed';
         showToast('Sync failed — check your Garmin connection', '#3A8B8B');
         setTimeout(() => { btn.textContent = 'Garmin Sync'; btn.disabled = false; }, 2000);
+    }
+}
+
+async function runPlanSync() {
+    const btn = document.getElementById('plan-sync-btn');
+    btn.textContent = 'Syncing...';
+    btn.disabled = true;
+    try {
+        const res  = await fetch(`${API}/plan/sync`, { method: 'POST' });
+        const data = await res.json();
+        const count = data.changes ? data.changes.length : 0;
+        showToast(count > 0 ? `Plan updated — ${count} day${count !== 1 ? 's' : ''} changed` : 'Plan already up to date', '#4A8B6E');
+        loadPlan();
+    } catch(e) {
+        showToast('Sync failed — try again', '#3A8B8B');
+    } finally {
+        btn.innerHTML = `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg> Sync Plan`;
+        btn.disabled = false;
     }
 }
 
@@ -1561,13 +1583,20 @@ let _planWeekOffset = 0;
 let _planDays = {};
 let _weekActivities = {};
 let _effectiveMiles = {};
-let _strengthCompleted = new Set();
+let _nonRunCompleted = new Set();
 const RUNNING_TYPES = new Set(['EASY', 'AEROBIC', 'LONG', 'TEMPO', 'INTERVAL']);
 const DOW_ORDER = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
 
 function isStrengthActivity(a) {
     const t = (a.activity_type || '').toLowerCase();
     return t.includes('strength') || t.includes('weight') || t.includes('resistance') || t.includes('gym') || t === 'fitness_equipment';
+}
+
+function isCrossActivity(a) {
+    const t = (a.activity_type || '').toLowerCase();
+    return t.includes('cycl') || t.includes('swim') || t.includes('elliptical') || t.includes('yoga') ||
+           t.includes('pilates') || t.includes('row') || t.includes('walk') || t.includes('hike') ||
+           t === 'virtual_ride' || t === 'ride';
 }
 
 function getWeekMonday(offsetWeeks = 0) {
@@ -1630,26 +1659,27 @@ async function loadPlan() {
             _effectiveMiles[d.plan_date] = miles;
         });
 
-        // Compute strength completion: exact match first, then float to first unclaimed STRENGTH plan day
-        _strengthCompleted = new Set();
-        const strengthPlanDays = days.filter(d => d.workout_type === 'STRENGTH').sort((a, b) => a.plan_date.localeCompare(b.plan_date));
-        const strengthActDates = Object.entries(_weekActivities)
-            .filter(([, acts]) => acts.some(isStrengthActivity))
+        // Compute completion for STRENGTH + CROSS plan days — fulfilled by either strength or cross activities
+        _nonRunCompleted = new Set();
+        const nonRunPlanDays = days.filter(d => d.workout_type === 'STRENGTH' || d.workout_type === 'CROSS')
+            .sort((a, b) => a.plan_date.localeCompare(b.plan_date));
+        const nonRunActDates = Object.entries(_weekActivities)
+            .filter(([, acts]) => acts.some(a => isStrengthActivity(a) || isCrossActivity(a)))
             .map(([date]) => date);
 
         const claimedActDates = new Set();
         // Pass 1: exact date matches
-        strengthPlanDays.forEach(d => {
-            if (strengthActDates.includes(d.plan_date)) {
-                _strengthCompleted.add(d.plan_date);
+        nonRunPlanDays.forEach(d => {
+            if (nonRunActDates.includes(d.plan_date)) {
+                _nonRunCompleted.add(d.plan_date);
                 claimedActDates.add(d.plan_date);
             }
         });
-        // Pass 2: float remaining strength activities to first unclaimed STRENGTH plan day
-        const remainingActs = strengthActDates.filter(d => !claimedActDates.has(d));
-        const unclaimedPlanDays = strengthPlanDays.filter(d => !_strengthCompleted.has(d.plan_date));
+        // Pass 2: float remaining activities to first unclaimed STRENGTH/CROSS plan day
+        const remainingActs = nonRunActDates.filter(d => !claimedActDates.has(d));
+        const unclaimedPlanDays = nonRunPlanDays.filter(d => !_nonRunCompleted.has(d.plan_date));
         remainingActs.forEach(() => {
-            if (unclaimedPlanDays.length) _strengthCompleted.add(unclaimedPlanDays.shift().plan_date);
+            if (unclaimedPlanDays.length) _nonRunCompleted.add(unclaimedPlanDays.shift().plan_date);
         });
 
         if (!days || !days.length) {
@@ -1670,23 +1700,29 @@ async function loadPlan() {
             const day    = dayMap[dow];
             const today  = isCurrentWeek && i === todayDow;
             if (!day) return `<div class="plan-day-cell${today ? ' today' : ''}"></div>`;
-            const type  = day.workout_type;
-            const miles = day.target_miles ? `${day.target_miles.toFixed(1)} mi` : '';
-            const pace  = day.target_pace  || '';
-            const dayActs    = _weekActivities[day.plan_date] || [];
+            const type    = day.workout_type;
+            const dayActs = _weekActivities[day.plan_date] || [];
+            let miles = day.target_miles ? `${day.target_miles.toFixed(1)} mi` : '';
+            let pace  = day.target_pace  || '';
+            if (type === 'CROSS' && (!miles || !pace)) {
+                const runAct = dayActs.find(a => (a.activity_type || '').toLowerCase().includes('run'));
+                if (runAct) {
+                    if (!miles && runAct.miles)         miles = `${runAct.miles.toFixed(1)} mi`;
+                    if (!pace  && runAct.average_pace)  pace  = runAct.average_pace;
+                }
+            }
             const isRunning  = RUNNING_TYPES.has(type);
             const effMiles   = _effectiveMiles[day.plan_date] || 0;
             const completed  = (isRunning && effMiles > 0 && (!day.target_miles || effMiles >= day.target_miles))
-                            || (type === 'STRENGTH' && _strengthCompleted.has(day.plan_date));
-            const isRest     = type === 'REST' || type === 'CROSS';
+                            || ((type === 'STRENGTH' || type === 'CROSS') && _nonRunCompleted.has(day.plan_date));
+            const isRest     = type === 'REST' || (type === 'CROSS' && !completed);
             const stateClass = completed ? ' completed' : isRest ? ' rest-day' : '';
             return `<div class="plan-day-cell${today ? ' today' : ''}${stateClass}" onclick="openDayModal('${day.id}')">
                 ${completed ? '<span class="plan-check">✓</span>' : ''}
                 <div class="workout-badge badge-${type}">${type}</div>
                 ${miles ? `<div class="plan-day-miles">${miles}</div>` : ''}
                 ${pace  ? `<div class="plan-day-pace">${pace}</div>`  : ''}
-                ${type === 'INTERVAL' ? `<div class="plan-day-notes">tap for intervals</div>` : ''}
-                ${dayActs.length ? `<button class="activity-logged-btn" onclick="event.stopPropagation();openDayModal('${day.id}')">View run</button>` : ''}
+                ${dayActs.length ? `<button class="activity-logged-btn" onclick="event.stopPropagation();openDayModal('${day.id}')">View activity</button>` : ''}
             </div>`;
         }).join('');
 

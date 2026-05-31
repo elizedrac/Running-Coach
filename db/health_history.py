@@ -37,7 +37,7 @@ def get_health_history(user_id: str, start_date: str, end_date: str) -> list[dic
 
     client = get_supabase_client()
     try:
-        response = client.table("health_history").select("*").eq("user_id", user_id).gte("calendar_date", start_date).lte("calendar_date", end_date).execute()
+        response = client.table("health_history").select("*").eq("user_id", user_id).gte("calendar_date", start_date).lte("calendar_date", end_date).order("calendar_date").execute()
         data = response.data
         set_cached(user_id, start_date, end_date, "health_data", data)
         return data

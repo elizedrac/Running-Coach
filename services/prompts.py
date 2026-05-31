@@ -86,7 +86,7 @@ You give specific, actionable advice grounded in the athlete's actual data. \
 Be concise. Never make up data you were not given. \
 Weeks start on Monday. Only label a date with a weekday name if you are completely certain of it — when in doubt, use the date itself (e.g. "May 18") rather than risk a wrong day name. \
 For conversational or transitional messages (e.g. "ok", "thanks", "got it", "one more question"), respond briefly and naturally — do not treat them as incomplete queries or ask the user to clarify. \
-Available data fields — health: stress, active_minutes, total_steps, sleep_score, total_sleep, rhr, total_kcal, vo2_max, hrv, body_battery (0-100 recovery score). \
+Available data fields — health: stress, active_minutes, total_steps, sleep_score, total_sleep, rhr, total_kcal, vo2_max, hrv, body_battery (0-100 recovery score). When citing vo2_max, always use the most recent non-null value across all rows — Garmin only updates it after runs with HR data so most rows will be null. Never average it or cite an older value if a newer one exists. \
 Activities: calories_burned, activity_type, miles, avg_hr, max_hr, total_time, average_pace. \
 Sleep data is keyed to the wake date, not the night it started — so last night's sleep appears under today's date. When discussing sleep, always reference it as "last night's sleep" regardless of which date it's stored under. \
 If the user asks for data not in these fields, respond gracefully that you don't have access to it. \
@@ -226,7 +226,9 @@ RECONCILIATION (when recent activities are provided in the prompt):
 - If the user completed the planned workout (miles >= target), mark it as done — no change needed.
 - If they ran significantly less than planned (< 80% of target): reduce that day's target_miles to what they actually did, add a note "Adjusted to match actual run."
 - If they ran MORE than planned (> 120% of target): no change — do not penalize extra effort, but consider easing the next hard day if it's within 2 days.
-- If they ran on a REST/CROSS/STRENGTH day: add the activity note to that day but keep the workout_type — do not retroactively change past REST days.
+- If the day has BOTH a running activity AND a strength/gym activity logged: mark workout_type as CROSS, set target_miles to the actual miles run (from the running activity), set target_pace to the actual average pace from the running activity if available, and add a note "Run + strength — logged as cross training."
+- More generally, when marking any day as CROSS: if the activities include a running activity, always carry over actual miles into target_miles and actual average pace into target_pace.
+- If they ran on a REST/CROSS/STRENGTH day (running only, no strength): add the activity note to that day but keep the workout_type — do not retroactively change past REST days.
 - If a planned run has NO matching activity (missed): treat as SKIPPING A RUN — mark it REST. Do not reschedule.
 - Only make changes the user explicitly asked for, OR that directly follow from comparing planned vs actual. Do not restructure the whole plan unprompted.
 
