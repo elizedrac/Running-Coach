@@ -276,9 +276,6 @@
             </div>
         </div>
         <button class="header-btn" id="plan-sync-btn" onclick="runPlanSync()">
-            <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
-            </svg>
             Sync Plan
         </button>
         <button class="header-btn" onclick="openEditRaceModal()">Edit Race</button>
@@ -629,9 +626,48 @@
                     <div style="font-size:12px;color:#aaa;margin-top:3px" id="day-modal-date"></div>
                 </div>
             </div>
-            <button class="modal-close" onclick="closeDayModal()">×</button>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <button id="day-modal-edit-btn" onclick="enterDayEditMode()" style="background:none;border:none;cursor:pointer;font-size:13px;color:#7A7A7A;padding:0;">Edit</button>
+                <button class="modal-close" onclick="closeDayModal()">×</button>
+            </div>
         </div>
         <div id="day-modal-body"></div>
+        <!-- Edit form (hidden by default) -->
+        <div id="day-modal-edit" style="display:none;">
+            <div class="modal-field">
+                <label>Workout Type</label>
+                <select id="edit-workout-type">
+                    <option value="EASY">EASY</option>
+                    <option value="AEROBIC">AEROBIC</option>
+                    <option value="LONG">LONG</option>
+                    <option value="TEMPO">TEMPO</option>
+                    <option value="INTERVAL">INTERVAL</option>
+                    <option value="STRENGTH">STRENGTH</option>
+                    <option value="CROSS">CROSS</option>
+                    <option value="REST">REST</option>
+                </select>
+            </div>
+            <div class="modal-field">
+                <label>Target Miles</label>
+                <input type="number" id="edit-target-miles" step="0.1" min="0" placeholder="e.g. 6.0">
+            </div>
+            <div class="modal-field">
+                <label>Target Pace</label>
+                <input type="text" id="edit-target-pace" placeholder="e.g. 8:30/mi">
+            </div>
+            <div class="modal-field">
+                <label>Notes</label>
+                <textarea id="edit-notes" rows="3" style="width:100%;border:1px solid #E8E4E0;border-radius:8px;padding:9px 12px;font-size:13.5px;outline:none;color:#1A1A1A;resize:vertical;font-family:inherit;" placeholder="Workout notes..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn-secondary" onclick="exitDayEditMode()">Cancel</button>
+                <button class="modal-btn-primary" onclick="saveDayEdit()">Save</button>
+            </div>
+            <div style="text-align:center;margin-top:12px;">
+                <button onclick="clearDayEdit()" style="background:none;border:none;cursor:pointer;font-size:12px;color:#C0392B;">Clear day</button>
+            </div>
+            <div id="day-edit-error" style="display:none;font-size:12px;color:#C0392B;margin-top:8px;text-align:center;"></div>
+        </div>
     </div>
 </div>
 
@@ -1236,6 +1272,14 @@ async function sendMessage() {
         const reader  = res.body.getReader();
         const decoder = new TextDecoder();
         let buffer = '';
+        let renderTimer = null;
+        const scheduleRender = () => {
+            if (renderTimer) return;
+            renderTimer = setTimeout(() => {
+                renderTimer = null;
+                if (bubble && fullText) bubble.innerHTML = marked.parse(fullText.replace(/~~([^~]+)~~/g, '$1'));
+            }, 150);
+        };
 
         while (true) {
             const { done, value } = await reader.read();
@@ -1260,11 +1304,12 @@ async function sendMessage() {
                         bubble = createCoachMessage();
                     }
                     fullText += event.text;
-                    bubble.textContent = fullText;
+                    scheduleRender();
                     document.getElementById('chat-messages').scrollTop = 999999;
 
                 } else if (event.type === 'done') {
-                    if (bubble) bubble.innerHTML = marked.parse(fullText.replace(/~~([^~]+)~~/g, '$1'));
+                    if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+                    if (bubble && fullText) bubble.innerHTML = marked.parse(fullText.replace(/~~([^~]+)~~/g, '$1'));
 
                 } else if (event.type === 'ended') {
                     setAnalyzing(false);
@@ -1305,7 +1350,7 @@ async function loadMetricBadges() {
         const bbRes = await fetch(`${API}/health/body-battery`);
         const bb    = await bbRes.json();
         const bbEl  = document.getElementById('metric-bb-val');
-        if (bbEl && bb && bb.body_battery > 0) bbEl.textContent = Math.round(bb.body_battery);
+        if (bbEl && bb && bb.body_battery != null) bbEl.textContent = Math.round(bb.body_battery);
     } catch(e) { console.error('Body battery:', e); }
 }
 
@@ -1693,7 +1738,11 @@ async function loadPlan() {
 
         _planDays = {};
         const dayMap = {};
-        days.forEach(d => { _planDays[d.id] = d; dayMap[d.day_of_week] = d; });
+        days.forEach(d => {
+            _planDays[d.id] = d;
+            const dow = d.day_of_week || DOW_ORDER[new Date(d.plan_date + 'T00:00:00').getDay() === 0 ? 6 : new Date(d.plan_date + 'T00:00:00').getDay() - 1];
+            dayMap[dow] = d;
+        });
 
 
         const cellsHtml = DOW_ORDER.map((dow, i) => {
@@ -1851,11 +1900,13 @@ async function deletePlan() {
 }
 
 let _dayModalFromMonth = false;
+let _currentDayId = null;
 
 async function openDayModal(dayId, fromMonth = false) {
     const day = _planDays[dayId];
     if (!day) return;
 
+    _currentDayId = dayId;
     _dayModalFromMonth = fromMonth;
     document.getElementById('day-modal-back').style.display = fromMonth ? 'block' : 'none';
     closeMonthModal();
@@ -1891,6 +1942,9 @@ async function openDayModal(dayId, fromMonth = false) {
     }
 
     body.innerHTML = html;
+    document.getElementById('day-modal-edit').style.display = 'none';
+    document.getElementById('day-modal-body').style.display = 'block';
+    document.getElementById('day-modal-edit-btn').style.display = 'inline';
     modal.classList.add('open');
 
     if (day.workout_type === 'INTERVAL') {
@@ -1924,6 +1978,68 @@ async function openDayModal(dayId, fromMonth = false) {
 function closeDayModal() {
     document.getElementById('day-modal').classList.remove('open');
     _dayModalFromMonth = false;
+    _currentDayId = null;
+}
+
+function enterDayEditMode() {
+    const day = _planDays[_currentDayId];
+    if (!day) return;
+    document.getElementById('edit-workout-type').value = day.workout_type || 'REST';
+    document.getElementById('edit-target-miles').value = day.target_miles ?? '';
+    document.getElementById('edit-target-pace').value  = day.target_pace  || '';
+    document.getElementById('edit-notes').value        = day.notes        || '';
+    document.getElementById('day-edit-error').style.display = 'none';
+    document.getElementById('day-modal-body').style.display = 'none';
+    document.getElementById('day-modal-edit').style.display = 'block';
+    document.getElementById('day-modal-edit-btn').style.display = 'none';
+}
+
+function exitDayEditMode() {
+    document.getElementById('day-modal-edit').style.display = 'none';
+    document.getElementById('day-modal-body').style.display = 'block';
+    document.getElementById('day-modal-edit-btn').style.display = 'inline';
+}
+
+async function saveDayEdit() {
+    if (!_currentDayId) return;
+    const body = {
+        workout_type: document.getElementById('edit-workout-type').value || null,
+        target_miles: parseFloat(document.getElementById('edit-target-miles').value) || null,
+        target_pace:  document.getElementById('edit-target-pace').value.trim() || null,
+        notes:        document.getElementById('edit-notes').value.trim() || null,
+    };
+    try {
+        const res = await fetch(`${API}/plan/day/${_currentDayId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error('Save failed');
+        // Update local cache and re-render
+        Object.assign(_planDays[_currentDayId], body);
+        closeDayModal();
+        loadPlan();
+    } catch(e) {
+        const err = document.getElementById('day-edit-error');
+        err.textContent = 'Failed to save. Please try again.';
+        err.style.display = 'block';
+    }
+}
+
+async function clearDayEdit() {
+    if (!_currentDayId) return;
+    if (!confirm('Reset this day to Rest?')) return;
+    try {
+        const res = await fetch(`${API}/plan/day/${_currentDayId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+        Object.assign(_planDays[_currentDayId], { workout_type: 'REST', target_miles: null, target_pace: null, notes: null });
+        closeDayModal();
+        loadPlan();
+    } catch(e) {
+        const err = document.getElementById('day-edit-error');
+        err.textContent = 'Failed to clear day. Please try again.';
+        err.style.display = 'block';
+    }
 }
 
 function backToMonth() {

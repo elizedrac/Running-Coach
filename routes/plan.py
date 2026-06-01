@@ -2,9 +2,9 @@
 from fastapi import APIRouter, HTTPException
 from db.race import get_race, set_race_type, set_goal_time, set_race_distance, set_race_date
 from db.preferences import get_preferences, set_days_per_week, set_preferred_days, set_avg_miles, set_max_miles, set_time_based
-from db.plan import get_plan_days, get_plan_intervals, get_plan_id, delete_plan
+from db.plan import get_plan_days, get_plan_intervals, get_plan_id, delete_plan, patch_plan, clear_day
 from services.plan import create_plan, update_plan
-from models.planner import RaceRequest, PreferencesRequest
+from models.planner import RaceRequest, PreferencesRequest, PatchDayRequest
 from datetime import date, timedelta
 from dotenv import load_dotenv
 import os
@@ -138,7 +138,6 @@ def remove_plan():
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-
 @router.post("/plan/sync")
 def sync_plan():
     try:
@@ -147,4 +146,18 @@ def sync_plan():
         return update_plan(USER_ID, intent, include_activities=True)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.patch("/plan/day/{day_id}")
+def patch_day(day_id: str, body: PatchDayRequest):
+    try:
+        return patch_plan(day_id, body.model_dump())
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/plan/day/{day_id}")
+def delete_day(day_id: str):
+    try:
+        return clear_day(day_id)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) 
 

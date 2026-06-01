@@ -2,6 +2,7 @@
 from db.client import get_supabase_client
 from db.race import get_race
 from datetime import date
+import json
 
 def get_current_plan(user_id) -> dict:
     client = get_supabase_client()
@@ -122,7 +123,6 @@ def update_plan_day(plan_id: int, changes: list) -> dict:
                             if orig_type == "INTERVAL":
                                 intervals = get_plan_intervals(day_id)
                                 if intervals:
-                                    import json
                                     parts.append(f"| intervals: {json.dumps(intervals)}")
                             orig_summary = " ".join(parts)
                             existing_notes = data.get("notes") or ""
@@ -146,6 +146,23 @@ def replace_plan_intervals(day_id: int, intervals) -> None:
     except Exception as e:
         return {"status": f"fail with error {e}"}
 
-# def archive_plan(user_id):
-#     client = get_supabase_client()
-#     return 
+def patch_plan(day_id: str, changes: dict) -> dict:
+    client = get_supabase_client()
+    data = {k: v for k, v in changes.items() if v is not None and k != "intervals"}
+    if not data:
+        return {"status": "no changes"}
+    try:
+        client.table("plan_days").update(data).eq("id", day_id).execute()
+        if changes.get("intervals") is not None:
+            replace_plan_intervals(day_id, changes.get("intervals"))
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": f"fail with error{e}"}
+
+def clear_day(day_id: str) -> dict:
+    client = get_supabase_client()
+    try:
+        client.table("plan_days").update({"workout_type": "REST", "target_miles": None, "target_pace": None, "notes": None}).eq("id", day_id).execute()
+        return {"status": "success"}
+    except Exception as e:
+        return {"status": f"fail with error{e}"}

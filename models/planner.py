@@ -76,6 +76,13 @@ class PlanChange(BaseModel):
 class UpdatePlanOutput(BaseModel):
     changes: list[PlanChange]
 
+class PatchDayRequest(BaseModel):
+    workout_type: str = None
+    target_miles: float = None
+    target_pace: str = None
+    notes: str = None
+    intervals: list[PlanInterval] | None = None
+
 @dataclass
 class History:
     summary: str = ""

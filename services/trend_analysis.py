@@ -231,11 +231,11 @@ def total_steps(user_id: str, start_date: str, end_date: str, prev_start=None, p
 def _activity_intensity(total_time: float, avg_hr: float) -> float:
     if avg_hr and total_time:
         if avg_hr > 160:
-            return (total_time * 1.2)  # high intensity
+            return (total_time * 0.75)
         elif avg_hr > 140:
-            return (total_time * 0.7)  # moderate intensity
+            return (total_time * 0.5)
         else:
-            return (total_time * 0.4)  # low intensity
+            return (total_time * 0.3)
     return 0
 
 def activity_load(total_time: float, avg_hr: float, max_hr: float) -> float:

@@ -1,7 +1,7 @@
 # Pacing calculator. Pure math: goal time + distance → training pace zones + GPS-adjusted pace.
 # Uses Jack Daniels-style offsets, relative to equivalent marathon pace (Riegel formula).
 from db.health_history import get_health_history
-from datetime import datetime
+from datetime import datetime, timedelta
 
 MARATHON_MILES = 26.2188
 
@@ -78,9 +78,11 @@ def pacing_calculator(user_id: str, goal_time: str, distance: float) -> dict:
     goal_pace = _get_pace(goal_time, distance)
     gps_adjusted_pace = _get_pace(goal_time, distance * 1.025)  # +2.5% for GPS / tangents
 
-    today = datetime.now().date().isoformat()
-    health = get_health_history(user_id, today, today)
-    vo2 = health[0].get("vo2_max") if health else None
+    today = datetime.now().date()
+    thirty_days_ago = (today - timedelta(days=30)).isoformat()
+    health = get_health_history(user_id, thirty_days_ago, today.isoformat())
+    vo2_vals = [r["vo2_max"] for r in health if r.get("vo2_max")]
+    vo2 = sum(vo2_vals) / len(vo2_vals) if vo2_vals else None
 
     return {
         "goal_time":         goal_time,

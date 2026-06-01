@@ -6,6 +6,7 @@ from services.pacing import pacing_calculator
 from services.sql_selector import execute_query
 from services.course_details import get_course_details
 from services.guardrails import challenger
+from services.trend_analysis import compute_load
 from db.race import get_race
 from db.preferences import get_preferences
 from db.plan import save_plan, get_plan_days, get_plan_id, update_plan_day
@@ -13,6 +14,8 @@ from db.activity_history import get_activities
 from models.planner import UpdatePlanOutput
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
+import os
+from dotenv import load_dotenv
 
 PLAN_TOOL_REGISTRY = {
     "pacing_calculator": pacing_calculator,
@@ -86,7 +89,7 @@ def update_plan(user_id, intent, include_activities: bool = False) -> dict:
     plan_id = get_plan_id(user_id)
     today = date.today()
     start_date = today - timedelta(days=7)
-    end_date = today + timedelta(days=7)
+    end_date = today + timedelta(days=8)
     plan = get_plan_days(plan_id, start_date=start_date.isoformat(), end_date=end_date.isoformat())
     print(f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}, include_activities={include_activities}")
 
@@ -134,4 +137,28 @@ def update_plan(user_id, intent, include_activities: bool = False) -> dict:
         print(f"[update_plan] ERROR: {e}")
         return {"status": f"fail with error {e}"}
     
+if __name__ == "__main__":
+    load_dotenv()
 
+    user_id = os.getenv("USER_ID")
+
+    if not user_id: raise ValueError()
+
+    today = date.today().isoformat()
+    load_data = compute_load(user_id)
+    acwr = load_data.get("acwr", "unknown")
+    race = get_race(user_id)
+    race_date = race.get("race_date", "unknown")
+
+    intent = (
+        f"Weekly refresh ({today}): adjust next week's plan based on this week's actual workouts. "
+        "This is a light adjustment pass — treat the existing next week plan as the baseline, not a rebuild. "
+        "Compare completed activities against planned: ease hard days if load was high, reduce mileage if significantly under-ran, adjust paces if this week skewed harder or easier than planned. "
+        f"Current ACWR={acwr}. Only reduce load if ACWR > 1.3; maintain progression if ACWR is 0.8-1.3. "
+        f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date}). "
+        "IMPORTANT: reschedule workouts to match updated preferred training days and days-per-week preferences — this takes priority over all other adjustments. "
+        "Only modify days in the upcoming week (Monday-Sunday). Do not touch this week or earlier."
+    )
+
+    result = update_plan(user_id, intent, include_activities=True)
+    print(result)
