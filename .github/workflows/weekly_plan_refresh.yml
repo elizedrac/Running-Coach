@@ -21,6 +21,7 @@ jobs:
       - name: Run weekly plan refresh
         run: python services/plan.py
         env:
+          PYTHONPATH: ${{ github.workspace }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           USER_ID: ${{ secrets.USER_ID }}
