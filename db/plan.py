@@ -111,22 +111,22 @@ def update_plan_day(plan_id: int, changes: list) -> dict:
             if data.get("workout_type") in {"REST", "CROSS", "STRENGTH"}:
                 data["target_pace"] = None
                 data["target_miles"] = None
-                if day_id:
-                    current = get_plan_days(plan_id, start_date=change["plan_date"], end_date=change["plan_date"])
-                    if current:
-                        orig = current[0]
-                        orig_type = orig.get("workout_type", "")
-                        if orig_type not in {"REST", "CROSS", "STRENGTH"}:
-                            parts = [f"Was: {orig_type}"]
-                            if orig.get("target_miles"): parts.append(f"{orig['target_miles']}mi")
-                            if orig.get("target_pace"): parts.append(f"@ {orig['target_pace']}")
-                            if orig_type == "INTERVAL":
-                                intervals = get_plan_intervals(day_id)
-                                if intervals:
-                                    parts.append(f"| intervals: {json.dumps(intervals)}")
-                            orig_summary = " ".join(parts)
-                            existing_notes = data.get("notes") or ""
-                            data["notes"] = f"{orig_summary}. {existing_notes}".strip() if existing_notes else orig_summary
+            if day_id and data.get("workout_type"):
+                current = get_plan_days(plan_id, start_date=change["plan_date"], end_date=change["plan_date"])
+                if current:
+                    orig = current[0]
+                    orig_type = orig.get("workout_type", "")
+                    existing_notes = data.get("notes") or ""
+                    if orig_type and orig_type != data.get("workout_type") and not existing_notes.startswith("Was:"):
+                        parts = [f"Was: {orig_type}"]
+                        if orig.get("target_miles"): parts.append(f"{orig['target_miles']}mi")
+                        if orig.get("target_pace"): parts.append(f"@ {orig['target_pace']}")
+                        if orig_type == "INTERVAL":
+                            orig_intervals = get_plan_intervals(day_id)
+                            if orig_intervals:
+                                parts.append(f"| intervals: {json.dumps(orig_intervals)}")
+                        orig_summary = " ".join(parts)
+                        data["notes"] = f"{orig_summary}\n{existing_notes}".strip() if existing_notes else orig_summary
             if not day_id:
                 result = save_plan_day(plan_id, [data])
                 day_id = result[0]["id"]

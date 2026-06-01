@@ -54,7 +54,7 @@ Today's date: {today}
 Date interpretation rules (use these exact dates — do not compute your own):
 - Current week day → date mapping (use these when the user says a day name like "Thursday"):
 {week_day_map}
-- "this week" / "weekly mileage" / "this week's runs" = {this_week_monday.isoformat()} to {today} (Mon of current week through today)
+- "this week" / "weekly mileage" / "this week's runs" = {this_week_monday.isoformat()} to {today} (Mon of current week through today). EXCEPTION: if today is Monday and the user uses past-tense or review language ("how did it go", "recap", "how was", "did I hit"), treat "this week" as last week = {last_week_monday.isoformat()} to {last_sunday.isoformat()} — they're reviewing the week that just ended, not today.
 - "last week" / "the week ending Sunday" / "this past week" = {last_week_monday.isoformat()} to {last_sunday.isoformat()} (the full Mon–Sun week that just ended)
 - "last Sunday" / "ending Sunday" = {last_sunday.isoformat()}
 - "last 7 days" = {seven_days_ago.isoformat()} to {today} (rolling 7 days including today)
@@ -227,7 +227,7 @@ GENERAL RULES:
 - Never include goal times, goal paces, or race names in notes fields — notes are for workout instructions only (e.g. "10 min easy warmup, 4 mi at threshold, 1 mi cooldown").
 - Always include target_miles and target_pace in every change, even if they are not changing. Set them to null for REST, CROSS, and STRENGTH. Preserve the original values for EASY, AEROBIC, TEMPO, and LONG changes unless explicitly reducing load.
 - For paces: first use the target_pace already set on the plan day. If target_pace is null, extract the pace from the day's notes (e.g. "8:52/mi", "@ 7:07"). If neither has pace info, use the pacing zones provided in the prompt. Never invent paces.
-- REVERTING A DAY: If the user asks to revert, undo, or restore a day, check the day's notes for a "Was: ..." entry (e.g. "Was: TEMPO 6mi @ 7:07/mi"). Use that to reconstruct the original workout_type, target_miles, and target_pace. Clear the "Was: ..." prefix from the notes after restoring.
+- REVERTING A DAY: If the user asks to revert, undo, or restore a day, check the day's notes for a "Was: ..." entry (e.g. "Was: TEMPO 6mi @ 7:07/mi"). Use that to reconstruct the original workout_type, target_miles, and target_pace. Clear the "Was: ..." line from the notes after restoring.
 
 RECONCILIATION (when recent activities are provided in the prompt):
 - Compare each plan day against actual activities on the same date.

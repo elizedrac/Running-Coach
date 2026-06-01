@@ -67,7 +67,7 @@ runcoach/
 ├── routes/
 │   ├── ask.py                     # POST /ask — SSE streaming endpoint; owns per-session History dict
 │   ├── activities.py              # GET /health/recent, /health/v02, /health/body-battery, /activities/recent, /weather; POST /garmin-sync
-│   ├── plan.py                    # Plan CRUD endpoints (stub — wired when plan tools are built)
+│   ├── plan.py                    # Plan CRUD: GET /plan/days, GET /plan/intervals/{day_id}, POST /plan/create, POST /plan/sync, DELETE /plan/delete, PATCH /plan/day/{day_id}, DELETE /plan/day/{day_id}
 │   └── auth.py                    # Auth endpoints (added pre-launch)
 │
 ├── services/
@@ -80,12 +80,15 @@ runcoach/
 │   ├── trend_analysis.py          # 14 per-metric trend functions + compute_body_battery (3-day weighted) + compute_load
 │   ├── final.py                   # Final LLM call (Sonnet) — generator, yields chunks via stream_llm
 │   ├── garmin.py                  # Garmin data sync (token-cached auth, upsert to Supabase)
-│   ├── plan.py                    # Training plan creation, update, injury logic
+│   ├── plan.py                    # Training plan creation (agentic Opus loop + guardrails), update (intent-based ±7d window), sync
+│   ├── guardrails.py              # challenger() — validates plan against hard rules before save; input_check() — blocks short/long queries
 │   ├── web_search.py              # Anthropic web search wrapper + persistence
 │   ├── weather.py                 # WeatherAPI wrapper (current day + 12-hour forecast)
 │   ├── export.py                  # CSV export. Local file in CLI mode, HTTP attachment stream in server mode (V2)
 │   ├── cache.py                   # TTLCache singleton + range-aware cache logic (get_cached, set_cached)
-│   └── prompts.py                 # All prompt strings: BASE_COACH, build_planner_system(), SQL_SELECTOR_SYSTEM, TOOL_SNIPPETS, TOOL_METADATA. Single source of truth.
+│   ├── pacing.py                  # pacing_calculator() — Riegel equivalent marathon pace → Daniels-style zones + GPS-adjusted pace + VO2-derived easy pace
+│   ├── course_details.py          # get_course_details() — RAG over course_chunks.json (word overlap + Voyage embedding similarity) + web search fallback
+│   └── prompts.py                 # All prompt strings: BASE_COACH, build_planner_system(), SQL_SELECTOR_SYSTEM, TOOL_SNIPPETS, TOOL_METADATA, UPDATE_PLAN_SYSTEM, CREATE_PLAN_SYSTEM, PLAN_CHECKER_SYSTEM. Single source of truth.
 │
 ├── services/ml/
 │   ├── features.py                # Feature extraction from Supabase
