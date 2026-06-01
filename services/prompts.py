@@ -32,6 +32,11 @@ def build_planner_system() -> str:
     last_sunday = this_week_monday - timedelta(days=1)
     last_week_monday = last_sunday - timedelta(days=6)
     seven_days_ago = today_dt - timedelta(days=6)
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    week_day_map = "\n".join(
+        f"- {day_names[i]} = {(this_week_monday + timedelta(days=i)).isoformat()}"
+        for i in range(7)
+    )
     tool_list = "\n".join(f"- {name}: {desc}" for name, desc in TOOL_METADATA.items())
     return f"""You are a planning assistant for a personal AI running coach.
 
@@ -47,6 +52,8 @@ Available tools (tools path only):
 Today's date: {today}
 
 Date interpretation rules (use these exact dates — do not compute your own):
+- Current week day → date mapping (use these when the user says a day name like "Thursday"):
+{week_day_map}
 - "this week" / "weekly mileage" / "this week's runs" = {this_week_monday.isoformat()} to {today} (Mon of current week through today)
 - "last week" / "the week ending Sunday" / "this past week" = {last_week_monday.isoformat()} to {last_sunday.isoformat()} (the full Mon–Sun week that just ended)
 - "last Sunday" / "ending Sunday" = {last_sunday.isoformat()}
@@ -121,7 +128,7 @@ TOOL_SNIPPETS = {
     "get_race":           "Use race_type, race_date, goal_time, and race_distance_miles to give personalized advice. Compute weeks until race from today's date. If any field is missing, give general advice and suggest they set it via the race settings.",
     "get_plan":           "Data is a list of plan days. If the list is empty, the plan has no scheduled workouts for that period — say so directly (e.g. 'your plan doesn't cover that week' or 'your training plan started on X, so there are no planned workouts before then'). Do NOT say you can't find the data or that it's unavailable. The plan_overview block has race metadata including when the plan was created — use it to explain why a past period has no entries. If days are returned: for each day include date/day of week, workout type, target miles (if set), target pace (if set), and notes (if set). For INTERVAL days mention the session type from notes. For TEMPO days state the pace from target_pace. Keep it scannable — short list format. IMPORTANT: Never infer the user's goal time from workout notes — notes may be outdated or incorrect. The authoritative goal time is in the race metadata (plan_overview), not in individual day notes.",
     "create_plan":        "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
-    "update_plan":        "The result contains a 'changes' list with what was actually updated — treat it as ground truth. Summarize what changed in 1-2 sentences. Do NOT re-analyze or second-guess whether the changes match the intent. Do NOT say 'let me try again' or 'let me fix that'. NEVER produce bracket-style log lines under any circumstances — not even if the result is empty or failed (e.g. never write '[update_plan] ...' or '[Updating ...]'). If changes is empty because the requested dates fall outside the ±7-day edit window: explain that the plan editor only covers the rolling 2-week window around today, then tell the user they can click directly on the day in the plan view to edit it manually, or — if they're early enough in their training schedule — delete and regenerate the plan to apply larger structural changes. If changes is empty for any other reason or status is not success, say something went wrong on your end in plain prose.",
+    "update_plan":        "The result contains a 'changes' list with what was actually updated — treat it as absolute ground truth. If changes is non-empty and status is success: the update succeeded. Summarize what changed in 1-2 sentences. NEVER refuse, apologize, or say the change can't be done — it already happened. Do NOT re-analyze or second-guess the changes. Do NOT say 'let me try again' or 'let me fix that'. NEVER produce bracket-style log lines under any circumstances. If changes is empty because the requested dates fall outside the ±7-day edit window: explain that the plan editor only covers the rolling 2-week window around today, then tell the user they can click directly on the day in the plan view to edit it manually, or — if they're early enough in their training schedule — delete and regenerate the plan to apply larger structural changes. If changes is empty for any other reason or status is not success, say something went wrong on your end in plain prose.",
     "clear_plan":         "Confirm the plan was cleared and ask if the user wants to create a new one.",
     "pacing_calculator":  "Present paces in a clean table: workout type → target pace range. Explain the purpose of each zone briefly. Additionally used if user asks for goal pace for a given distance and time and/or upcoming race. \n\n"
                           "IMPORTANT — interpreting fields:\n"
@@ -184,7 +191,7 @@ PLAN_RULES = """WORKOUT DEFINITIONS:
 
 SPACING RULES:
 - INTERVAL and TEMPO are hard days — never schedule them on adjacent calendar days.
-- STRENGTH: never the day before or after a hard effort (INTERVAL or TEMPO).
+- STRENGTH: never the day before or after a hard effort (INTERVAL or TEMPO). STRENGTH does NOT count toward days_per_week — it is always additive. If the user runs 4 days per week, the plan has 4 running days PLUS 1 STRENGTH day.
 - Place REST before or after hard efforts where possible."""
 
 UPDATE_PLAN_SYSTEM = f"""You are a training plan modifier for a running coach app. The user has a situation that requires changes to their plan. Review their current upcoming days and output ONLY valid JSON — no extra text, no markdown.
@@ -344,6 +351,8 @@ Rules:
 - In Phase 1, vary non-long-run days: mix EASY, AEROBIC, TEMPO, STRENGTH — avoid consecutive identical workout types.
 - Remaining days after running/strength days are REST or CROSS.
 - Honor preferred_days. If a preferred day conflicts with spacing rules, shift by one day.
+- days_per_week refers to running days only. STRENGTH is always additive — a 4-day plan has 4 running days + 1 STRENGTH day.
+- days_per_week refers to running days only. STRENGTH is always additive — a 4-day plan has 4 running days + 1 STRENGTH day.
 - When days_per_week is fewer than the full structure requires: prioritize LONG > TEMPO > INTERVAL > EASY.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━
