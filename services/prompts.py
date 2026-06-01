@@ -182,7 +182,7 @@ COURSE_DETAILS="""You are a JSON-only assistant. Return valid JSON, nothing else
 PLAN_RULES = """WORKOUT DEFINITIONS:
 - EASY: conversational pace (easy_pace from pacing zones). Aerobic base. ~6 miles in structured phase.
 - AEROBIC: comfortably hard aerobic effort (aerobic_pace). Good non-hard variety day.
-- LONG: easy pace, week's longest run. Builds endurance.
+- LONG: easy pace, week's longest run. Builds endurance. Must be the last running day of the week. Must have a REST or STRENGTH day the day after — never follow a LONG with another run.
 - TEMPO: lactate threshold (threshold_pace). Do NOT use intervals[]. Notes must be ONLY: "10 min easy warmup, 5 min easy cooldown" — do not describe the tempo segment or mention pace in notes.
 - INTERVAL: populate intervals[] with WARMUP, alternating WORK/REST reps, and COOLDOWN. Set target_pace to interval_pace. Set target_miles to estimated total session distance.
 - STRENGTH: gym or bodyweight. No running. Describe exercises in notes.

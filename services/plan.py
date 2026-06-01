@@ -164,6 +164,7 @@ if __name__ == "__main__":
         f"Current ACWR={acwr}. Only reduce load if ACWR > 1.3; maintain progression if ACWR is 0.8-1.3. "
         f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date}). "
         "IMPORTANT: reschedule workouts to match updated preferred training days and days-per-week preferences — this takes priority over all other adjustments. "
+        "When rescheduling, all spacing rules must still be respected: no hard days (INTERVAL, TEMPO, LONG) on consecutive days, LONG run must be the last running day of the week and must have a REST or STRENGTH day after it, never place a run on a non-preferred day. "
         f"Only modify days from {this_monday.isoformat()} to {next_sunday.isoformat()}. Do not touch any earlier days."
     )
 
