@@ -20,7 +20,7 @@ THRESHOLD_SIMILARITY = 0.7
 load_dotenv()
 
 VOYAGE_API_KEY = os.getenv("VOYAGE_API_KEY")
-voyage_client = voyageai.Client(api_key=VOYAGE_API_KEY)
+voyage_client = voyageai.Client(api_key=VOYAGE_API_KEY) if VOYAGE_API_KEY else None
 
 CHUNKS_FILE = Path(__file__).parent.parent.joinpath("knowledge/course_chunks.json")
 
