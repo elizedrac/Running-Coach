@@ -484,10 +484,44 @@
             <label>Max miles/week (peak week)</label>
             <input type="number" id="ep-max-miles" placeholder="e.g. 45" step="1"/>
         </div>
+        <div style="border-top:1px solid #E8E4E0;margin:20px 0 16px;"></div>
+        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-bottom:12px;">Garmin Account</div>
+        <div class="modal-field">
+            <label>Garmin email</label>
+            <input type="text" id="ep-garmin-email" placeholder="you@example.com" autocomplete="new-password"/>
+        </div>
+        <div class="modal-field">
+            <label>Garmin password</label>
+            <input type="password" id="ep-garmin-password" placeholder="Leave blank to keep existing" autocomplete="new-password"/>
+        </div>
         <div class="modal-error" id="ep-error"></div>
         <div class="modal-actions">
             <button class="modal-btn-secondary" onclick="closeEditPrefsModal()">Cancel</button>
             <button class="modal-btn-primary" onclick="saveEditedPrefs()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Garmin setup modal -->
+<div class="modal-overlay" id="garmin-setup-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">Connect Garmin</div>
+            <button class="modal-close" onclick="document.getElementById('garmin-setup-modal').classList.remove('open')">×</button>
+        </div>
+        <div class="modal-step-indicator" style="color:#aaa;font-size:12px;margin-bottom:20px">Enter your Garmin Connect credentials to enable syncing</div>
+        <div class="modal-field">
+            <label>Garmin email</label>
+            <input type="text" id="gs-email" placeholder="you@example.com" autocomplete="new-password"/>
+        </div>
+        <div class="modal-field">
+            <label>Garmin password</label>
+            <input type="password" id="gs-password" placeholder="••••••••" autocomplete="new-password"/>
+        </div>
+        <div class="modal-error" id="gs-error" style="display:none"></div>
+        <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="document.getElementById('garmin-setup-modal').classList.remove('open')">Cancel</button>
+            <button class="modal-btn-primary" onclick="saveGarminSetup()">Connect</button>
         </div>
     </div>
 </div>
@@ -803,17 +837,17 @@ async function loadHealthChart() {
             return +(+h + +m / 60).toFixed(1);
         });
 
-        // Today's values (last row)
+        // 7-day averages
         const last = rows[rows.length - 1];
-        const todaySteps = last.total_steps ? (last.total_steps / 1000).toFixed(1) + 'K' : '—';
-        const todaySleep = last.total_sleep ? (() => {
-            const [h, m] = last.total_sleep.split(':');
-            return (+h + +m / 60).toFixed(1) + 'h';
-        })() : '—';
-        const todayRhr = last.rhr ? Math.round(last.rhr) + ' bpm' : '—';
-        document.getElementById('spark-steps-val').textContent = todaySteps;
-        document.getElementById('spark-sleep-val').textContent = todaySleep;
-        document.getElementById('spark-rhr-val').textContent = todayRhr;
+        const validSteps = steps.filter(x => x != null);
+        const validSleep = sleep.filter(x => x != null);
+        const validRhr   = rhr.filter(x => x != null);
+        const avgSteps = validSteps.length ? (validSteps.reduce((a,b) => a+b, 0) / validSteps.length).toFixed(1) + 'K' : '—';
+        const avgSleep = validSleep.length ? (validSleep.reduce((a,b) => a+b, 0) / validSleep.length).toFixed(1) + 'h' : '—';
+        const avgRhr   = validRhr.length   ? Math.round(validRhr.reduce((a,b) => a+b, 0) / validRhr.length) + ' bpm' : '—';
+        document.getElementById('spark-steps-val').textContent = avgSteps;
+        document.getElementById('spark-sleep-val').textContent = avgSleep;
+        document.getElementById('spark-rhr-val').textContent = avgRhr;
 
         _latestHealth = {
             steps: last.total_steps || null,
@@ -1112,14 +1146,37 @@ function localOffset(days) {
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
 
-function toggleSyncPopover(e) {
+async function toggleSyncPopover(e) {
     e.stopPropagation();
+    const res = await apiFetch(`${API}/garmin/credentials/status`);
+    const { connected } = await res.json();
+    if (!connected) {
+        document.getElementById('garmin-setup-modal').classList.add('open');
+        return;
+    }
     const pop = document.getElementById('sync-popover');
     pop.classList.toggle('open');
     if (pop.classList.contains('open')) {
         document.getElementById('sync-end').value   = localToday();
         document.getElementById('sync-start').value = localToday();
     }
+}
+
+async function saveGarminSetup() {
+    const email    = document.getElementById('gs-email').value.trim();
+    const password = document.getElementById('gs-password').value;
+    const err      = document.getElementById('gs-error');
+    if (!email || !password) { err.textContent = 'Email and password are required.'; err.style.display = 'block'; return; }
+    err.style.display = 'none';
+    const res = await apiFetch(`${API}/garmin/credentials`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ email, password })
+    });
+    if (!res.ok) { err.textContent = 'Failed to save — try again.'; err.style.display = 'block'; return; }
+    document.getElementById('garmin-setup-modal').classList.remove('open');
+    document.getElementById('gs-email').value = '';
+    document.getElementById('gs-password').value = '';
+    showToast('Garmin account connected', '#4A8B6E');
 }
 
 function setDefaultDates() {
@@ -1412,12 +1469,16 @@ async function saveEditedPrefs() {
     const maxMiles = parseFloat(document.getElementById('ep-max-miles').value);
     const prefDays = [...document.querySelectorAll('#ep-pref-days .day-chip.selected')].map(d => d.textContent);
 
+    const garminEmail    = document.getElementById('ep-garmin-email').value.trim();
+    const garminPassword = document.getElementById('ep-garmin-password').value;
+
     try {
         const calls = [];
         if (!isNaN(days))     calls.push(post('/preferences/total-days',    {days_per_week: days}));
         if (!isNaN(avgMiles)) calls.push(post('/preferences/avg-miles',     {avg_miles: avgMiles}));
         if (!isNaN(maxMiles)) calls.push(post('/preferences/max-miles',     {max_miles: maxMiles}));
         if (prefDays.length)  calls.push(post('/preferences/preferred-days', {preferred_days: prefDays}));
+        if (garminEmail && garminPassword) calls.push(post('/garmin/credentials', {email: garminEmail, password: garminPassword}));
         await Promise.all(calls);
         closeEditPrefsModal();
         showToast('Training preferences updated', '#4A8B6E');

@@ -7,10 +7,25 @@ from services.trend_analysis import compute_body_battery
 from services.auth import get_current_user
 from db.activity_history import get_activities
 from db.health_history import get_health_history
-from models.planner import DataRequest
+from db.garmin import save_garmin_credentials
+from models.planner import DataRequest, GarminCredentials
 from datetime import date
 
 router = APIRouter()
+
+@router.get("/garmin/credentials/status")
+def garmin_credentials_status(user_id: str = Depends(get_current_user)):
+    from db.garmin import get_garmin_credentials
+    creds = get_garmin_credentials(user_id)
+    return {"connected": creds is not None}
+
+@router.post("/garmin/credentials")
+def set_garmin_credentials(body: GarminCredentials, user_id: str = Depends(get_current_user)):
+    try:
+        save_garmin_credentials(user_id, body.email, body.password)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/garmin-sync")
 def sync_garmin(dates: DataRequest, user_id: str = Depends(get_current_user)):

@@ -1,8 +1,10 @@
 # Tests for all deterministic logic: plan constraints, injury severity mapping, REGISTRY validation, etc.
+import asyncio
 from unittest.mock import patch, MagicMock
 from datetime import date as dt_date, datetime, timedelta
 from services.cache import session_cache, get_cached, set_cached
 from services.weather import get_weather
+from services.auth import get_current_user
 
 
 # ── cache tests ──────────────────────────────────────────────────────────────
@@ -731,9 +733,9 @@ def test_body_battery_activity_deduction(mock_health, mock_wavg, mock_activities
     # today activity: diff=0, weight=1.0, avg_hr=150 >140 → 60min * 0.5 = 30
     mock_activities.return_value = [{"total_time": "01:00:00", "avg_hr": 150, "calendar_date": date.today().isoformat()}]
     result = compute_body_battery("user1")
-    # sleep 6-8h → -10, hrv >80 → +5, moderate activity (150bpm, 60min * 0.7 = 42) → -42
-    # 100 - 10 + 5 - 42 = 53
-    assert result["body_battery"] == 53
+    # sleep 6-8h → -10, hrv >80 → +5, moderate activity (150bpm >140, 60min * 0.5 = 30) → -30
+    # 100 - 10 + 5 - 30 = 65
+    assert result["body_battery"] == 65
     assert result["num_activities"] == 1
 
 @patch("services.trend_analysis.get_activities")
@@ -1102,3 +1104,144 @@ def test_detect_end_calls_llm_when_end_word_detected(mock_llm):
     result = detect_end("thanks!", [])
     assert result is True
     mock_llm.assert_called_once()
+
+
+# ── patch_plan and clear_day tests ───────────────────────────────────────────
+
+from db.plan import patch_plan, clear_day
+
+@patch("db.plan.get_supabase_client")
+def test_patch_plan_filters_none_values(mock_client):
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    result = patch_plan("day-uuid", {"workout_type": "EASY", "target_miles": None, "target_pace": None, "notes": None, "intervals": None})
+    update_call = chain.table.return_value.update.call_args[0][0]
+    assert "workout_type" in update_call
+    assert "target_miles" not in update_call
+    assert "target_pace" not in update_call
+    assert result == {"status": "success"}
+
+@patch("db.plan.get_supabase_client")
+def test_patch_plan_all_none_returns_no_changes(mock_client):
+    result = patch_plan("day-uuid", {"workout_type": None, "target_miles": None, "target_pace": None, "notes": None, "intervals": None})
+    assert result == {"status": "no changes"}
+    mock_client.return_value.table.assert_not_called()
+
+@patch("db.plan.replace_plan_intervals")
+@patch("db.plan.get_supabase_client")
+def test_patch_plan_calls_replace_intervals_when_provided(mock_client, mock_replace):
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    intervals = [{"interval_num": 1, "interval_type": "WARMUP"}]
+    patch_plan("day-uuid", {"workout_type": "INTERVAL", "intervals": intervals})
+    mock_replace.assert_called_once_with("day-uuid", intervals)
+
+@patch("db.plan.replace_plan_intervals")
+@patch("db.plan.get_supabase_client")
+def test_patch_plan_skips_replace_when_intervals_none(mock_client, mock_replace):
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    patch_plan("day-uuid", {"workout_type": "EASY", "intervals": None})
+    mock_replace.assert_not_called()
+
+@patch("db.plan.get_supabase_client")
+def test_clear_day_sets_rest_and_nulls(mock_client):
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    result = clear_day("day-uuid")
+    update_call = chain.table.return_value.update.call_args[0][0]
+    assert update_call["workout_type"] == "REST"
+    assert update_call["target_miles"] is None
+    assert update_call["target_pace"] is None
+    assert update_call["notes"] is None
+    assert result == {"status": "success"}
+
+
+# ── update_plan_day "Was:" undo history tests ─────────────────────────────────
+
+from db.plan import update_plan_day
+
+@patch("db.plan.get_plan_intervals", return_value=[])
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_plan_days")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_update_plan_day_prepends_was_on_type_change(mock_day_id, mock_get_days, mock_client, mock_intervals):
+    mock_get_days.return_value = [{"workout_type": "TEMPO", "target_miles": 6.0, "target_pace": "7:07/mi"}]
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    update_plan_day("plan-uuid", [{"plan_date": "2026-06-01", "workout_type": "EASY", "notes": "easy day"}])
+    update_call = chain.table.return_value.update.call_args[0][0]
+    assert update_call["notes"].startswith("Was: TEMPO")
+    assert "easy day" in update_call["notes"]
+
+@patch("db.plan.get_plan_intervals", return_value=[])
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_plan_days")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_update_plan_day_does_not_overwrite_existing_was(mock_day_id, mock_get_days, mock_client, mock_intervals):
+    mock_get_days.return_value = [{"workout_type": "TEMPO", "target_miles": 6.0, "target_pace": "7:07/mi"}]
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    update_plan_day("plan-uuid", [{"plan_date": "2026-06-01", "workout_type": "REST", "notes": "Was: EASY 5mi @ 9:00/mi"}])
+    update_call = chain.table.return_value.update.call_args[0][0]
+    assert update_call["notes"].count("Was:") == 1
+
+@patch("db.plan.get_plan_intervals", return_value=[])
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_plan_days")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_update_plan_day_no_was_when_same_type(mock_day_id, mock_get_days, mock_client, mock_intervals):
+    mock_get_days.return_value = [{"workout_type": "EASY", "target_miles": 5.0, "target_pace": "9:30/mi"}]
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    update_plan_day("plan-uuid", [{"plan_date": "2026-06-01", "workout_type": "EASY", "notes": "adjusted miles"}])
+    update_call = chain.table.return_value.update.call_args[0][0]
+    assert not update_call.get("notes", "").startswith("Was:")
+
+@patch("db.plan.get_plan_intervals", return_value=[])
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_plan_days")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_update_plan_day_nulls_pace_and_miles_for_rest(mock_day_id, mock_get_days, mock_client, mock_intervals):
+    mock_get_days.return_value = [{"workout_type": "EASY", "target_miles": 5.0, "target_pace": "9:30/mi"}]
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    update_plan_day("plan-uuid", [{"plan_date": "2026-06-01", "workout_type": "REST", "target_miles": 5.0, "target_pace": "9:30/mi", "notes": None}])
+    update_call = chain.table.return_value.update.call_args[0][0]
+    assert update_call["target_miles"] is None
+    assert update_call["target_pace"] is None
+
+
+# ── auth dependency tests ─────────────────────────────────────────────────────
+
+import asyncio
+from fastapi import HTTPException
+
+@patch("services.auth.get_supabase_client")
+def test_auth_valid_token_returns_user_id(mock_client):
+    mock_client.return_value.auth.get_user.return_value = MagicMock(user=MagicMock(id="user-uuid"))
+    result = asyncio.run(get_current_user("Bearer valid-token"))
+    assert result == "user-uuid"
+
+def test_auth_missing_header_raises_401():
+    try:
+        asyncio.run(get_current_user(None))
+        assert False, "should have raised"
+    except HTTPException as e:
+        assert e.status_code == 401
+
+def test_auth_no_bearer_prefix_raises_401():
+    try:
+        asyncio.run(get_current_user("invalid-token"))
+        assert False, "should have raised"
+    except HTTPException as e:
+        assert e.status_code == 401
+
+@patch("services.auth.get_supabase_client")
+def test_auth_invalid_token_raises_401(mock_client):
+    mock_client.return_value.auth.get_user.side_effect = Exception("invalid jwt")
+    try:
+        asyncio.run(get_current_user("Bearer bad-token"))
+        assert False, "should have raised"
+    except HTTPException as e:
+        assert e.status_code == 401

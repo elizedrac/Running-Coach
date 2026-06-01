@@ -2,6 +2,7 @@
 # Run directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
 import json
 import os
+import tempfile
 from dotenv import load_dotenv
 from garminconnect import Garmin
 from datetime import datetime, timedelta
@@ -9,6 +10,7 @@ from time import sleep
 import sys
 from db.activity_history import insert_activities
 from db.health_history import insert_health_history
+from db.garmin import get_garmin_credentials, save_garmin_token
 
 # Load environment variables from .env file
 load_dotenv()
@@ -17,15 +19,10 @@ DAY_PAUSE = 2  # Seconds to sleep between Garmin API calls to avoidw rate limits
 CALL_PAUSE = 1  # Seconds to sleep between individual API calls within a day
 
 def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
-    result = fetch_garmin_data(day_iso_start, day_iso_end)
-    if result is None:
-        print("Failed to fetch Garmin data.")
-        return {
-            "status": "error",
-            "date_range": f"{day_iso_start} to {day_iso_end}",
-        }
-
-    activities, stats = result
+    try:
+        activities, stats = fetch_garmin_data(user_id, day_iso_start, day_iso_end)
+    except Exception as e:
+        return {"status": "error", "error": str(e), "date_range": f"{day_iso_start} to {day_iso_end}"}
 
     if activities:
         insert_activities([{**a, "user_id": user_id} for a in activities])
@@ -44,25 +41,62 @@ def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
         "days_synced": len(stats),
     }
 
-TOKEN_PATH = ".garmin_tokens"
+def _token_dir(user_id: str) -> str:
+    path = os.path.join(tempfile.gettempdir(), f"garmin_{user_id}")
+    os.makedirs(path, exist_ok=True)
+    return path
 
-def _get_client() -> Garmin:
-    email = os.getenv("GARMIN_EMAIL")
-    password = os.getenv("GARMIN_PASSWORD")
+def _dump_token_to_json(path: str) -> str:
+    result = {}
+    for fname in os.listdir(path):
+        fpath = os.path.join(path, fname)
+        if os.path.isfile(fpath):
+            with open(fpath) as f:
+                result[fname] = f.read()
+    return json.dumps(result)
+
+def _restore_token_from_json(path: str, token_json: str) -> None:
+    data = json.loads(token_json)
+    for fname, content in data.items():
+        with open(os.path.join(path, fname), "w") as f:
+            f.write(content)
+
+def _get_client(user_id: str) -> Garmin:
+    creds = get_garmin_credentials(user_id)
+    if not creds:
+        raise ValueError(f"No Garmin credentials found for user {user_id}")
+    email, password, token_json = creds["email"], creds["password"], creds.get("token_json")
+    token_path = _token_dir(user_id)
     client = Garmin(email, password)
+
+    # Tier 1: token files already in temp dir from this container session
     try:
-        client.login(TOKEN_PATH)
+        client.login(token_path)
+        return client
     except Exception:
-        client.login()
-        client.garth.dump(TOKEN_PATH)
+        pass
+
+    # Tier 2: restore token from Supabase and try again
+    if token_json:
+        try:
+            _restore_token_from_json(token_path, token_json)
+            client.login(token_path)
+            return client
+        except Exception:
+            pass
+
+    # Tier 3: full email/password login, persist new token to DB
+    client.login()
+    client.garth.dump(token_path)
+    save_garmin_token(user_id, _dump_token_to_json(token_path))
     return client
 
-def fetch_garmin_data(day_iso_start: str, day_iso_end: str) -> tuple[list[dict], dict] | None:
+def fetch_garmin_data(user_id: str, day_iso_start: str, day_iso_end: str) -> tuple[list[dict], dict] | None:
     all_activities = []
     all_stats = []
 
     try:
-        client = _get_client()
+        client = _get_client(user_id)
         
         while day_iso_start <= day_iso_end:
             if "--debug" in sys.argv: print(f"Fetching Garmin data for {day_iso_start}...")
@@ -74,7 +108,7 @@ def fetch_garmin_data(day_iso_start: str, day_iso_end: str) -> tuple[list[dict],
         return all_activities, all_stats
     except Exception as e:
         print(f"Error fetching Garmin data: {e}")
-        return None
+        raise
     
 
 def get_daily_stats(client: Garmin, day_iso: str) -> dict:

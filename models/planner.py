@@ -89,6 +89,14 @@ class History:
     recent: list[dict] = field(default_factory=list)
     turn_count: int = 0
 
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+class GarminCredentials(BaseModel):
+    email: str
+    password: str
+
 
 
 
