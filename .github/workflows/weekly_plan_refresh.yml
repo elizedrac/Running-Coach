@@ -25,4 +25,3 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           USER_ID: ${{ secrets.USER_ID }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          VOYAGE_API_KEY: ${{ secrets.VOYAGE_API_KEY }}
