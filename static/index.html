@@ -686,13 +686,31 @@
 </div>
 
 <script>
-const API   = "http://localhost:8000";
+const API   = "";
 let   SID   = crypto.randomUUID();
 const DAYS  = ["M","T","W","T","F","S","S"];
 const TODAY = new Date().getDay();
 let   abortController = null;
 let   _stepsChart = null, _sleepChart = null, _rhrChart = null;
 let   _latestHealth = {};
+
+(function checkAuth() {
+    if (!localStorage.getItem('rc_token')) window.location.href = '/login.html';
+})();
+
+function getToken() { return localStorage.getItem('rc_token'); }
+
+function logout() {
+    localStorage.removeItem('rc_token');
+    window.location.href = '/login.html';
+}
+
+async function apiFetch(url, options = {}) {
+    const headers = { ...(options.headers || {}), 'Authorization': `Bearer ${getToken()}` };
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) { logout(); return; }
+    return res;
+}
 
 const SUGGESTED_PROMPTS = [
     "How did my training go this week?",
@@ -773,7 +791,7 @@ function fmtTime() {
 
 async function loadHealthChart() {
     try {
-        const res  = await fetch(`${API}/health/recent?start_date=${localOffset(-6)}&end_date=${localToday()}`);
+        const res  = await apiFetch(`${API}/health/recent?start_date=${localOffset(-6)}&end_date=${localToday()}`);
         const rows = await res.json();
         if (!rows || !rows.length) return;
 
@@ -962,7 +980,7 @@ function toggleActivityView() {
 async function loadActivity() {
     const card = document.getElementById('activity-card');
     try {
-        const res  = await fetch(`${API}/activities/recent?start_date=${localOffset(-14)}&end_date=${localToday()}`);
+        const res  = await apiFetch(`${API}/activities/recent?start_date=${localOffset(-14)}&end_date=${localToday()}`);
         const rows = await res.json();
         _allActivities = rows && rows.length ? rows.slice().sort((a, b) => a.calendar_date > b.calendar_date ? 1 : -1) : [];
         _renderActivityCard();
@@ -976,7 +994,7 @@ async function loadActivity() {
 async function loadWeather() {
     const txt = document.getElementById('weather-mini-text');
     try {
-        const res   = await fetch(`${API}/weather`);
+        const res   = await apiFetch(`${API}/weather`);
         const hours = await res.json();
         const h     = hours && hours.length ? hours[0] : null;
         if (!h || !txt) return;
@@ -998,7 +1016,7 @@ async function loadMileageChart() {
     try {
         const start = isoFromDate(getWeekMonday(-7)); // 8 weeks back
         const end   = isoFromDate(new Date());
-        const res   = await fetch(`${API}/activities/recent?start_date=${start}&end_date=${end}`);
+        const res   = await apiFetch(`${API}/activities/recent?start_date=${start}&end_date=${end}`);
         const acts  = await res.json();
 
         // Bucket running miles by week (Mon as start)
@@ -1129,7 +1147,7 @@ async function runSync() {
     btn.textContent = 'Syncing...';
     btn.disabled = true;
     try {
-        await fetch(`${API}/garmin-sync`, {
+        await apiFetch(`${API}/garmin-sync`, {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ start_date: start, end_date: end })
         });
@@ -1148,7 +1166,7 @@ async function runPlanSync() {
     btn.textContent = 'Syncing...';
     btn.disabled = true;
     try {
-        const res  = await fetch(`${API}/plan/sync`, { method: 'POST' });
+        const res  = await apiFetch(`${API}/plan/sync`, { method: 'POST' });
         const data = await res.json();
         const count = data.changes ? data.changes.length : 0;
         showToast(count > 0 ? `Plan updated — ${count} day${count !== 1 ? 's' : ''} changed` : 'Plan already up to date', '#4A8B6E');
@@ -1252,7 +1270,7 @@ function createCoachMessage() {
 }
 
 async function clearChat() {
-    await fetch(`${API}/session/${SID}`, { method: 'DELETE' });
+    await apiFetch(`${API}/session/${SID}`, { method: 'DELETE' });
     SID = crypto.randomUUID();
     document.getElementById('chat-messages').innerHTML = '';
     renderEmptyState();
@@ -1272,7 +1290,7 @@ async function sendMessage() {
     let hasChunks = false;
 
     try {
-        const res = await fetch(`${API}/ask`, {
+        const res = await apiFetch(`${API}/ask`, {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ query: text, session_id: SID }),
             signal: abortController.signal
@@ -1349,14 +1367,14 @@ async function sendMessage() {
 
 async function loadMetricBadges() {
     try {
-        const vo2Res = await fetch(`${API}/health/v02`);
+        const vo2Res = await apiFetch(`${API}/health/v02`);
         const vo2    = await vo2Res.json();
         const vo2Num = Number(vo2);
         const vo2El  = document.getElementById('metric-vo2-val');
         if (vo2El && !isNaN(vo2Num) && vo2Num > 0) vo2El.textContent = Math.round(vo2Num);
     } catch(e) { console.error('VO2:', e); }
     try {
-        const bbRes = await fetch(`${API}/health/body-battery`);
+        const bbRes = await apiFetch(`${API}/health/body-battery`);
         const bb    = await bbRes.json();
         const bbEl  = document.getElementById('metric-bb-val');
         if (bbEl && bb && bb.body_battery != null) bbEl.textContent = Math.round(bb.body_battery);
@@ -1368,7 +1386,7 @@ async function loadMetricBadges() {
 async function openEditPrefsModal() {
     document.getElementById('ep-error').style.display = 'none';
     try {
-        const res   = await fetch(`${API}/preferences`);
+        const res   = await apiFetch(`${API}/preferences`);
         const prefs = await res.json();
         if (prefs.days_per_week) document.getElementById('ep-days').value     = prefs.days_per_week;
         if (prefs.avg_miles)     document.getElementById('ep-avg-miles').value = prefs.avg_miles;
@@ -1387,7 +1405,7 @@ function closeEditPrefsModal() {
 }
 
 async function saveEditedPrefs() {
-    const post = (url, body) => fetch(`${API}${url}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const post = (url, body) => apiFetch(`${API}${url}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const err  = document.getElementById('ep-error');
     const days     = parseInt(document.getElementById('ep-days').value);
     const avgMiles = parseFloat(document.getElementById('ep-avg-miles').value);
@@ -1420,7 +1438,7 @@ const DIST_TO_LABEL = {"3.107":"5K","6.214":"10K","13.1094":"Half Marathon","26.
 async function openEditRaceModal() {
     document.getElementById('er-error').style.display = 'none';
     try {
-        const res  = await fetch(`${API}/race`);
+        const res  = await apiFetch(`${API}/race`);
         const race = await res.json();
         document.getElementById('er-race-name').value  = race.race_type || '';
         document.getElementById('er-goal-time').value  = race.goal_time || '';
@@ -1450,7 +1468,7 @@ function toggleEditCustomDistance(val) {
 }
 
 async function saveEditedRace() {
-    const post = (url, body) => fetch(`${API}${url}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const post = (url, body) => apiFetch(`${API}${url}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
     const err  = document.getElementById('er-error');
     const distVal  = document.getElementById('er-distance').value;
     const miles    = distVal === 'custom' ? parseFloat(document.getElementById('er-custom-miles').value) : parseFloat(distVal);
@@ -1487,8 +1505,8 @@ async function openPlanModal() {
 
     try {
         const [race, prefs] = await Promise.all([
-            fetch(`${API}/race`).then(r => r.json()),
-            fetch(`${API}/preferences`).then(r => r.json())
+            apiFetch(`${API}/race`).then(r => r.json()),
+            apiFetch(`${API}/preferences`).then(r => r.json())
         ]);
 
         if (race.race_type)  document.getElementById('p-race-name').value  = race.race_type;
@@ -1568,7 +1586,7 @@ async function submitPlan() {
     btn.textContent = 'Saving...';
 
     try {
-        const post = (url, body) => fetch(`${API}${url}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const post = (url, body) => apiFetch(`${API}${url}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
         const goalTime = document.getElementById('p-goal-time').value.trim();
         const raceName = document.getElementById('p-race-name').value.trim();
         const avgMiles = parseFloat(document.getElementById('p-avg-miles').value);
@@ -1590,7 +1608,7 @@ async function submitPlan() {
         closePlanModal();
         showPlanGenerating();
 
-        const planRes = await fetch(`${API}/plan/create`, { method: 'POST' });
+        const planRes = await apiFetch(`${API}/plan/create`, { method: 'POST' });
         hidePlanGenerating();
 
         const planData = await planRes.json();
@@ -1685,8 +1703,8 @@ async function loadPlan() {
 
     try {
         const [daysRes, actsRes] = await Promise.all([
-            fetch(`${API}/plan/days?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`),
-            fetch(`${API}/activities/recent?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`)
+            apiFetch(`${API}/plan/days?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`),
+            apiFetch(`${API}/activities/recent?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`)
         ]);
         const days = await daysRes.json();
         const acts = await actsRes.json().catch(() => []);
@@ -1852,7 +1870,7 @@ async function loadMonthView() {
     grid.innerHTML += `<div class="month-cell empty" style="grid-column:1/-1;text-align:center;padding:8px;color:#bbb;font-size:12px;">Loading...</div>`;
 
     try {
-        const res  = await fetch(`${API}/plan/days?start_date=${start}&end_date=${end}`);
+        const res  = await apiFetch(`${API}/plan/days?start_date=${start}&end_date=${end}`);
         const days = await res.json();
 
         const dayMap = {};
@@ -1900,7 +1918,7 @@ function closeDeleteModal() {
 
 async function deletePlan() {
     closeDeleteModal();
-    await fetch('/plan', { method: 'DELETE' });
+    await apiFetch(`${API}/plan/delete`, { method: 'DELETE' });
     document.getElementById('delete-plan-btn').style.display = 'none';
     document.getElementById('month-view-btn').style.display = 'none';
     _planWeekOffset = 0;
@@ -1959,7 +1977,7 @@ async function openDayModal(dayId, fromMonth = false) {
     if (day.workout_type === 'INTERVAL') {
         body.innerHTML += `<div id="intervals-loading" style="font-size:12px;color:#aaa;margin-top:16px">Loading intervals...</div>`;
         try {
-            const res       = await fetch(`${API}/plan/intervals/${day.id}`);
+            const res       = await apiFetch(`${API}/plan/intervals/${day.id}`);
             const intervals = await res.json();
             document.getElementById('intervals-loading')?.remove();
             if (intervals && intervals.length) {
@@ -2018,7 +2036,7 @@ async function saveDayEdit() {
         notes:        document.getElementById('edit-notes').value.trim() || null,
     };
     try {
-        const res = await fetch(`${API}/plan/day/${_currentDayId}`, {
+        const res = await apiFetch(`${API}/plan/day/${_currentDayId}`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
@@ -2039,7 +2057,7 @@ async function clearDayEdit() {
     if (!_currentDayId) return;
     if (!confirm('Reset this day to Rest?')) return;
     try {
-        const res = await fetch(`${API}/plan/day/${_currentDayId}`, { method: 'DELETE' });
+        const res = await apiFetch(`${API}/plan/day/${_currentDayId}`, { method: 'DELETE' });
         if (!res.ok) throw new Error();
         Object.assign(_planDays[_currentDayId], { workout_type: 'REST', target_miles: null, target_pace: null, notes: null });
         closeDayModal();

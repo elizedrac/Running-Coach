@@ -41,7 +41,8 @@ A personal AI running coach that ingests Garmin health and activity data, stores
 | LLM | Anthropic Claude | Sonnet for main calls, Haiku for lightweight |
 | ML | XGBoost | Race time prediction |
 | In-memory cache | cachetools TTLCache | Per-session, no persistence |
-| Hosting (app) | Render or Railway | Simple deploy from GitHub, migrate to AWS later |
+| Auth | Supabase Auth | Email/password login; JWT validated server-side via `get_user()` |
+| Hosting (app) | AWS EC2 | Docker + nginx reverse proxy |
 | Hosting (DB) | Supabase cloud | Already cloud-hosted, no migration needed |
 | Weather | WeatherAPI.com | Free tier, API key required, current day + 12-hour forecast |
 | Web search | Anthropic web search tool | Built-in, no extra API key |
@@ -62,13 +63,14 @@ runcoach/
 ├── DESIGN.md
 │
 ├── static/
-│   └── index.html                 # Single-file frontend (served by FastAPI via StaticFiles)
+│   ├── index.html                 # Single-file frontend (served by FastAPI via StaticFiles); checks localStorage for JWT on load, redirects to login if missing
+│   └── login.html                 # Login page — POST /auth/login, stores JWT in localStorage, redirects to /
 │
 ├── routes/
 │   ├── ask.py                     # POST /ask — SSE streaming endpoint; owns per-session History dict
 │   ├── activities.py              # GET /health/recent, /health/v02, /health/body-battery, /activities/recent, /weather; POST /garmin-sync
 │   ├── plan.py                    # Plan CRUD: GET /plan/days, GET /plan/intervals/{day_id}, POST /plan/create, POST /plan/sync, DELETE /plan/delete, PATCH /plan/day/{day_id}, DELETE /plan/day/{day_id}
-│   └── auth.py                    # Auth endpoints (added pre-launch)
+│   └── auth.py                    # POST /auth/login — Supabase Auth sign-in, returns JWT access token
 │
 ├── services/
 │   ├── coach.py                   # Orchestrator — generator that yields SSE events (status, chunk, done)
@@ -86,6 +88,7 @@ runcoach/
 │   ├── weather.py                 # WeatherAPI wrapper (current day + 12-hour forecast)
 │   ├── export.py                  # CSV export. Local file in CLI mode, HTTP attachment stream in server mode (V2)
 │   ├── cache.py                   # TTLCache singleton + range-aware cache logic (get_cached, set_cached)
+│   ├── auth.py                    # get_current_user() FastAPI dependency — validates Bearer JWT via Supabase, returns user_id
 │   ├── pacing.py                  # pacing_calculator() — Riegel equivalent marathon pace → Daniels-style zones + GPS-adjusted pace + VO2-derived easy pace
 │   ├── course_details.py          # get_course_details() — RAG over course_chunks.json (word overlap + Voyage embedding similarity) + web search fallback
 │   └── prompts.py                 # All prompt strings: BASE_COACH, build_planner_system(), SQL_SELECTOR_SYSTEM, TOOL_SNIPPETS, TOOL_METADATA, UPDATE_PLAN_SYSTEM, CREATE_PLAN_SYSTEM, PLAN_CHECKER_SYSTEM. Single source of truth.
@@ -129,21 +132,11 @@ runcoach/
 
 ## Database Schema
 
-### users
-```sql
-create table users (
-    id          uuid default gen_random_uuid() primary key,
-    email       text unique,
-    password    text,                -- hashed, Supabase Auth handles this
-    created_at  timestamptz default now()
-);
-```
-
 ### race (user's target race — one per user)
 ```sql
 create table race (
     id                  uuid default gen_random_uuid() primary key,
-    user_id             uuid references users(id) unique,
+    user_id             uuid references auth.users(id) on delete cascade unique,
     race_type           text,
     goal_time           text,
     race_distance_miles integer,
@@ -156,7 +149,7 @@ create table race (
 ```sql
 create table training_preferences (
     id              uuid default gen_random_uuid() primary key,
-    user_id         uuid references users(id) unique,
+    user_id         uuid references auth.users(id) on delete cascade unique,
     days_per_week   integer default 4,
     preferred_days  text[],                                     -- e.g. {'MON','WED','FRI','SAT'}
     avg_miles       float,
@@ -169,7 +162,7 @@ create table training_preferences (
 ```sql
 create table activity_history (
     id                  uuid default gen_random_uuid() primary key,
-    user_id             uuid references users(id),
+    user_id             uuid references auth.users(id) on delete cascade,
     garmin_activity_id  bigint unique,
     calendar_date       date,
     calories_burned     float,
@@ -222,7 +215,7 @@ create table health_history (
 ```sql
 create table current_plan (
     id              uuid default gen_random_uuid() primary key,
-    user_id         uuid references users(id) unique,               -- enforces one per user
+    user_id         uuid references auth.users(id) on delete cascade unique,               -- enforces one per user
     race_name       text,
     race_date       date,
     goal_time       interval,
@@ -939,10 +932,10 @@ on:
 13. **Design** — single-file `static/index.html` served from FastAPI
 14. **Frontend implementation** ✓ — health chart, activity card, weather widget, chatbot with SSE streaming, follow-up chips, Garmin sync popover
 
-### Phase 6 — Launch Prep
+### Phase 6 — Launch Prep ✓ (in progress)
 
-14. **Auth + login** — Supabase Auth, password protection, user_id foreign keys active
-15. **Docker + AWS** — Dockerise FastAPI app, deploy to EC2 or Elastic Beanstalk, Supabase stays cloud-hosted
+14. **Auth + login** ✓ — Supabase Auth email/password login; `POST /auth/login` returns JWT; `get_current_user` FastAPI dependency validates token on every route; `static/login.html` login page; all public `users` table FK constraints migrated to `auth.users(id) ON DELETE CASCADE`; public `users` table dropped
+15. **Docker + AWS** — Dockerise FastAPI app, deploy to EC2 with nginx reverse proxy
 
 ---
 

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RunCoach — Sign In</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #F7F4F1;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .card {
+    background: white;
+    border-radius: 16px;
+    padding: 40px;
+    width: 100%;
+    max-width: 380px;
+    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  }
+  .logo { font-size: 22px; font-weight: 700; color: #1A1A1A; margin-bottom: 6px; }
+  .subtitle { font-size: 14px; color: #7A7A7A; margin-bottom: 32px; }
+  label { display: block; font-size: 13px; font-weight: 500; color: #1A1A1A; margin-bottom: 6px; }
+  input {
+    width: 100%;
+    padding: 10px 14px;
+    border: 1px solid #E8E4E0;
+    border-radius: 8px;
+    font-size: 14px;
+    color: #1A1A1A;
+    background: #FAFAF9;
+    margin-bottom: 18px;
+    outline: none;
+    transition: border-color 0.15s;
+  }
+  input:focus { border-color: #2D5A7B; background: white; }
+  button {
+    width: 100%;
+    padding: 11px;
+    background: #2D5A7B;
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s;
+  }
+  button:hover { background: #244d6b; }
+  button:disabled { background: #a0b8c8; cursor: not-allowed; }
+  .error { font-size: 13px; color: #c0392b; margin-top: 12px; display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">RunCoach</div>
+  <div class="subtitle">Sign in to your account</div>
+  <form id="login-form" onsubmit="handleLogin(event)">
+    <label>Email</label>
+    <input type="email" id="email" autocomplete="email" required placeholder="you@example.com">
+    <label>Password</label>
+    <input type="password" id="password" autocomplete="current-password" required placeholder="••••••••">
+    <button type="submit" id="submit-btn">Sign in</button>
+    <div class="error" id="error-msg">Invalid email or password.</div>
+  </form>
+</div>
+<script>
+  if (localStorage.getItem('rc_token')) {
+    window.location.href = '/';
+  }
+
+  async function handleLogin(e) {
+    e.preventDefault();
+    const btn = document.getElementById('submit-btn');
+    const err = document.getElementById('error-msg');
+    btn.disabled = true;
+    btn.textContent = 'Signing in…';
+    err.style.display = 'none';
+
+    try {
+      const res = await fetch('/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: document.getElementById('email').value,
+          password: document.getElementById('password').value
+        })
+      });
+      if (!res.ok) throw new Error();
+      const data = await res.json();
+      localStorage.setItem('rc_token', data.access_token);
+      window.location.href = '/';
+    } catch {
+      err.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = 'Sign in';
+    }
+  }
+</script>
+</body>
+</html>

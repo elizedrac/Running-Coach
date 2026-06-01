@@ -5,6 +5,7 @@ from fastapi.staticfiles import StaticFiles
 from routes.ask import router as ask_router
 from routes.activities import router as data_router
 from routes.plan import router as plan_router
+from routes.auth import router as auth_router
 import os
 
 app = FastAPI()
@@ -19,6 +20,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(auth_router)
 app.include_router(ask_router)
 app.include_router(data_router)
 app.include_router(plan_router)
