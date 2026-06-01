@@ -107,7 +107,7 @@ runcoach/
 │   └── plan.py                    # Plan read/write queries (current_plan, plan_days, plan_intervals, plan_history)
 │
 ├── models/
-│   ├── planner.py                 # Pydantic models: PlannerOutput, SQLPlan, AskRequest, DataRequest, History (dataclass), EndBehaviorClassification
+│   ├── planner.py                 # Pydantic models: PlannerOutput, SQLPlan, AskRequest, DataRequest, History (dataclass), EndBehaviorClassification, UpdatePlanOutput, PatchDayRequest, CourseDetailsPlan, RaceRequest, PreferencesRequest
 │   └── finish_time_predictor.json # Serialised XGBoost model (V2)
 │
 ├── knowledge/
@@ -121,7 +121,8 @@ runcoach/
 │
 └── .github/
     └── workflows/
-        └── garmin_sync.yml        # Daily Garmin data sync cron
+        ├── garmin_sync.yml           # Daily Garmin data sync cron
+        └── weekly_plan_refresh.yml   # Monday 8am UTC — runs services/plan.py __main__ to refresh current week
 ```
 
 ---
@@ -435,37 +436,47 @@ Question arrives
 - Uses cached data if Garmin unavailable — notes staleness to user
 - GitHub Actions runs daily sync as fallback (see GitHub Actions section)
 
-### 2. Plan Creation
-- Onboarding entry point; user fills form
-- Generates per-day workouts with intervals for all weeks leading to race
-- Persists to `current_plan` + `plan_days` + `plan_intervals`
-- Archives previous plan to `plan_history` before creating new one
-- Output: deterministic confirmation message only
+### 2. Plan Creation ✓
+- Triggered via `POST /plan/create`; user clicks "Create Plan" button in UI
+- Uses **native Anthropic tool_use API** with Claude Opus 4-7 in an agentic loop (up to 10 iterations) — unlike the rest of the system which uses the JSON plan approach
+- Tools available to the plan creator: `pacing_calculator`, `query_data`, `get_course_details`, `save_training_plan`
+- Plan creator calls tools to gather context (pacing zones, recent training load, course terrain), then calls `save_training_plan` as final action
+- **Guardrails**: before saving, `challenger()` in `services/guardrails.py` validates the plan against hard rules (adjacent hard days, long run monotonicity, mileage ramp ≤20%, peak long run timing, taper structure). If violations found, sends them back as a tool result and loops once more. Validates at most once — second attempt always saves.
+- `PLAN_CHECKER_SYSTEM` prompt defines 11 hard + quality rules for the challenger
+- Persists to `current_plan` + `plan_days` + `plan_intervals` via `save_plan()`
+- System prompt (`CREATE_PLAN_SYSTEM`) is prompt-cached (ephemeral)
 
-### 3. Get Plan
+### 3. Get Plan ✓
 - Default timeframe: current week
-- Temporal grounding injected in planner
-- Sub-tool: determines timeframe + which SQL query to call
-- Passes to final LLM for plain English summary
+- Temporal grounding injected in planner (week_day_map with exact ISO dates for Mon-Sun)
+- Returns `plan_days` rows for the requested window; includes `plan_overview` with race metadata
+- Passes to final LLM with `get_plan` TOOL_SNIPPET for plain English summary
 
-### 4. Clear Plan
-- Sets all DB entries to null
-- Asks user if they want to generate a new plan
+### 4. Clear Plan ✓
+- `DELETE /plan/delete` — deletes `current_plan` row (cascades to `plan_days` + `plan_intervals`)
+- User directed to "Delete Plan" trash icon in UI; not done via chat
 
-### 5. Update Plan
-- Injury handling: LLM outputs severity score 1-10, deterministic SQL handles modification:
-  - 1-2: swap hard days to easy, keep volume
-  - 3-4: cut intensity, keep structure
-  - 5-6: cut volume 40%
-  - 7+: pause plan, flag medical advice
-- Skipped day: LLM reconfigures remaining days
-- Timeframe and constraint checks are deterministic
+### 5. Update Plan ✓
+- `POST /plan/sync` for activity reconciliation; triggered by chat intent otherwise via `update_plan` tool
+- `UPDATE_PLAN_SYSTEM` prompt handles all cases: illness (mild/moderate/severe), injury, skipping, reconciliation with actual activities
+- **Scope**: ±7 days from today only. Returns `{"changes": []}` if outside window; coach directs user to click the day or regenerate plan
+- `include_activities=true` fetches Garmin activities for the same window and passes them to the LLM for reconciliation
+- LLM outputs `{"changes": [...]}` list; `update_plan_day()` applies each change deterministically
+- **Undo history**: when `update_plan_day()` changes a `workout_type`, it reads the current plan day from DB and prepends `"Was: {WORKOUT_TYPE} {miles}mi @ {pace}"` to notes (only if notes don't already start with `"Was:"`). For INTERVAL days, the full intervals JSON is appended. This enables one-step revert via `REVERTING A DAY` rule in `UPDATE_PLAN_SYSTEM`.
+- Weekly automatic refresh: GitHub Actions runs `services/plan.py __main__` every Monday 8am UTC, passing ACWR + race date into the intent for load-aware adjustments
 
-### 6. Pacing Calculator
+### 5a. Manual Day Edit ✓
+- `PATCH /plan/day/{day_id}` — partial update of a single plan day (workout_type, target_miles, target_pace, notes, intervals)
+- `DELETE /plan/day/{day_id}` — sets the day to REST with all fields nulled (does not delete the row)
+- Triggered from UI: click a plan day → "Edit" button top-right of modal → edit form pre-filled with current values → Save / Clear / Cancel
+- `patch_plan()` in `db/plan.py` filters None values before writing; conditionally replaces intervals if provided
+
+### 6. Pacing Calculator ✓
 - Used by plan creation or direct user request
-- Zones (Daniels-style offsets from equivalent marathon pace): easy (+1:30), aerobic (+0:45), marathon (0), threshold (-0:15), interval (-1:00), repetition (-1:30)
-- Also returns `goal_pace`, `gps_adjusted_pace` (+2.5% for tangent/GPS drift), `current_easy_pace` (from VO2 max via ACSM formula)
-- Server context returns message asking for missing args rather than prompting via `input()`
+- Zones (Daniels-style offsets from equivalent marathon pace via Riegel formula): easy (+1:30), aerobic (+0:45), marathon (0), threshold (-0:15), interval (-1:00), repetition (-1:30)
+- Also returns `goal_pace`, `gps_adjusted_pace` (+2.5% for tangent/GPS drift), `current_easy_pace` (ACSM formula from VO2 max)
+- `current_easy_pace`: derived from **30-day average** VO2 max (not latest value — Garmin VO2 fluctuates with heat/fatigue). Coach only flags the gap if it's >60s/mile from goal easy pace.
+- Implemented in `services/pacing.py`
 
 ### 7. Get Weather ✓
 - Triggered if user asks about weather or whether to run inside
@@ -521,8 +532,9 @@ Question arrives
 ### 11. Get Course Details ✓
 - Anthropic web search + planner LLM-generated query
 - Second LLM call (Haiku) to consolidate search results into plain English summary
-- RAG with embedding similarity scores for cached races
-- Cache in `search_cache` with 60-day expiry
+- RAG via `knowledge/course_chunks.json`: first tries word-overlap (≥0.7 Jaccard), then Voyage embedding similarity (threshold 0.7). Falls back to web search on miss.
+- Voyage client lazily initialized (only if `VOYAGE_API_KEY` is set) to avoid import-time crashes in environments without the key
+- Cached locally in `course_chunks.json` with embeddings inline
 
 ### 12. Race Time Prediction
 - XGBoost model (see ML Model section)
@@ -532,7 +544,9 @@ Question arrives
 - Recovery readiness score computed from today's sleep hours, yesterday's stress, today's HRV, and the past 24h of activity load
 - Returns `{body_battery, sleep_hours, stress, hrv, num_activities, last_activity}` — component values included so LLM can caveat missing data or account for a hard run today
 - `sleep_hours`, `hrv`, `stress` are **3-day recency-weighted averages** via `_weighted_avg()` (weights: today=1.0, yesterday=0.67, 2 days ago=0.5). Zero/missing days excluded from average.
+- Activity load multipliers: `(0.75, 0.5, 0.3)` for hard/moderate/easy effort — calibrated to avoid over-penalizing single hard runs
 - `last_activity` = most recent activity dict (or null) — if today, LLM factors it into recovery recommendation regardless of battery score
+- Dashboard shows `0` when battery is zero (previously hidden); guarded against negative values
 - Implemented in `services/trend_analysis.py::compute_body_battery(user_id)`
 - Also exposed as `GET /health/body-battery` route for dashboard display
 - Registered in `sql_selector.REGISTRY`; Haiku instructed to use only for readiness/recovery questions
@@ -643,6 +657,8 @@ Return ONLY valid JSON:
 | Debuggability | Print full plan before run | One tool call visible at a time |
 | Loop with model | None (single shot) | Yes (extra API calls, harder to bound cost) |
 | Fits this codebase | Aligns with REGISTRY + deterministic ethos | Designed for exploratory agentic flows |
+
+**Exception — Plan Creation**: `create_plan()` in `services/plan.py` uses native `tool_use` with Claude Opus 4-7 in a multi-turn agentic loop (up to 10 iterations). This is intentional: plan creation requires the model to gather context (pacing zones, training history, course details) before writing the full plan, and the guardrails step may force a revision loop. The JSON-plan approach can't support this kind of back-and-forth; native tool_use is the right fit here. All other coach interactions remain JSON-plan based.
 
 ### LLM Call Budget
 
@@ -804,6 +820,7 @@ models/
 - `services/coach.py::orchestrate()` — generator yielding tuples: `("status", text)` before blocking tool calls, `("chunk", text)` for response tokens, `("done", hist)` at end
 - `routes/ask.py` wraps `orchestrate` in a `StreamingResponse` generator that formats tuples as SSE events (`data: {...}\n\n`)
 - Frontend reads stream via `fetch` + `ReadableStream`, appends chunks in real-time to the chat bubble
+- **Throttled markdown rendering**: chunks are accumulated in a buffer and re-rendered via `marked.parse()` on a 150ms debounce timer (`scheduleRender()`). Prevents layout thrash from per-token DOM updates while still feeling real-time.
 
 ---
 
@@ -864,31 +881,30 @@ Garmin rate limit: 100 req/min. 60s wait on rate limit hit. Up to 3 attempts.
 
 ```yaml
 # .github/workflows/garmin_sync.yml
-name: Daily Garmin Sync
-
 on:
   schedule:
     - cron: '0 6 * * *'    # 6am UTC daily
-  workflow_dispatch:        # allow manual trigger
-
-jobs:
-  sync:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
-        with:
-          python-version: '3.14'  # matches local dev environment
-      - run: pip install -r requirements.txt
-      - run: python -m services.garmin
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
-          GARMIN_EMAIL: ${{ secrets.GARMIN_EMAIL }}
-          GARMIN_PASSWORD: ${{ secrets.GARMIN_PASSWORD }}
+  workflow_dispatch:
 ```
 
-Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary — this is the fallback.
+- Runs `python -m services.garmin` with `SUPABASE_URL`, `SUPABASE_KEY`, `GARMIN_EMAIL`, `GARMIN_PASSWORD` secrets
+- Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary — this is the fallback.
+
+### Weekly Plan Refresh
+
+```yaml
+# .github/workflows/weekly_plan_refresh.yml
+on:
+  schedule:
+    - cron: '0 8 * * 1'    # Monday 8am UTC (~4am EDT)
+  workflow_dispatch:
+```
+
+- Runs `python services/plan.py` (the `__main__` block)
+- Computes ACWR from `compute_load()`, fetches race date, builds a load-aware intent string covering last week's activities vs plan and this week's adjustments
+- Intent enforces: ACWR-gated load reduction, ≤10% weekly mileage variance, ≤20% week-over-week increase, long runs flat or increasing, preferred training days respected
+- Requires `PYTHONPATH: ${{ github.workspace }}` so relative imports resolve correctly
+- Secrets: `SUPABASE_URL`, `SUPABASE_KEY`, `USER_ID`, `ANTHROPIC_API_KEY`
 
 ---
 
@@ -949,4 +965,4 @@ Keeps DB fresh without requiring app to be running 24/7. Webhook remains primary
 
 ---
 
-*Last updated: May 2026*
+*Last updated: June 2026*

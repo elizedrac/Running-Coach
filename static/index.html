@@ -914,16 +914,25 @@ function _renderActivityCard() {
     const toggleBtn = `<button onclick="toggleActivityView()" style="background:none;border:1px solid #E8E4E0;border-radius:8px;padding:3px 10px;font-size:11px;cursor:pointer;color:#7A7A7A;">${_activityWeekView ? 'Latest' : 'This week'}</button>`;
     const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="card-title" style="margin:0">${_activityWeekView ? 'This Week\'s Activities' : 'Most Recent Activity'}</div>${toggleBtn}</div>`;
 
-    if (!_allActivities.length) {
+    const monday = isoFromDate(getWeekMonday(0));
+    const thisWeekActivities = _allActivities.filter(a => a.calendar_date.split('T')[0] >= monday);
+
+    if (_activityWeekView && !thisWeekActivities.length) {
+        card.innerHTML = header + '<div class="placeholder-text">No activities recorded for this week yet.</div>';
+        return;
+    }
+    if (!_activityWeekView && !_allActivities.length) {
         card.innerHTML = header + '<div class="placeholder-text">No recent activity found.</div>';
         return;
     }
 
     if (_activityWeekView) {
-        const rows = _allActivities.slice().reverse().map((a, i) => {
+        const reversedWeek = thisWeekActivities.slice().reverse();
+        const rows = reversedWeek.map((a, i) => {
             const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
             const d = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
-            return `<div class="stat-row" style="cursor:pointer;" onclick="openActivityModal(_allActivities[${_allActivities.length - 1 - i}])">
+            const origIdx = _allActivities.indexOf(a);
+            return `<div class="stat-row" style="cursor:pointer;" onclick="openActivityModal(_allActivities[${origIdx}])">
                 <span class="stat-label" style="flex:1">${d} · ${_fmtActivityType(a.activity_type)}</span>
                 <span class="stat-value" style="white-space:nowrap">${a.miles ? a.miles.toFixed(1)+' mi' : '—'} · ${a.average_pace || '—'}</span>
             </div>`;
@@ -953,7 +962,7 @@ function toggleActivityView() {
 async function loadActivity() {
     const card = document.getElementById('activity-card');
     try {
-        const res  = await fetch(`${API}/activities/recent?start_date=${localOffset(-7)}&end_date=${localToday()}`);
+        const res  = await fetch(`${API}/activities/recent?start_date=${localOffset(-14)}&end_date=${localToday()}`);
         const rows = await res.json();
         _allActivities = rows && rows.length ? rows.slice().sort((a, b) => a.calendar_date > b.calendar_date ? 1 : -1) : [];
         _renderActivityCard();
