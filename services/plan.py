@@ -144,20 +144,27 @@ if __name__ == "__main__":
 
     if not user_id: raise ValueError()
 
-    today = date.today().isoformat()
+    today = date.today()
+    weekday = today.weekday()  # 0=Mon
+    this_monday = today - timedelta(days=weekday)
+    last_monday = this_monday - timedelta(days=7)
+    last_sunday = this_monday - timedelta(days=1)
+    next_sunday = this_monday + timedelta(days=6)
+
     load_data = compute_load(user_id)
     acwr = load_data.get("acwr", "unknown")
     race = get_race(user_id)
     race_date = race.get("race_date", "unknown")
 
     intent = (
-        f"Weekly refresh ({today}): adjust next week's plan based on this week's actual workouts. "
-        "This is a light adjustment pass — treat the existing next week plan as the baseline, not a rebuild. "
-        "Compare completed activities against planned: ease hard days if load was high, reduce mileage if significantly under-ran, adjust paces if this week skewed harder or easier than planned. "
+        f"Weekly refresh ({today.isoformat()}): review last week's completed workouts ({last_monday.isoformat()} to {last_sunday.isoformat()}) "
+        f"and adjust this week's plan ({this_monday.isoformat()} to {next_sunday.isoformat()}) accordingly. "
+        "This is a light adjustment pass — treat the existing plan as the baseline, not a rebuild. "
+        "Compare completed activities against what was planned last week: ease hard days if load was high, reduce mileage if significantly under-ran, adjust paces if last week skewed harder or easier than planned. "
         f"Current ACWR={acwr}. Only reduce load if ACWR > 1.3; maintain progression if ACWR is 0.8-1.3. "
         f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date}). "
         "IMPORTANT: reschedule workouts to match updated preferred training days and days-per-week preferences — this takes priority over all other adjustments. "
-        "Only modify days in the upcoming week (Monday-Sunday). Do not touch this week or earlier."
+        f"Only modify days from {this_monday.isoformat()} to {next_sunday.isoformat()}. Do not touch any earlier days."
     )
 
     result = update_plan(user_id, intent, include_activities=True)

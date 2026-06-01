@@ -2,7 +2,7 @@ name: Weekly Plan Refresh
 
 on:
   schedule:
-    - cron: '0 9 * * 1'  # Monday 9am UTC (4am EST)
+    - cron: '0 8 * * 1'  # Monday 8am UTC (~4am EDT / 3am EST)
   workflow_dispatch:      # allow manual trigger for testing
 
 jobs:
