@@ -70,11 +70,14 @@ def _get_client(user_id: str) -> Garmin:
     client = Garmin(email, password)
 
     # Tier 1: token files already in temp dir from this container session
-    try:
-        client.login(token_path)
-        return client
-    except Exception:
-        pass
+    if os.listdir(token_path):
+        try:
+            client.login(token_path)
+            if not token_json:
+                save_garmin_token(user_id, _dump_token_to_json(token_path))
+            return client
+        except Exception:
+            pass
 
     # Tier 2: restore token from Supabase and try again
     if token_json:

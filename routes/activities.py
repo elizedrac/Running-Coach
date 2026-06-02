@@ -9,7 +9,7 @@ from db.activity_history import get_activities
 from db.health_history import get_health_history
 from db.garmin import save_garmin_credentials
 from models.planner import DataRequest, GarminCredentials
-from datetime import date
+from datetime import date, timedelta
 
 router = APIRouter()
 
@@ -40,8 +40,9 @@ def sync_garmin(dates: DataRequest, user_id: str = Depends(get_current_user)):
 def get_vo2(user_id: str = Depends(get_current_user)):
     try:
         today = date.today().isoformat()
-        health = get_health_history(user_id, today, today)
-        vo2 = health[0].get("vo2_max") if health else None
+        thirty_days_ago = (date.today() - timedelta(days=7)).isoformat()
+        health = get_health_history(user_id, thirty_days_ago, today)
+        vo2 = next((row["vo2_max"] for row in reversed(health) if row.get("vo2_max")), None)
         return vo2
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

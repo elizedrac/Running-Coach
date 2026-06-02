@@ -1231,7 +1231,7 @@ async function runPlanSync() {
     } catch(e) {
         showToast('Sync failed — try again', '#3A8B8B');
     } finally {
-        btn.innerHTML = `<svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg> Sync Plan`;
+        btn.innerHTML = `Sync Plan`;
         btn.disabled = false;
     }
 }
@@ -2155,6 +2155,14 @@ loadActivity();
 loadWeather();
 loadMileageChart();
 loadPlan();
+
+// Retry any loads that failed silently on first attempt (e.g. concurrent startup requests)
+setTimeout(() => {
+    if (document.getElementById('spark-steps-val').textContent === '—') loadHealthChart();
+    if (document.getElementById('spark-steps-val').textContent === '—') loadMetricBadges();
+    if (!_allActivities.length) loadActivity();
+    if (!_mileageChart) loadMileageChart();
+}, 3000);
 </script>
 </body>
 </html>
