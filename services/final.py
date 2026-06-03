@@ -4,7 +4,7 @@ from services.llm import stream_llm
 from db.plan import get_current_plan
 from models.planner import PlannerOutput
 
-def final_output(user_query: str, planner_decision: PlannerOutput, tool_results: dict = None, user_id: str = None):
+def final_output(user_query: str, planner_decision: PlannerOutput, tool_results: dict = None, user_id: str = None, min_date: str = "2020-01-01"):
     tool_results = tool_results or {}
     system_prompt = BASE_COACH  # static — cacheable
 
@@ -14,7 +14,7 @@ def final_output(user_query: str, planner_decision: PlannerOutput, tool_results:
         knowledge = ""
         tools = planner_decision.tools
         for tool in tools:
-            snippet = TOOL_SNIPPETS.get(tool.name, "")
+            snippet = TOOL_SNIPPETS.get(tool.name, "").replace("{min_date}", min_date)
             result = tool_results.get(tool.name, "")
             if snippet or result:
                 user_prompt += f"\n\n[{tool.name}]"

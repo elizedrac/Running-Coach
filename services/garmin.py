@@ -1,6 +1,5 @@
 # Garmin data extraction and parsing
 # Run directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
-import json
 import os
 import tempfile
 from dotenv import load_dotenv
@@ -46,21 +45,6 @@ def _token_dir(user_id: str) -> str:
     os.makedirs(path, exist_ok=True)
     return path
 
-def _dump_token_to_json(path: str) -> str:
-    result = {}
-    for fname in os.listdir(path):
-        fpath = os.path.join(path, fname)
-        if os.path.isfile(fpath):
-            with open(fpath) as f:
-                result[fname] = f.read()
-    return json.dumps(result)
-
-def _restore_token_from_json(path: str, token_json: str) -> None:
-    data = json.loads(token_json)
-    for fname, content in data.items():
-        with open(os.path.join(path, fname), "w") as f:
-            f.write(content)
-
 def _get_client(user_id: str) -> Garmin:
     creds = get_garmin_credentials(user_id)
     if not creds:
@@ -69,29 +53,28 @@ def _get_client(user_id: str) -> Garmin:
     token_path = _token_dir(user_id)
     client = Garmin(email, password)
 
-    # Tier 1: token files already in temp dir from this container session
-    if os.listdir(token_path):
+    # Tier 1: token file cached in temp dir from this container session
+    token_file = os.path.join(token_path, "garmin_tokens.json")
+    if os.path.exists(token_file):
         try:
-            client.login(token_path)
-            if not token_json:
-                save_garmin_token(user_id, _dump_token_to_json(token_path))
+            client.login(tokenstore=token_path)
             return client
         except Exception:
             pass
 
-    # Tier 2: restore token from Supabase and try again
+    # Tier 2: load token JSON string directly from Supabase (>512 chars triggers string load)
     if token_json:
         try:
-            _restore_token_from_json(token_path, token_json)
-            client.login(token_path)
+            client.login(tokenstore=token_json)
+            client.client.dump(token_path)  # cache for Tier 1 next time
             return client
         except Exception:
             pass
 
-    # Tier 3: full email/password login, persist new token to DB
+    # Tier 3: full login via 5-strategy chain (mobile cffi/requests, widget, portal cffi/requests)
     client.login()
-    client.garth.dump(token_path)
-    save_garmin_token(user_id, _dump_token_to_json(token_path))
+    save_garmin_token(user_id, client.client.dumps())
+    client.client.dump(token_path)
     return client
 
 def fetch_garmin_data(user_id: str, day_iso_start: str, day_iso_end: str) -> tuple[list[dict], dict] | None:

@@ -827,6 +827,7 @@ async function loadHealthChart() {
     try {
         const res  = await apiFetch(`${API}/health/recent?start_date=${localOffset(-6)}&end_date=${localToday()}`);
         const rows = await res.json();
+        _healthChartLoaded = true;
         if (!rows || !rows.length) return;
 
         const steps = rows.map(r => r.total_steps ? +(r.total_steps / 1000).toFixed(1) : null);
@@ -1016,6 +1017,7 @@ async function loadActivity() {
     try {
         const res  = await apiFetch(`${API}/activities/recent?start_date=${localOffset(-14)}&end_date=${localToday()}`);
         const rows = await res.json();
+        _activityLoaded = true;
         _allActivities = rows && rows.length ? rows.slice().sort((a, b) => a.calendar_date > b.calendar_date ? 1 : -1) : [];
         _renderActivityCard();
     } catch(e) {
@@ -1043,6 +1045,10 @@ async function loadWeather() {
 // ── Weekly mileage chart ──────────────────────────────────────────────────────
 
 let _mileageChart = null;
+let _healthChartLoaded = false;
+let _activityLoaded = false;
+let _mileageChartLoaded = false;
+let _metricBadgesLoaded = false;
 
 async function loadMileageChart() {
     const canvas = document.getElementById('mileageChart');
@@ -1078,6 +1084,7 @@ async function loadMileageChart() {
         if (thisWeekEl && currentMiles > 0) thisWeekEl.textContent = `${currentMiles} mi this week`;
 
         if (_mileageChart) _mileageChart.destroy();
+        _mileageChartLoaded = true;
         _mileageChart = new Chart(canvas, {
             type: 'line',
             data: {
@@ -1204,17 +1211,31 @@ async function runSync() {
     btn.textContent = 'Syncing...';
     btn.disabled = true;
     try {
-        await apiFetch(`${API}/garmin-sync`, {
+        const res  = await apiFetch(`${API}/garmin-sync`, {
             method:'POST', headers:{'Content-Type':'application/json'},
             body: JSON.stringify({ start_date: start, end_date: end })
         });
+        const data = await res.json();
+        if (data.status === 'error') {
+            const msg = (data.error || '').toLowerCase();
+            btn.textContent = 'Failed';
+            if (msg.includes('rate limit') || msg.includes('429')) {
+                showToast('Garmin is rate limiting — try again in a few minutes', '#c0392b');
+            } else if (msg.includes('credentials') || msg.includes('no garmin')) {
+                showToast('Garmin account not connected — add credentials in settings', '#c0392b');
+            } else {
+                showToast('Sync failed — check your Garmin connection', '#3A8B8B');
+            }
+            setTimeout(() => { btn.innerHTML = '↺ Garmin Sync'; btn.disabled = false; }, 2000);
+            return;
+        }
         btn.textContent = '✓ Synced';
         showToast('Garmin sync complete', '#4A8B6E');
         setTimeout(() => { btn.innerHTML = '↺ Garmin Sync'; btn.disabled = false; loadActivity(); loadHealthChart(); loadMileageChart(); }, 2000);
     } catch(e) {
         btn.textContent = 'Failed';
         showToast('Sync failed — check your Garmin connection', '#3A8B8B');
-        setTimeout(() => { btn.textContent = 'Garmin Sync'; btn.disabled = false; }, 2000);
+        setTimeout(() => { btn.innerHTML = '↺ Garmin Sync'; btn.disabled = false; }, 2000);
     }
 }
 
@@ -1426,6 +1447,7 @@ async function loadMetricBadges() {
     try {
         const vo2Res = await apiFetch(`${API}/health/v02`);
         const vo2    = await vo2Res.json();
+        _metricBadgesLoaded = true;
         const vo2Num = Number(vo2);
         const vo2El  = document.getElementById('metric-vo2-val');
         if (vo2El && !isNaN(vo2Num) && vo2Num > 0) vo2El.textContent = Math.round(vo2Num);
@@ -2158,11 +2180,12 @@ loadPlan();
 
 // Retry any loads that failed silently on first attempt (e.g. concurrent startup requests)
 setTimeout(() => {
-    if (document.getElementById('spark-steps-val').textContent === '—') loadHealthChart();
-    if (document.getElementById('spark-steps-val').textContent === '—') loadMetricBadges();
-    if (!_allActivities.length) loadActivity();
-    if (!_mileageChart) loadMileageChart();
+    if (!_healthChartLoaded) loadHealthChart();
+    if (!_metricBadgesLoaded) loadMetricBadges();
+    if (!_activityLoaded) loadActivity();
+    if (!_mileageChartLoaded) loadMileageChart();
 }, 3000);
 </script>
+<div style="text-align:center;padding:16px 0 24px;"><button onclick="logout()" style="background:none;border:none;color:#aaa;font-size:12px;cursor:pointer;text-decoration:underline;">Sign out</button></div>
 </body>
 </html>

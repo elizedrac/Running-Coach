@@ -5,7 +5,17 @@ from datetime import datetime
 from db.client import get_supabase_client
 from services.cache import get_cached, set_cached
 
-MIN_DATE = "2026-01-01"
+MIN_DATE = "2020-01-01"
+
+def get_user_min_date(user_id: str) -> str:
+    client = get_supabase_client()
+    try:
+        h = client.table("health_history").select("calendar_date").eq("user_id", user_id).order("calendar_date").limit(1).execute()
+        a = client.table("activity_history").select("calendar_date").eq("user_id", user_id).order("calendar_date").limit(1).execute()
+        dates = [r["calendar_date"] for r in (h.data or []) + (a.data or []) if r.get("calendar_date")]
+        return min(dates) if dates else MIN_DATE
+    except Exception:
+        return MIN_DATE
 
 def insert_health_history(rows: list[dict]) -> None:
     if not rows:

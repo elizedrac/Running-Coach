@@ -12,6 +12,7 @@ from services.plan import update_plan
 from db.plan import get_plan_days as get_plan, get_plan_id, get_current_plan
 from db.race import get_race
 from db.preferences import update_preferences
+from db.health_history import get_user_min_date
 from datetime import date, timedelta
 from models.planner import History
 from pathlib import Path
@@ -125,7 +126,8 @@ def orchestrate(user_query, user_id, hist = None):
     if hist.summary or recent_context:
         context = f"{hist.summary}\n{recent_context}".strip()
         planner_prompt += f"\n\n[Conversation context]\n{context}"
-    planner_response = planner(planner_prompt)
+    min_date = get_user_min_date(user_id)
+    planner_response = planner(planner_prompt, min_date=min_date)
 
     if debug:
         print(f"[coach] path={planner_response.path}, tools={[t.name for t in planner_response.tools]}")
@@ -189,7 +191,7 @@ def orchestrate(user_query, user_id, hist = None):
     prompt = f"Today is {today_label}. Answer the user's most recent question: {user_query}{context}"
     
     full_response = []
-    for chunk in final_output(prompt, planner_response, tool_results, user_id):
+    for chunk in final_output(prompt, planner_response, tool_results, user_id, min_date=min_date):
         yield ("chunk", chunk)
         full_response.append(chunk)
 

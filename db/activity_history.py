@@ -5,7 +5,7 @@ from datetime import datetime, date as date_type
 from db.client import get_supabase_client
 from services.cache import get_cached, set_cached
 
-MIN_DATE = "2026-01-01"
+MIN_DATE = "2020-01-01"
 
 def insert_activities(rows: list[dict]) -> None:
     if not rows:

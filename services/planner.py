@@ -4,8 +4,8 @@ from services.prompts import build_planner_system
 from models.planner import PlannerOutput
 from services.llm import call_llm
 
-def planner(user_query: str) -> PlannerOutput:
-    system_prompt = build_planner_system()
+def planner(user_query: str, min_date: str = "2020-01-01") -> PlannerOutput:
+    system_prompt = build_planner_system(min_date=min_date)
     user_query = f"""User question: {user_query}"""
     response = call_llm(system_prompt, user_query)
     response = response.strip()

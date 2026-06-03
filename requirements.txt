@@ -8,6 +8,7 @@ pydantic
 cachetools
 xgboost
 requests
-garminconnect
+garminconnect>=0.3.4
+curl-cffi
 pytest
 voyageai

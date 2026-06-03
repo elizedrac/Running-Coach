@@ -9,6 +9,7 @@ from services.trend_analysis import (
     compute_body_battery, compute_load,
 )
 from datetime import datetime, timedelta
+import json
 import sys
 from services.llm import call_llm
 from services.prompts import SQL_SELECTOR_SYSTEM
@@ -82,7 +83,7 @@ def execute_query(user_id, query_intent: str, start_date: str = None, end_date: 
     end_date = end_date or today.isoformat()
 
     raw = select_queries(query_intent)
-    response = SQLPlan.model_validate_json(raw)
+    response = SQLPlan.model_validate(json.loads(raw))
 
     # Enforce: if any trend function was picked, drop raw fetchers (they're redundant)
     if any(q not in ("get_activities", "get_health_data") for q in response.queries):

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta
 from db.activity_history import get_activities
 from db.health_history import get_health_history
 
-MIN_DATE = "2026-01-01"
+MIN_DATE = "2020-01-01"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
 
