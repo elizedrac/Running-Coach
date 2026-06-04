@@ -249,7 +249,10 @@ def _mps_to_pace(mps) -> str | None:
 if __name__ == "__main__":
     today = datetime.now().date().isoformat()
     yesterday = (datetime.now() - timedelta(days=1)).date().isoformat()
-    user_id = os.getenv("USER_ID")
-    if not user_id:
+    user_ids = os.getenv("USER_IDS", "").split(",")
+
+    if not user_ids:
         raise ValueError("USER_ID env var not set")
-    garmin_sync(user_id, yesterday, today)
+
+    for user_id in user_ids:
+        garmin_sync(user_id, yesterday, today)
