@@ -721,7 +721,8 @@
 
 <script>
 const API   = "";
-let   SID   = crypto.randomUUID();
+const _uuid = () => crypto.randomUUID?.() ?? ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16));
+let   SID   = _uuid();
 const DAYS  = ["M","T","W","T","F","S","S"];
 const TODAY = new Date().getDay();
 let   abortController = null;
@@ -1349,7 +1350,7 @@ function createCoachMessage() {
 
 async function clearChat() {
     await apiFetch(`${API}/session/${SID}`, { method: 'DELETE' });
-    SID = crypto.randomUUID();
+    SID = _uuid();
     document.getElementById('chat-messages').innerHTML = '';
     renderEmptyState();
 }
