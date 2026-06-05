@@ -107,7 +107,7 @@ def call_tool(name: str, args: dict, user_id: str):
         return f"Tool '{name}' not yet implemented"
     return fn(user_id, **args)
 
-def orchestrate(user_query, user_id, hist = None):
+def orchestrate(user_query, user_id, hist = None, has_plan: bool = False):
     debug = "--debug" in sys.argv
 
     hist = hist or History()
@@ -191,7 +191,7 @@ def orchestrate(user_query, user_id, hist = None):
     prompt = f"Today is {today_label}. Answer the user's most recent question: {user_query}{context}"
     
     full_response = []
-    for chunk in final_output(prompt, planner_response, tool_results, user_id, min_date=min_date):
+    for chunk in final_output(prompt, planner_response, tool_results, user_id, min_date=min_date, has_plan=has_plan):
         yield ("chunk", chunk)
         full_response.append(chunk)
 

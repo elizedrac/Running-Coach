@@ -275,7 +275,7 @@
                 </div>
             </div>
         </div>
-        <button class="header-btn" id="plan-sync-btn" onclick="runPlanSync()">
+        <button class="header-btn" id="plan-sync-btn" onclick="runPlanSync()" style="display:none">
             Sync Plan
         </button>
         <button class="header-btn" onclick="openEditRaceModal()">Edit Race</button>
@@ -725,6 +725,7 @@ const _uuid = () => crypto.randomUUID?.() ?? ([1e7]+-1e3+-4e3+-8e3+-1e11).replac
 let   SID   = _uuid();
 const DAYS  = ["M","T","W","T","F","S","S"];
 const TODAY = new Date().getDay();
+let   hasPlan = false;
 let   abortController = null;
 let   _stepsChart = null, _sleepChart = null, _rhrChart = null;
 let   _latestHealth = {};
@@ -1371,7 +1372,7 @@ async function sendMessage() {
     try {
         const res = await apiFetch(`${API}/ask`, {
             method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ query: text, session_id: SID }),
+            body: JSON.stringify({ query: text, session_id: SID, has_plan: hasPlan }),
             signal: abortController.signal
         });
 
@@ -1840,11 +1841,17 @@ async function loadPlan() {
 
         if (!days || !days.length) {
             if (_planWeekOffset === 0) {
+                hasPlan = false;
+                document.getElementById('plan-sync-btn').style.display = 'none';
                 grid.innerHTML = headerHtml + `<div class="plan-placeholder">No training plan yet.<br><button class="create-plan-btn" onclick="openPlanModal()">+ Create Training Plan</button></div>`;
             } else {
                 grid.innerHTML = headerHtml + `<div class="plan-placeholder">No workouts scheduled for this week.</div>`;
             }
             return;
+        }
+        if (_planWeekOffset === 0) {
+            hasPlan = true;
+            document.getElementById('plan-sync-btn').style.display = '';
         }
 
         _planDays = {};

@@ -4,11 +4,12 @@ from services.llm import stream_llm
 from db.plan import get_current_plan
 from models.planner import PlannerOutput
 
-def final_output(user_query: str, planner_decision: PlannerOutput, tool_results: dict = None, user_id: str = None, min_date: str = "2020-01-01"):
+def final_output(user_query: str, planner_decision: PlannerOutput, tool_results: dict = None, user_id: str = None, min_date: str = "2020-01-01", has_plan: bool = False):
     tool_results = tool_results or {}
     system_prompt = BASE_COACH  # static — cacheable
 
-    user_prompt = f"User question: {user_query}"
+    plan_status = "The user HAS an active training plan." if has_plan else "The user does NOT have a training plan yet."
+    user_prompt = f"[Plan status: {plan_status}]\n\nUser question: {user_query}"
 
     if planner_decision.path == "tools":
         knowledge = ""
