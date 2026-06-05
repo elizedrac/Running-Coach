@@ -253,4 +253,6 @@ if __name__ == "__main__":
     if not user_ids:
         raise ValueError("USER_IDS env var not set")
     for user_id in user_ids:
-        garmin_sync(user_id, yesterday, today)
+        print(f"[cron] syncing user {user_id} ({yesterday} to {today})")
+        result = garmin_sync(user_id, yesterday, today)
+        print(f"[cron] result: {result}")
