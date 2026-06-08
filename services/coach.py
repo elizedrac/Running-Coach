@@ -41,7 +41,7 @@ TOOL_REGISTRY = {
     "get_race": get_race,
 }
 
-def call_tool(name: str, args: dict, user_id: str):
+def call_tool(name: str, args: dict, user_id: str, location: str = "New York"):
     fn = TOOL_REGISTRY.get(name)
     if name == "garmin_sync" and "day_iso_start" not in args:
         if os.getenv("SERVER_MODE"):
@@ -107,7 +107,7 @@ def call_tool(name: str, args: dict, user_id: str):
         return f"Tool '{name}' not yet implemented"
     return fn(user_id, **args)
 
-def orchestrate(user_query, user_id, hist = None, has_plan: bool = False):
+def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, location: str = "New York, NY"):
     debug = "--debug" in sys.argv
 
     hist = hist or History()
@@ -166,6 +166,8 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False):
                         input_id = get_plan_id(user_id)
                     else:
                         input_id = user_id
+                    if name == "get_weather" and "location" not in tool.args:
+                        tool.args["location"] = location
                     if debug:
                         print(f"[coach] calling {name} args={tool.args}")
                     result = call_tool(name, tool.args, input_id)

@@ -69,8 +69,8 @@ def get_recent_activities(start_date: str = None, end_date: str = None, user_id:
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/weather")
-def get_current_weather(user_id: str = Depends(get_current_user)):
+def get_current_weather(location: str = None, user_id: str = Depends(get_current_user)):
     try:
-        return get_weather(user_id)
+        return get_weather(user_id, location=location) if location else get_weather(user_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

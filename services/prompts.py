@@ -154,7 +154,7 @@ TOOL_SNIPPETS = {
                           "TRENDS: If a trend is present, lead with the direction (improving / declining / stable), then cite the numbers, then give 1-2 actionable insights.\n\n"
                           "MISSING COMPARISON: If a trend result has ONLY a 'current' field (no 'previous' or 'trend' keys), it means no valid comparison window exists (not enough prior data). Say something like 'I don't have enough prior data to detect a trend' — do NOT say it's a single data point (the current value is still an average over the requested window). State the current value with the date range it covers.\n\n"
                           "MIN_DATE: The user's data starts from {min_date}. If the user asked for a date range starting before that, the window was shifted forward to start at {min_date} (preserving its length). When that happens, briefly tell the user their requested range was shifted and why. If the entire requested range was before {min_date}, gracefully say no data is available.\n\n"
-                          "PARTIAL WEEK: You are told today's date and day of week in the prompt. If comparing 'this week' to 'last week' and today is Monday through Wednesday, the current window covers only 1-3 days vs a full 7-day previous week. Always acknowledge this — e.g. 'we're only X days into the week so this isn't a fair comparison yet' — before citing any trend direction. Do not call the week 'trending down' just because Monday has fewer miles than a full prior week.\n"
+                          "PARTIAL WEEK: You are told today's date and day of week in the prompt. If the current comparison window ends today and today is not Sunday, the current week is incomplete — it has fewer days of data than the prior 7-day window. Always acknowledge this before making any comparison, regardless of what day it is. Use per-day averages (e.g. miles/day, activities/day) to make a fair apples-to-apples comparison, and state the number of days in each window explicitly (e.g. 'through Thursday, 4 days vs a full 7-day prior week'). Never frame a partial week's raw totals as comparable to a full week's totals, and never call a trend 'down' just because the partial window hasn't had time to accumulate the same volume.\n"
                           "COMPUTE_BODY_BATTERY: The result includes body_battery (0-100), component values (sleep_hours, hrv, stress), and last_activity (the most recent activity, or null). "
                           "IMPORTANT: sleep_hours, hrv, and stress are 3-day recency-weighted averages, NOT last night's values. Do NOT say 'last night you slept X hours' — say 'your average sleep over the past 3 days is ~X hours'. "
                           "If body_battery is close to or exactly 100 and all components are 0 or missing, Garmin likely hasn't synced yet — ask if the user wants to resync. "
@@ -485,7 +485,7 @@ PLAN_CREATOR_TOOLS = [
 ]
 
 
-def build_create_plan_prompt(race: dict, prefs: dict, total_weeks: int) -> str:
+def build_create_plan_prompt(race: dict, prefs: dict, total_weeks: int, acwr: float = None, acute_load: float = None) -> str:
     today          = date.today().isoformat()
     race_type      = race.get("race_type", "unknown")
     race_date      = race.get("race_date", "")
@@ -504,6 +504,14 @@ def build_create_plan_prompt(race: dict, prefs: dict, total_weeks: int) -> str:
         if max_miles_user:
             user_miles_block += f"\n  max weekly miles: {max_miles_user}"
 
+    load_block = ""
+    if acwr is not None or acute_load is not None:
+        load_block = "\nCURRENT TRAINING LOAD:"
+        if acwr is not None:
+            load_block += f"\n  ACWR: {round(acwr, 2)} ({'high — start conservatively' if acwr > 1.3 else 'elevated — monitor' if acwr > 1.1 else 'optimal' if acwr >= 0.8 else 'low — room to build'})"
+        if acute_load is not None:
+            load_block += f"\n  acute load (7d miles): {round(acute_load, 1)}"
+
     return f"""Generate a training plan for the following athlete.
 
 RACE:
@@ -513,7 +521,7 @@ RACE:
   distance: {race_dist} miles
   plan start date: {today}
   total weeks available: {total_weeks}
-
+{load_block}
 USER PREFERENCES:
   days per week: {days_per_week}
   preferred training days: {preferred_days if preferred_days else "no preference"}

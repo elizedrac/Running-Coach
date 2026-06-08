@@ -158,12 +158,14 @@ def _parse_splits(raw) -> list[dict] | None:
     result = []
     for i, lap in enumerate(laps):
         dist_m = lap.get("distance") or 0
+        elev_m = lap.get("elevationGain")
         result.append({
-            "lap":      i + 1,
-            "miles":    round(dist_m / 1609.34, 2),
-            "pace":     _mps_to_pace(lap.get("averageSpeed")),
-            "avg_hr":   _to_int(lap.get("averageHR")),
-            "duration": _seconds_to_interval(lap.get("duration")),
+            "lap":            i + 1,
+            "miles":          round(dist_m / 1609.34, 2),
+            "pace":           _mps_to_pace(lap.get("averageSpeed")),
+            "avg_hr":         _to_int(lap.get("averageHR")),
+            "duration":       _seconds_to_interval(lap.get("duration")),
+            "elevation_gain": round(elev_m * 3.28084) if elev_m is not None else None,
         })
     return result or None
 

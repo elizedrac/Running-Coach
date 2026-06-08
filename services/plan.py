@@ -29,7 +29,11 @@ def create_plan(user_id: str) -> dict:
 
     total_weeks = (date.fromisoformat(race["race_date"][:10]) - date.today()).days // 7
 
-    messages = [{"role": "user", "content": build_create_plan_prompt(race, prefs, total_weeks)}]
+    load_data = compute_load(user_id)
+    acwr = load_data.get("acwr")
+    acute_load = load_data.get("acute_load")
+
+    messages = [{"role": "user", "content": build_create_plan_prompt(race, prefs, total_weeks, acwr=acwr, acute_load=acute_load)}]
 
     validated = False
     for i in range(10):

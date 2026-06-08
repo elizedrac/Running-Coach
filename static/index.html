@@ -11,11 +11,12 @@
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #FAFAF8; color: #1A1A1A; min-height: 100vh; }
 
         /* ── Header ── */
-        header { background: #1A1A1A; padding: 12px 24px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 100; }
+        header { background: #1A1A1A; padding: 12px 24px 12px 24px; padding-right: 35px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 100; }
         .logo { display: flex; align-items: center; gap: 10px; color: white; font-size: 18px; font-weight: 600; }
         .header-btns { display: flex; gap: 10px; position: relative; }
-        .header-btn { background: transparent; border: 1px solid #555; color: white; padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; transition: border-color 0.2s; display: flex; align-items: center; gap: 6px; }
+        .header-btn { background: transparent; border: 1px solid #555; color: white; padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; transition: border-color 0.2s; display: flex; align-items: center; gap: 6px; position: relative; }
         .header-btn:hover { border-color: white; }
+        .header-btn[data-tip]:hover::after { content: attr(data-tip); position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); background: #fff; color: #333; font-size: 11px; padding: 5px 9px; border-radius: 6px; white-space: normal; width: 140px; text-align: center; pointer-events: none; z-index: 999; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
 
         /* ── Garmin sync popover ── */
         .sync-popover { display: none; position: absolute; top: calc(100% + 10px); right: 0; background: white; border-radius: 12px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); width: 280px; z-index: 200; }
@@ -66,6 +67,8 @@
 
         /* ── Weather pill ── */
         .weather-corner { display: inline-flex; align-items: center; gap: 5px; background: #F0EDE8; border-radius: 6px; padding: 3px 8px; font-size: 11px; color: #7A7A7A; margin-top: 3px; }
+        .location-input { border: none; background: transparent; font-size: 11px; color: #7A7A7A; width: 120px; outline: none; cursor: text; }
+        .location-input:focus { color: #333; }
 
         /* ── Mileage chart card ── */
         .mileage-card-inner { position: relative; }
@@ -252,7 +255,7 @@
     </div>
     <div class="header-btns">
         <div style="position:relative">
-            <button class="header-btn" onclick="toggleSyncPopover(event)" id="sync-btn">
+            <button class="header-btn" onclick="toggleSyncPopover(event)" id="sync-btn" data-tip="Import your latest runs and health data from Garmin Connect">
                 <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
                 </svg>
@@ -275,12 +278,12 @@
                 </div>
             </div>
         </div>
-        <button class="header-btn" id="plan-sync-btn" onclick="runPlanSync()" style="display:none">
+        <button class="header-btn" id="plan-sync-btn" onclick="runPlanSync()" style="display:none" data-tip="Reconcile your training plan with recent Garmin activities — updates mileage and pace based on what you actually ran">
             Sync Plan
         </button>
-        <button class="header-btn" onclick="openEditRaceModal()">Edit Race</button>
-        <button class="header-btn" onclick="openEditPrefsModal()">Edit Training Preferences</button>
-        <button class="header-btn" onclick="notImplemented('Predictions')">Predictions</button>
+        <button class="header-btn" onclick="openEditRaceModal()" data-tip="Set your goal race, race date, goal finish time, and distance">Edit Race</button>
+        <button class="header-btn" onclick="openEditPrefsModal()" data-tip="Set your weekly training days, mileage targets, and preferences for plan generation">Edit Training Preferences</button>
+        <button class="header-btn" onclick="notImplemented('Predictions')" data-tip="Predict your race finish time based on current fitness (coming soon)">Predictions</button>
     </div>
 </header>
 
@@ -312,6 +315,8 @@
                     <div style="font-size:14px;font-weight:600;margin-bottom:3px">Health Data</div>
                     <div class="weather-corner" id="weather-corner">
                         <span id="weather-mini-text">—</span>
+                        <span style="color:#7A7A7A">·</span>
+                        <input class="location-input" id="location-input" value="New York, NY" title="Click to change location" />
                     </div>
                 </div>
             </div>
@@ -726,6 +731,7 @@ let   SID   = _uuid();
 const DAYS  = ["M","T","W","T","F","S","S"];
 const TODAY = new Date().getDay();
 let   hasPlan = false;
+let   userLocation = "New York, NY";
 let   abortController = null;
 let   _stepsChart = null, _sleepChart = null, _rhrChart = null;
 let   _latestHealth = {};
@@ -948,11 +954,16 @@ function openActivityModal(a) {
     if (a.calories_burned) html += `<div class="stat-row"><span class="stat-label">Calories</span><span class="stat-value">${Math.round(a.calories_burned)}</span></div>`;
     if (a.total_time)      html += `<div class="stat-row"><span class="stat-label">Duration</span><span class="stat-value">${a.total_time}</span></div>`;
     if (a.splits && a.splits.length) {
+        const hasElev = a.splits.some(s => s.elevation_gain != null);
+        const splitRows = a.splits.map(s => {
+            const elevTd = hasElev ? `<td>${s.elevation_gain != null ? s.elevation_gain + 'ft' : '—'}</td>` : '';
+            return `<tr><td>${s.lap}</td><td>${s.miles ?? '—'}</td><td>${s.pace || '—'}</td><td>${s.avg_hr ?? '—'}</td>${elevTd}</tr>`;
+        }).join('');
         html += `<div style="margin-top:14px">
             <div class="activity-section-label" style="margin-bottom:6px">Splits</div>
             <table class="interval-table">
-                <thead><tr><th>Lap</th><th>Miles</th><th>Pace</th><th>HR</th></tr></thead>
-                <tbody>${a.splits.map(s => `<tr><td>${s.lap}</td><td>${s.miles ?? '—'}</td><td>${s.pace || '—'}</td><td>${s.avg_hr ?? '—'}</td></tr>`).join('')}</tbody>
+                <thead><tr><th>Lap</th><th>Miles</th><th>Pace</th><th>HR</th>${hasElev ? '<th>Gain</th>' : ''}</tr></thead>
+                <tbody>${splitRows}</tbody>
             </table>
         </div>`;
     }
@@ -1032,7 +1043,7 @@ async function loadActivity() {
 async function loadWeather() {
     const txt = document.getElementById('weather-mini-text');
     try {
-        const res   = await apiFetch(`${API}/weather`);
+        const res   = await apiFetch(`${API}/weather?location=${encodeURIComponent(userLocation)}`);
         const hours = await res.json();
         const h     = hours && hours.length ? hours[0] : null;
         if (!h || !txt) return;
@@ -1372,7 +1383,7 @@ async function sendMessage() {
     try {
         const res = await apiFetch(`${API}/ask`, {
             method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ query: text, session_id: SID, has_plan: hasPlan }),
+            body: JSON.stringify({ query: text, session_id: SID, has_plan: hasPlan, location: userLocation }),
             signal: abortController.signal
         });
 
@@ -2175,6 +2186,12 @@ document.getElementById('activity-modal').addEventListener('click', e => {
 
 document.getElementById('plan-modal').addEventListener('click', e => {
     if (e.target === document.getElementById('plan-modal')) closePlanModal();
+});
+
+// ── Location input ────────────────────────────────────────────────────────────
+document.getElementById('location-input').addEventListener('change', e => {
+    const val = e.target.value.trim();
+    if (val) { userLocation = val; loadWeather(); }
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
