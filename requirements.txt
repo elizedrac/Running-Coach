@@ -1,6 +1,5 @@
 # Python dependencies for runcoach.
 python-dotenv
-python>=3.12
 supabase
 anthropic
 fastapi
