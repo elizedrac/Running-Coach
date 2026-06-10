@@ -25,7 +25,7 @@ def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
                 yield f"data: {json.dumps({'type': 'ended', 'follow_ups': follow_ups})}\n\n"
                 return
 
-            for event_type, data in orchestrate(body.query, user_id, hist, has_plan=body.has_plan, location=body.location):
+            for event_type, data in orchestrate(body.query, user_id, hist, has_plan=body.has_plan, location=body.location, today=body.today):
                 if event_type == "chunk":
                     yield f"data: {json.dumps({'type': 'chunk', 'text': data})}\n\n"
                 elif event_type == "status":

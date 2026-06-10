@@ -1257,7 +1257,7 @@ async function runPlanSync() {
     btn.textContent = 'Syncing...';
     btn.disabled = true;
     try {
-        const res  = await apiFetch(`${API}/plan/sync`, { method: 'POST' });
+        const res  = await apiFetch(`${API}/plan/sync`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ today: localToday() }) });
         const data = await res.json();
         const count = data.changes ? data.changes.length : 0;
         showToast(count > 0 ? `Plan updated — ${count} day${count !== 1 ? 's' : ''} changed` : 'Plan already up to date', '#4A8B6E');
@@ -1383,7 +1383,7 @@ async function sendMessage() {
     try {
         const res = await apiFetch(`${API}/ask`, {
             method:'POST', headers:{'Content-Type':'application/json'},
-            body: JSON.stringify({ query: text, session_id: SID, has_plan: hasPlan, location: userLocation }),
+            body: JSON.stringify({ query: text, session_id: SID, has_plan: hasPlan, location: userLocation, today: localToday() }),
             signal: abortController.signal
         });
 
@@ -1891,7 +1891,7 @@ async function loadPlan() {
             }
             const isRunning  = RUNNING_TYPES.has(type);
             const effMiles   = _effectiveMiles[day.plan_date] || 0;
-            const completed  = (isRunning && effMiles > 0 && (!day.target_miles || effMiles >= day.target_miles))
+            const completed  = (isRunning && effMiles > 0 && (!day.target_miles || effMiles >= day.target_miles * 0.95))
                             || ((type === 'STRENGTH' || type === 'CROSS') && _nonRunCompleted.has(day.plan_date));
             const isRest     = type === 'REST' || (type === 'CROSS' && !completed);
             const stateClass = completed ? ' completed' : isRest ? ' rest-day' : '';

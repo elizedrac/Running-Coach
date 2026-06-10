@@ -89,9 +89,9 @@ def create_plan(user_id: str) -> dict:
     return {"status": "fail"}
 
 
-def update_plan(user_id, intent, include_activities: bool = False) -> dict:
+def update_plan(user_id, intent, include_activities: bool = False, local_today: str = None) -> dict:
     plan_id = get_plan_id(user_id)
-    today = date.today()
+    today = date.fromisoformat(local_today) if local_today else date.today()
     start_date = today - timedelta(days=7)
     end_date = today + timedelta(days=8)
     plan = get_plan_days(plan_id, start_date=start_date.isoformat(), end_date=end_date.isoformat())
@@ -118,7 +118,7 @@ def update_plan(user_id, intent, include_activities: bool = False) -> dict:
         except Exception:
             pass
 
-    prompt = f"User intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (±7 days): {plan}{pacing_block}{activities_block}"
+    prompt = f"Today is {today.isoformat()}.\nUser intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (±7 days): {plan}{pacing_block}{activities_block}"
     response = call_llm(system_prompt=UPDATE_PLAN_SYSTEM, user_prompt=prompt, max_tokens=4096)
     print(f"[update_plan] raw LLM response ({len(response)} chars): {response[:500]}")
 
@@ -156,17 +156,23 @@ if __name__ == "__main__":
     next_sunday = this_monday + timedelta(days=6)
 
     load_data = compute_load(user_id)
-    acwr = load_data.get("acwr", "unknown")
+    acwr = load_data.get("acwr")
     race = get_race(user_id)
     race_date = race.get("race_date", "unknown")
+
+    acwr_block = (
+        f"Current ACWR={round(acwr, 2)}. Only reduce load if ACWR > 1.3; maintain progression if ACWR is 0.8-1.3. "
+        if acwr is not None
+        else "ACWR unavailable — proceed with standard week-over-week progression rules. "
+    )
 
     intent = (
         f"Weekly refresh ({today.isoformat()}): review last week's completed workouts ({last_monday.isoformat()} to {last_sunday.isoformat()}) "
         f"and adjust this week's plan ({this_monday.isoformat()} to {next_sunday.isoformat()}) accordingly. "
         "This is a light adjustment pass — treat the existing plan as the baseline, not a rebuild. "
         "Compare completed activities against what was planned last week: ease hard days if load was high, reduce mileage if significantly under-ran, adjust paces if last week skewed harder or easier than planned. "
-        f"Current ACWR={acwr}. Only reduce load if ACWR > 1.3; maintain progression if ACWR is 0.8-1.3. "
-        f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date}). "
+        + acwr_block
+        + f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date}). "
         "IMPORTANT: reschedule workouts to match updated preferred training days and days-per-week preferences — this takes priority over all other adjustments. "
         "When rescheduling, all spacing rules must still be respected: no hard days (INTERVAL, TEMPO, LONG) on consecutive days, LONG run must be the last running day of the week and must have a REST or STRENGTH day after it, never place a run on a non-preferred day. "
         f"Only modify days from {this_monday.isoformat()} to {next_sunday.isoformat()}. Do not touch any earlier days."

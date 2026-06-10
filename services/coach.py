@@ -107,7 +107,7 @@ def call_tool(name: str, args: dict, user_id: str, location: str = "New York"):
         return f"Tool '{name}' not yet implemented"
     return fn(user_id, **args)
 
-def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, location: str = "New York, NY"):
+def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, location: str = "New York, NY", today: str = None):
     debug = "--debug" in sys.argv
 
     hist = hist or History()
@@ -120,7 +120,7 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, locati
     
     def _truncate(msg):
         content = msg['content'] if isinstance(msg['content'], str) else str(msg['content'])
-        return content[:300] + "..." if len(content) > 300 else content
+        return content[:600] + "..." if len(content) > 600 else content
     recent_context = "\n".join(f"{m['role']}: {_truncate(m)}" for m in hist.recent[-8:])
     planner_prompt = f"User query: {user_query}"
     if hist.summary or recent_context:
@@ -173,7 +173,12 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, locati
                     result = call_tool(name, tool.args, input_id)
                     if debug:
                         print(f"[coach] {name} result={str(result)[:200]}")
-                    tool_results[name] = result
+                    if name in tool_results:
+                        existing = tool_results[name]
+                        tool_results[name] = existing if isinstance(existing, list) else [existing]
+                        tool_results[name].append(result)
+                    else:
+                        tool_results[name] = result
                     if name == "update_plan" and isinstance(result, dict) and result.get("status") == "success":
                         yield ("plan_updated", None)
                 except Exception as e:
@@ -188,7 +193,7 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, locati
     recent_turns = "\n".join(f"{m['role']}: {m['content']}" for m in hist.recent[-4:])
     full_history = "\n".join(p for p in [hist.summary, recent_turns] if p)
 
-    today_label = date.today().strftime("%A, %B %d %Y")
+    today_label = date.fromisoformat(today).strftime("%A, %B %d %Y") if today else date.today().strftime("%A, %B %d %Y")
     context = f"\n\n[Conversation context]\n{full_history}" if full_history else ""
     prompt = f"Today is {today_label}. Answer the user's most recent question: {user_query}{context}"
     

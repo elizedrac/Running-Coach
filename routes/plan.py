@@ -4,7 +4,7 @@ from db.preferences import get_preferences, set_days_per_week, set_preferred_day
 from db.plan import get_plan_days, get_plan_intervals, get_plan_id, delete_plan, patch_plan, clear_day
 from services.plan import create_plan, update_plan
 from services.auth import get_current_user
-from models.planner import RaceRequest, PreferencesRequest, PatchDayRequest
+from models.planner import RaceRequest, PreferencesRequest, PatchDayRequest, SyncPlanRequest
 from datetime import date, timedelta
 
 router = APIRouter()
@@ -122,11 +122,11 @@ def remove_plan(user_id: str = Depends(get_current_user)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.post("/plan/sync")
-def sync_plan(user_id: str = Depends(get_current_user)):
+def sync_plan(body: SyncPlanRequest = SyncPlanRequest(), user_id: str = Depends(get_current_user)):
     try:
-        today = date.today().isoformat()
-        intent = f"Reconcile plan with actual Garmin activities. Only update days from the start of the current week up to and including today ({today}). Do not modify any future days that have not happened yet."
-        return update_plan(user_id, intent, include_activities=True)
+        today = body.today or date.today().isoformat()
+        intent = f"Reconcile plan with actual Garmin activities. Today is {today}. Update completed days (start of current week through today) to reflect actual Garmin activities. For future days within the ±7 day window: only adjust if a completed day's load warrants it (e.g. ease the next hard day if today's run was significantly harder or longer than planned)."
+        return update_plan(user_id, intent, include_activities=True, local_today=today)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
