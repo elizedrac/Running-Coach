@@ -48,6 +48,7 @@ class PreferencesRequest(BaseModel):
     avg_miles: float = None
     max_miles: float = None
     time_based: bool = None
+    notes: str = None
 
 class PlanInterval(BaseModel):
     interval_num: int

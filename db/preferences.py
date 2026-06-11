@@ -39,3 +39,6 @@ def set_max_miles(user_id: str, miles: float = None):
 
 def set_time_based(user_id: str, time_based: bool = False):
     return _set(user_id, "time_based", time_based)
+
+def set_notes(user_id: str, notes: str = None):
+    return _set(user_id, "notes", notes)

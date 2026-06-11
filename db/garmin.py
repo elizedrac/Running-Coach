@@ -17,6 +17,11 @@ def save_garmin_credentials(user_id: str, email: str, password: str) -> None:
     }, on_conflict="user_id").execute()
 
 
+def delete_garmin_credentials(user_id: str) -> None:
+    supabase = get_supabase_client()
+    supabase.table("garmin_credentials").delete().eq("user_id", user_id).execute()
+
+
 def save_garmin_token(user_id: str, token_json: str) -> None:
     supabase = get_supabase_client()
     supabase.table("garmin_credentials").update({

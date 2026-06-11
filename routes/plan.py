@@ -1,6 +1,6 @@
 from fastapi import APIRouter, HTTPException, Depends
 from db.race import get_race, set_race_type, set_goal_time, set_race_distance, set_race_date
-from db.preferences import get_preferences, set_days_per_week, set_preferred_days, set_avg_miles, set_max_miles, set_time_based
+from db.preferences import get_preferences, set_days_per_week, set_preferred_days, set_avg_miles, set_max_miles, set_time_based, set_notes
 from db.plan import get_plan_days, get_plan_intervals, get_plan_id, delete_plan, patch_plan, clear_day
 from services.plan import create_plan, update_plan
 from services.auth import get_current_user
@@ -85,6 +85,13 @@ def max_miles(body: PreferencesRequest, user_id: str = Depends(get_current_user)
 def time_based(body: PreferencesRequest, user_id: str = Depends(get_current_user)):
     try:
         return set_time_based(user_id, body.time_based)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/preferences/notes")
+def notes(body: PreferencesRequest, user_id: str = Depends(get_current_user)):
+    try:
+        return set_notes(user_id, body.notes)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

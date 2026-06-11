@@ -276,6 +276,9 @@
                     <button class="sync-default-btn" onclick="setDefaultDates()">Last 7 days</button>
                     <button class="sync-go-btn" onclick="runSync()">Sync</button>
                 </div>
+                <div style="margin-top:10px;text-align:center;">
+                    <button onclick="disconnectGarmin()" style="background:none;border:none;font-size:11px;color:#A8A8A8;cursor:pointer;text-decoration:underline;padding:0;">Disconnect Garmin</button>
+                </div>
             </div>
         </div>
         <button class="header-btn" id="plan-sync-btn" onclick="runPlanSync()" style="display:none" data-tip="Reconcile your training plan with recent Garmin activities — updates mileage and pace based on what you actually ran">
@@ -489,15 +492,9 @@
             <label>Max miles/week (peak week)</label>
             <input type="number" id="ep-max-miles" placeholder="e.g. 45" step="1"/>
         </div>
-        <div style="border-top:1px solid #E8E4E0;margin:20px 0 16px;"></div>
-        <div style="font-size:13px;font-weight:600;color:#1A1A1A;margin-bottom:12px;">Garmin Account</div>
         <div class="modal-field">
-            <label>Garmin email</label>
-            <input type="text" id="ep-garmin-email" placeholder="you@example.com" autocomplete="new-password"/>
-        </div>
-        <div class="modal-field">
-            <label>Garmin password</label>
-            <input type="password" id="ep-garmin-password" placeholder="Leave blank to keep existing" autocomplete="new-password"/>
+            <label>Personal notes <span style="color:#A8A8A8;font-weight:400">(injuries, preferences, things to keep in mind)</span></label>
+            <textarea id="ep-notes" rows="3" placeholder="e.g. left knee tends to flare up, prefer morning runs, avoid back-to-back hard days..." style="width:100%;border:1px solid #E8E4E0;border-radius:8px;padding:9px 12px;font-size:13.5px;outline:none;color:#1A1A1A;resize:vertical;font-family:inherit;"></textarea>
         </div>
         <div class="modal-error" id="ep-error"></div>
         <div class="modal-actions">
@@ -839,9 +836,9 @@ async function loadHealthChart() {
         if (!rows || !rows.length) return;
 
         const steps = rows.map(r => r.total_steps ? +(r.total_steps / 1000).toFixed(1) : null);
-        const rhr   = rows.map(r => r.rhr || null);
+        const rhr   = rows.map(r => r.rhr ?? 0);
         const sleep = rows.map(r => {
-            if (!r.total_sleep) return null;
+            if (!r.total_sleep) return 0;
             const [h, m] = r.total_sleep.split(':');
             return +(+h + +m / 60).toFixed(1);
         });
@@ -849,8 +846,8 @@ async function loadHealthChart() {
         // 7-day averages
         const last = rows[rows.length - 1];
         const validSteps = steps.filter(x => x != null);
-        const validSleep = sleep.filter(x => x != null);
-        const validRhr   = rhr.filter(x => x != null);
+        const validSleep = sleep.filter(x => x > 0);
+        const validRhr   = rhr.filter(x => x > 0);
         const avgSteps = validSteps.length ? (validSteps.reduce((a,b) => a+b, 0) / validSteps.length).toFixed(1) + 'K' : '—';
         const avgSleep = validSleep.length ? (validSleep.reduce((a,b) => a+b, 0) / validSleep.length).toFixed(1) + 'h' : '—';
         const avgRhr   = validRhr.length   ? Math.round(validRhr.reduce((a,b) => a+b, 0) / validRhr.length) + ' bpm' : '—';
@@ -1199,6 +1196,13 @@ async function saveGarminSetup() {
     showToast('Garmin account connected', '#4A8B6E');
 }
 
+async function disconnectGarmin() {
+    document.getElementById('sync-popover').classList.remove('open');
+    await apiFetch(`${API}/garmin/credentials`, { method: 'DELETE' });
+    showToast('Garmin disconnected', '#3A8B8B');
+    document.getElementById('garmin-setup-modal').classList.add('open');
+}
+
 function setDefaultDates() {
     document.getElementById('sync-start').value = localOffset(-7);
     document.getElementById('sync-end').value   = localToday();
@@ -1483,6 +1487,7 @@ async function openEditPrefsModal() {
         if (prefs.days_per_week) document.getElementById('ep-days').value     = prefs.days_per_week;
         if (prefs.avg_miles)     document.getElementById('ep-avg-miles').value = prefs.avg_miles;
         if (prefs.max_miles)     document.getElementById('ep-max-miles').value = prefs.max_miles;
+        document.getElementById('ep-notes').value = prefs.notes || '';
         if (prefs.preferred_days) {
             document.querySelectorAll('#ep-pref-days .day-chip').forEach(chip => {
                 chip.classList.toggle('selected', prefs.preferred_days.includes(chip.textContent));
@@ -1504,16 +1509,14 @@ async function saveEditedPrefs() {
     const maxMiles = parseFloat(document.getElementById('ep-max-miles').value);
     const prefDays = [...document.querySelectorAll('#ep-pref-days .day-chip.selected')].map(d => d.textContent);
 
-    const garminEmail    = document.getElementById('ep-garmin-email').value.trim();
-    const garminPassword = document.getElementById('ep-garmin-password').value;
-
     try {
         const calls = [];
         if (!isNaN(days))     calls.push(post('/preferences/total-days',    {days_per_week: days}));
         if (!isNaN(avgMiles)) calls.push(post('/preferences/avg-miles',     {avg_miles: avgMiles}));
         if (!isNaN(maxMiles)) calls.push(post('/preferences/max-miles',     {max_miles: maxMiles}));
         if (prefDays.length)  calls.push(post('/preferences/preferred-days', {preferred_days: prefDays}));
-        if (garminEmail && garminPassword) calls.push(post('/garmin/credentials', {email: garminEmail, password: garminPassword}));
+        const notes = document.getElementById('ep-notes').value.trim();
+        calls.push(post('/preferences/notes', {notes: notes || null}));
         await Promise.all(calls);
         closeEditPrefsModal();
         showToast('Training preferences updated', '#4A8B6E');

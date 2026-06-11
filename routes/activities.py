@@ -7,7 +7,7 @@ from services.trend_analysis import compute_body_battery
 from services.auth import get_current_user
 from db.activity_history import get_activities
 from db.health_history import get_health_history
-from db.garmin import save_garmin_credentials
+from db.garmin import save_garmin_credentials, delete_garmin_credentials
 from models.planner import DataRequest, GarminCredentials
 from datetime import date, timedelta
 
@@ -23,6 +23,14 @@ def garmin_credentials_status(user_id: str = Depends(get_current_user)):
 def set_garmin_credentials(body: GarminCredentials, user_id: str = Depends(get_current_user)):
     try:
         save_garmin_credentials(user_id, body.email, body.password)
+        return {"status": "ok"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.delete("/garmin/credentials")
+def remove_garmin_credentials(user_id: str = Depends(get_current_user)):
+    try:
+        delete_garmin_credentials(user_id)
         return {"status": "ok"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

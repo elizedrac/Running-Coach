@@ -20,12 +20,12 @@ TOOL_METADATA = {
     "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
     "update_preferences": "Update a specific training preference when the user explicitly asks to change it — days per week, preferred training days, mileage targets, or time vs mileage based training.",
-    "update_plan":        "Modify the user's training plan for specific days within ±7 days of today. Use when the user explicitly asks to update, change, or add something to their plan (e.g. add mileage, add paces, swap workouts), when they are sick/hurt/feeling off, or when they respond affirmatively to a plan change the coach previously recommended. Also use when the user wants to reconcile their plan with recent activities (e.g. 'update plan based on my run', 'I did X yesterday, adjust plan', 'sync my workouts to the plan'). Do NOT use for: wholesale restructuring (changing days per week, rebuilding the plan from scratch) — those require a delete + recreate flow. Do NOT use for changes spanning more than ±7 days from today — tell the user to click the day directly to edit it, or regenerate the plan if early in training.",
+    "update_plan":        "Modify the user's training plan for specific days within ±7 days of today. Use when the user explicitly asks to update, change, or add something to their plan (e.g. add mileage, add paces, swap workouts), when they are sick/hurt/feeling off, or when they respond affirmatively to a plan change the coach previously recommended. Also use when the user wants to reconcile their plan with recent activities (e.g. 'update plan based on my run', 'I did X yesterday, adjust plan', 'sync my workouts to the plan'). Do NOT use for: wholesale restructuring (changing days per week, rebuilding the plan from scratch) — those require a delete + recreate flow. Do NOT use for changes spanning more than ±7 days from today — tell the user to click the day directly to edit it, or regenerate the plan if early in training. CRITICAL: Do NOT use for questions like 'should I...', 'can I...', 'is it okay if...', 'what if I...' — these are advice-seeking questions, not change requests. Answer the question; only propose or execute a change if the user explicitly says to do it.",
 }
 
-def build_planner_system(min_date: str = "2020-01-01") -> str:
+def build_planner_system(min_date: str = "2020-01-01", local_today: str = None) -> str:
     from datetime import timedelta
-    today_dt = date.today()
+    today_dt = date.fromisoformat(local_today) if local_today else date.today()
     today = today_dt.isoformat()
     weekday = today_dt.weekday()  # 0=Mon, 6=Sun
     this_week_monday = today_dt - timedelta(days=weekday)
@@ -155,6 +155,7 @@ TOOL_SNIPPETS = {
                           "MISSING COMPARISON: If a trend result has ONLY a 'current' field (no 'previous' or 'trend' keys), it means no valid comparison window exists (not enough prior data). Say something like 'I don't have enough prior data to detect a trend' — do NOT say it's a single data point (the current value is still an average over the requested window). State the current value with the date range it covers.\n\n"
                           "MIN_DATE: The user's data starts from {min_date}. If the user asked for a date range starting before that, the window was shifted forward to start at {min_date} (preserving its length). When that happens, briefly tell the user their requested range was shifted and why. If the entire requested range was before {min_date}, gracefully say no data is available.\n\n"
                           "PARTIAL WEEK: You are told today's date and day of week in the prompt. If the current comparison window ends today and today is not Sunday, the current week is incomplete — it has fewer days of data than the prior 7-day window. Always acknowledge this before making any comparison, regardless of what day it is. Use per-day averages (e.g. miles/day, activities/day) to make a fair apples-to-apples comparison, and state the number of days in each window explicitly (e.g. 'through Thursday, 4 days vs a full 7-day prior week'). Never frame a partial week's raw totals as comparable to a full week's totals, and never call a trend 'down' just because the partial window hasn't had time to accumulate the same volume.\n"
+                          "TREADMILL PACE: For any activity with activity_type containing 'treadmill', pace from Garmin is unreliable — the watch uses wrist accelerometer data indoors and typically reads slower than actual effort. Flag this when discussing pace for treadmill runs. For interval workouts on a treadmill, average_pace is especially misleading (it blends warmup, reps, and rest) — treat it as approximate only and note the caveat.\n"
                           "COMPUTE_BODY_BATTERY: The result includes body_battery (0-100), component values (sleep_hours, hrv, stress), and last_activity (the most recent activity, or null). "
                           "IMPORTANT: sleep_hours, hrv, and stress are 3-day recency-weighted averages, NOT last night's values. Do NOT say 'last night you slept X hours' — say 'your average sleep over the past 3 days is ~X hours'. "
                           "If body_battery is close to or exactly 100 and all components are 0 or missing, Garmin likely hasn't synced yet — ask if the user wants to resync. "
@@ -497,6 +498,7 @@ def build_create_plan_prompt(race: dict, prefs: dict, total_weeks: int, acwr: fl
     preferred_days = prefs.get("preferred_days") or []
     avg_miles_user = prefs.get("avg_miles")
     max_miles_user = prefs.get("max_miles")
+    user_notes     = prefs.get("notes")
 
     user_miles_block = ""
     if avg_miles_user or max_miles_user:
@@ -527,7 +529,7 @@ RACE:
 USER PREFERENCES:
   days per week: {days_per_week}
   preferred training days: {preferred_days if preferred_days else "no preference"}
-{user_miles_block}
+{user_miles_block}{f"{chr(10)}ATHLETE NOTES (respect these throughout the plan): {user_notes}" if user_notes else ""}
 
 RACE DISTANCE KNOWLEDGE (match race type to closest entry for fallback defaults):
 {json.dumps(_RACE_MILES_KNOWLEDGE, indent=2)}

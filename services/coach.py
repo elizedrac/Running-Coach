@@ -118,16 +118,17 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, locati
         yield("done", hist)
         return 
     
-    def _truncate(msg):
+    def _msg_str(msg):
         content = msg['content'] if isinstance(msg['content'], str) else str(msg['content'])
-        return content[:600] + "..." if len(content) > 600 else content
-    recent_context = "\n".join(f"{m['role']}: {_truncate(m)}" for m in hist.recent[-8:])
+        return f"{msg['role']}: {content}"
+    full_context = "\n".join(_msg_str(m) for m in hist.recent[-8:])
+    recent_context = full_context[-3000:] if len(full_context) > 3000 else full_context
     planner_prompt = f"User query: {user_query}"
     if hist.summary or recent_context:
         context = f"{hist.summary}\n{recent_context}".strip()
         planner_prompt += f"\n\n[Conversation context]\n{context}"
     min_date = get_user_min_date(user_id)
-    planner_response = planner(planner_prompt, min_date=min_date)
+    planner_response = planner(planner_prompt, min_date=min_date, local_today=today)
 
     if debug:
         print(f"[coach] path={planner_response.path}, tools={[t.name for t in planner_response.tools]}")
