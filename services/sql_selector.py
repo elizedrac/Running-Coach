@@ -85,9 +85,9 @@ def execute_query(user_id, query_intent: str, start_date: str = None, end_date: 
     raw = select_queries(query_intent)
     response = SQLPlan.model_validate(json.loads(raw))
 
-    # Enforce: if any trend function was picked, drop raw fetchers (they're redundant)
+    # If trend functions were picked, drop get_health_data (redundant) but keep get_activities (individual rows)
     if any(q not in ("get_activities", "get_health_data") for q in response.queries):
-        response.queries = [q for q in response.queries if q not in ("get_activities", "get_health_data")]
+        response.queries = [q for q in response.queries if q != "get_health_data"]
 
     if "--debug" in sys.argv:
         print(f"[sql_selector] picked: {response.queries}", file=sys.stderr)
