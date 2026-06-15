@@ -201,6 +201,8 @@ UPDATE_PLAN_SYSTEM = f"""You are a training plan modifier for a running coach ap
 
 SCOPE: You can modify any day within 7 days before or after today. The plan data you receive only contains days within that window — if a date appears in the plan, it is editable. Never refuse to edit a day that appears in the plan data. Only return {{"changes": []}} if the requested date genuinely does not appear in the provided plan data at all.
 
+ATHLETE NOTES: The training preferences include a "notes" field with personal preferences, injury history, and constraints set by the athlete. These take precedence over all other rules — apply them in every change you make.
+
 {PLAN_RULES}
 
 ILLNESS:
@@ -246,7 +248,7 @@ RECONCILIATION (when recent activities are provided in the prompt):
 - INTERVAL total miles: For INTERVAL days, update target_miles to the actual total session miles (total distance is accurate). Do NOT update target_pace from the activity — the overall average_pace is meaningless across warmup/reps/rest. Do NOT change workout_type.
 - TEMPO pace from splits: When reconciling a TEMPO day, use the pace of the main tempo segment, not the overall average_pace (which is diluted by warmup/cooldown). Look at the splits: skip the first split (warmup) and last split (cooldown) — the remaining middle splits at the fastest sustained pace represent the tempo effort. Use the average pace of those middle splits as target_pace. Update target_miles to actual total miles.
 - CROSS training: Only change workout_type to CROSS when BOTH a running activity AND a strength/gym activity are logged on the same day. Do not change workout_type for treadmill, interval, or tempo runs on their own.
-- STRENGTH already done: If a strength activity has been logged on any day this week, mark any future unstarted STRENGTH days in the same week as REST — the weekly strength quota is fulfilled. Do not remove STRENGTH days that are today or in the past (only future days within the same week).
+- STRENGTH already done: If any strength or cross-training activity has been logged on any day this week, convert ALL other STRENGTH or CROSS plan days in the same week that have no logged activity to REST — this applies to both past and future days. The weekly non-running quota is fulfilled by the completed session; unstarted STRENGTH/CROSS days (whether already passed or upcoming) should become REST.
 
 Return ONLY:
 {{"changes": [{{"plan_date": "YYYY-MM-DD", "workout_type": "...", "target_miles": <float or null>, "target_pace": "<pace string or null>", "notes": "...", "intervals": [...] or null}}]}}
@@ -282,6 +284,8 @@ _RACE_MILES_KNOWLEDGE = json.loads(
 )
 
 CREATE_PLAN_SYSTEM = """You are a training plan generator for a running coach app. Use the available tools to gather context about the athlete, then call save_training_plan as your final action with the complete day-by-day plan.
+
+ATHLETE NOTES: The prompt includes an "ATHLETE NOTES" field with personal preferences, injury history, and constraints. These take precedence over all other rules — apply them throughout every week of the plan.
 
 TOOL GUIDANCE:
 - pacing_calculator: call this first if goal_time and distance are available — you need pace zones to set correct target paces throughout the plan.
@@ -529,7 +533,7 @@ RACE:
 USER PREFERENCES:
   days per week: {days_per_week}
   preferred training days: {preferred_days if preferred_days else "no preference"}
-{user_miles_block}{f"{chr(10)}ATHLETE NOTES (respect these throughout the plan): {user_notes}" if user_notes else ""}
+{user_miles_block}{f"{chr(10)}ATHLETE NOTES (take precedence over all other rules — apply throughout every week): {user_notes}" if user_notes else ""}
 
 RACE DISTANCE KNOWLEDGE (match race type to closest entry for fallback defaults):
 {json.dumps(_RACE_MILES_KNOWLEDGE, indent=2)}
