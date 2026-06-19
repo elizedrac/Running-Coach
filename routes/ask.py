@@ -1,15 +1,18 @@
 # Main /ask entry point. Thin wrapper that calls services/coach.py::orchestrate().
-from fastapi import APIRouter, HTTPException, Depends
+import json
+
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+
+from models.planner import AskRequest, History
+from services.auth import get_current_user
 from services.coach import orchestrate
 from services.end import detect_end, generate_followups
-from services.auth import get_current_user
-from models.planner import History, AskRequest
-import json
 
 router = APIRouter()
 
 session_memory = {}
+
 
 @router.post("/ask")
 def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
@@ -25,7 +28,9 @@ def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
                 yield f"data: {json.dumps({'type': 'ended', 'follow_ups': follow_ups})}\n\n"
                 return
 
-            for event_type, data in orchestrate(body.query, user_id, hist, has_plan=body.has_plan, location=body.location, today=body.today):
+            for event_type, data in orchestrate(
+                body.query, user_id, hist, has_plan=body.has_plan, location=body.location, today=body.today
+            ):
                 if event_type == "chunk":
                     yield f"data: {json.dumps({'type': 'chunk', 'text': data})}\n\n"
                 elif event_type == "status":
@@ -40,6 +45,7 @@ def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
 
     return StreamingResponse(generate(), media_type="text/event-stream")
+
 
 @router.delete("/session/{session_id}")
 def clear_session(session_id: str):

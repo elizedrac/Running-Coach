@@ -1,21 +1,24 @@
-from typing import Tuple
+import json
 from collections import defaultdict
-from db.activity_history import get_avg_weekly_miles
-from services.llm import call_llm
-from services.prompts import PLAN_CHECKER_SYSTEM
-from db.preferences import get_preferences
 from datetime import date
 from pathlib import Path
-import json
+from typing import Tuple
+
+from db.activity_history import get_avg_weekly_miles
+from db.preferences import get_preferences
+from services.llm import call_llm
+from services.prompts import PLAN_CHECKER_SYSTEM
 
 _RACE_MILES = json.loads(Path(__file__).parent.parent.joinpath("knowledge/race_miles.json").read_text())
+
 
 def input_check(query: str) -> Tuple[bool, str]:
     if len(query.strip()) < 2:
         return True, "Looks like you got cut off. Want to resend your message?"
     if len(query.split()) > 150:
-        return True, "That message is a bit long — want to break it into smaller questions?"    
+        return True, "That message is a bit long — want to break it into smaller questions?"
     return False, ""
+
 
 def _normalize_race_type(race_type: str) -> str:
     rt = (race_type or "").lower()
@@ -28,6 +31,7 @@ def _normalize_race_type(race_type: str) -> str:
     if "5k" in rt or "5 k" in rt:
         return "5k"
     return "marathon"
+
 
 # plan guardrails/challenger
 def challenger(days: list, user_id: str, race_type: str = "") -> list:
@@ -42,6 +46,7 @@ def challenger(days: list, user_id: str, race_type: str = "") -> list:
 
     return violations
 
+
 def _get_weeks(days: list) -> dict:
     weeks = defaultdict(list)
 
@@ -50,16 +55,17 @@ def _get_weeks(days: list) -> dict:
 
     return weeks
 
+
 def check_long_run_monotonicity(days: list, violations: list) -> None:
     weeks = _get_weeks(days)
 
     prev_long_run = 0
-    
+
     for week in sorted(weeks):
         curr_week = weeks[week]
         long_run = next((d.get("target_miles") for d in curr_week if d["workout_type"] == "LONG"), None)
 
-        if week / len(weeks) <= .60:
+        if week / len(weeks) <= 0.60:
             if prev_long_run and long_run and prev_long_run > long_run:
                 violations.append(f"Week {week}: long run decreased ({prev_long_run} → {long_run} mi)")
         else:
@@ -67,6 +73,7 @@ def check_long_run_monotonicity(days: list, violations: list) -> None:
 
         if long_run:
             prev_long_run = long_run
+
 
 def check_mileage_ramp(days: list, violations: list, user_id: str) -> None:
     weeks = _get_weeks(days)
@@ -80,14 +87,15 @@ def check_mileage_ramp(days: list, violations: list, user_id: str) -> None:
         if week == last_week:
             break
         curr_week = weeks[week]
-        total_miles = sum(d['target_miles'] for d in curr_week if d.get('target_miles'))
+        total_miles = sum(d["target_miles"] for d in curr_week if d.get("target_miles"))
 
         if total_miles and prev_total and total_miles > 1.20 * prev_total:
             violations.append(f"Week {week}: mileage ramp too steep ({prev_total:.1f} → {total_miles:.1f} mi, >20%)")
 
         if total_miles:
             prev_total = total_miles
-        
+
+
 def check_days_per_week(days: list, violations: list, user_id: str) -> None:
     prefs = get_preferences(user_id)
     target = prefs.get("days_per_week")
@@ -102,12 +110,14 @@ def check_days_per_week(days: list, violations: list, user_id: str) -> None:
         if active_days < target:
             violations.append(f"Week {week}: only {active_days} workout days — expected {target}")
 
+
 def check_peak_long_run_repetition(days: list, violations: list) -> None:
     weeks = _get_weeks(days)
     last_week = max(weeks)
     # exclude last week to avoid counting the race itself as the peak
     long_runs = [
-        d.get("target_miles") for d in days
+        d.get("target_miles")
+        for d in days
         if d["workout_type"] == "LONG" and d.get("target_miles") and d["week_number"] != last_week
     ]
     if not long_runs:
@@ -116,7 +126,10 @@ def check_peak_long_run_repetition(days: list, violations: list) -> None:
     peak_count = sum(1 for m in long_runs if m >= peak - 1.5)
     print(f"[guardrails] peak long run: {peak} mi, count within 1.5 mi: {peak_count}")
     if peak_count > 2:
-        violations.append(f"Peak long run ({peak} mi) repeated {peak_count} times — max 2 of peak +- 1.5 miles allowed before taper")
+        violations.append(
+            f"Peak long run ({peak} mi) repeated {peak_count} times — max 2 of peak +- 1.5 miles allowed before taper"
+        )
+
 
 def check_phase2_variety(days: list, violations: list, race_type: str) -> None:
     weeks = _get_weeks(days)
@@ -136,11 +149,14 @@ def check_phase2_variety(days: list, violations: list, race_type: str) -> None:
         if "LONG" not in types:
             violations.append(f"Week {week} (Phase 2): missing long run")
         if types.count("EASY") > 1:
-            violations.append(f"Week {week} (Phase 2): {types.count('EASY')} easy runs — max 1 allowed, use AEROBIC for additional easy-effort days")
+            violations.append(
+                f"Week {week} (Phase 2): {types.count('EASY')} easy runs — max 1 allowed, use AEROBIC for additional easy-effort days"
+            )
         if "TEMPO" not in types:
             violations.append(f"Week {week} (Phase 2): missing tempo run")
         if "INTERVAL" not in types:
             violations.append(f"Week {week} (Phase 2): missing interval session")
+
 
 def llm_check(days: list, violations: list):
     summary = [
@@ -150,7 +166,9 @@ def llm_check(days: list, violations: list):
     prompt = f"current plan: {json.dumps(summary)}"
 
     try:
-        result = call_llm(system_prompt=PLAN_CHECKER_SYSTEM, user_prompt=prompt, model="claude-haiku-4-5-20251001", max_tokens=1024)
+        result = call_llm(
+            system_prompt=PLAN_CHECKER_SYSTEM, user_prompt=prompt, model="claude-haiku-4-5-20251001", max_tokens=1024
+        )
         data = json.loads(result)
         violations.extend(data.get("violations", []))
     except Exception:

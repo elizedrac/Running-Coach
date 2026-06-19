@@ -1,11 +1,13 @@
 # Per-metric trend analysis. Each function compares its window against the same-length window immediately before it.
 from datetime import datetime, timedelta
+
 from db.activity_history import get_activities
 from db.health_history import get_health_history
 
 MIN_DATE = "2020-01-01"
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _pace_to_seconds(pace_str):
     if not pace_str or "/" not in pace_str:
@@ -16,6 +18,7 @@ def _pace_to_seconds(pace_str):
     except (ValueError, AttributeError):
         return None
 
+
 def _time_to_hours(time_str):
     if not time_str:
         return 0
@@ -25,15 +28,18 @@ def _time_to_hours(time_str):
     except (ValueError, AttributeError):
         return 0
 
+
 def _avg(rows, field, coerce=None):
     vals = [(coerce(r.get(field)) if coerce else r.get(field)) for r in rows if r.get(field) is not None]
     vals = [v for v in vals if v is not None]
     return sum(vals) / len(vals) if vals else 0.0
 
+
 def _sum(rows, field, coerce=None):
     vals = [(coerce(r.get(field)) if coerce else r.get(field)) for r in rows if r.get(field) is not None]
     vals = [v for v in vals if v is not None]
     return sum(vals)
+
 
 def _direction(current, previous, higher_is_better):
     if previous == 0 or higher_is_better is None:
@@ -44,6 +50,7 @@ def _direction(current, previous, higher_is_better):
     if (diff_pct > 0) == higher_is_better:
         return "improving"
     return "declining"
+
 
 def _windows(start_date: str, end_date: str, prev_start=None, prev_end=None) -> tuple[str | None, str | None]:
     if prev_start and prev_end and prev_start >= MIN_DATE:
@@ -67,6 +74,7 @@ def _windows(start_date: str, end_date: str, prev_start=None, prev_end=None) -> 
 
     return prev_start.isoformat(), prev_end.isoformat()
 
+
 def _build(metric, current, prev_rows, previous, higher_is_better):
     result = {"metric": metric, "current": round(current, 2)}
     if prev_rows:
@@ -77,6 +85,7 @@ def _build(metric, current, prev_rows, previous, higher_is_better):
 
 # ── activity trends ──────────────────────────────────────────────────────────
 
+
 def miles_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
     curr = get_activities(user_id, start_date, end_date)
@@ -85,6 +94,7 @@ def miles_trend(user_id: str, start_date: str, end_date: str, prev_start=None, p
     if prev_start and prev_end:
         prev = get_activities(user_id, prev_start, prev_end)
     return _build("total_miles", _sum(curr, "miles"), prev, _sum(prev, "miles"), True)
+
 
 def pace_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
@@ -101,6 +111,7 @@ def pace_trend(user_id: str, start_date: str, end_date: str, prev_start=None, pr
         False,
     )
 
+
 def hr_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
     curr = get_activities(user_id, start_date, end_date)
@@ -109,6 +120,7 @@ def hr_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev
     if prev_start and prev_end:
         prev = get_activities(user_id, prev_start, prev_end)
     return _build("avg_hr", _avg(curr, "avg_hr"), prev, _avg(prev, "avg_hr"), None)
+
 
 def total_calories_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
@@ -119,6 +131,7 @@ def total_calories_trend(user_id: str, start_date: str, end_date: str, prev_star
         prev = get_activities(user_id, prev_start, prev_end)
     return _build("total_calories", _sum(curr, "calories_burned"), prev, _sum(prev, "calories_burned"), None)
 
+
 def avg_calories_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
     curr = get_activities(user_id, start_date, end_date)
@@ -127,6 +140,7 @@ def avg_calories_trend(user_id: str, start_date: str, end_date: str, prev_start=
     if prev_start and prev_end:
         prev = get_activities(user_id, prev_start, prev_end)
     return _build("avg_calories_per_activity", _avg(curr, "calories_burned"), prev, _avg(prev, "calories_burned"), None)
+
 
 def activity_count_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
@@ -137,11 +151,12 @@ def activity_count_trend(user_id: str, start_date: str, end_date: str, prev_star
         prev = get_activities(user_id, prev_start, prev_end)
     return _build("total_activities", len(curr), prev, len(prev), True)
 
+
 def total_time_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
     curr = get_activities(user_id, start_date, end_date)
 
-    prev = []   
+    prev = []
     if prev_start and prev_end:
         prev = get_activities(user_id, prev_start, prev_end)
     return _build(
@@ -155,6 +170,7 @@ def total_time_trend(user_id: str, start_date: str, end_date: str, prev_start=No
 
 # ── health trends ────────────────────────────────────────────────────────────
 
+
 def hrv_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
     curr = get_health_history(user_id, start_date, end_date)
@@ -163,6 +179,7 @@ def hrv_trend(user_id: str, start_date: str, end_date: str, prev_start=None, pre
     if prev_start and prev_end:
         prev = get_health_history(user_id, prev_start, prev_end)
     return _build("avg_hrv", _avg(curr, "hrv"), prev, _avg(prev, "hrv"), True)
+
 
 def rhr_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
@@ -173,6 +190,7 @@ def rhr_trend(user_id: str, start_date: str, end_date: str, prev_start=None, pre
         prev = get_health_history(user_id, prev_start, prev_end)
     return _build("avg_rhr", _avg(curr, "rhr"), prev, _avg(prev, "rhr"), False)
 
+
 def average_sleep(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
     curr = get_health_history(user_id, start_date, end_date)
@@ -181,6 +199,7 @@ def average_sleep(user_id: str, start_date: str, end_date: str, prev_start=None,
     if prev_start and prev_end:
         prev = get_health_history(user_id, prev_start, prev_end)
     return _build("avg_sleep_score", _avg(curr, "sleep_score"), prev, _avg(prev, "sleep_score"), True)
+
 
 def total_sleep(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
@@ -207,6 +226,7 @@ def stress_trend(user_id: str, start_date: str, end_date: str, prev_start=None, 
         prev = get_health_history(user_id, prev_start, prev_end)
     return _build("avg_stress", _avg(curr, "stress"), prev, _avg(prev, "stress"), False)
 
+
 def average_steps(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
     curr = get_health_history(user_id, start_date, end_date)
@@ -215,6 +235,7 @@ def average_steps(user_id: str, start_date: str, end_date: str, prev_start=None,
     if prev_start and prev_end:
         prev = get_health_history(user_id, prev_start, prev_end)
     return _build("avg_steps", _avg(curr, "total_steps"), prev, _avg(prev, "total_steps"), True)
+
 
 def total_steps(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
     prev_start, prev_end = _windows(start_date, end_date, prev_start, prev_end)
@@ -228,20 +249,23 @@ def total_steps(user_id: str, start_date: str, end_date: str, prev_start=None, p
 
 # ── training load and body battery ──────────────────────────────────────────────────────────
 
+
 def _activity_intensity(total_time: float, avg_hr: float) -> float:
     if avg_hr and total_time:
         if avg_hr > 160:
-            return (total_time * 0.75)
+            return total_time * 0.75
         elif avg_hr > 140:
-            return (total_time * 0.5)
+            return total_time * 0.5
         else:
-            return (total_time * 0.3)
+            return total_time * 0.3
     return 0
+
 
 def activity_load(total_time: float, avg_hr: float, max_hr: float) -> float:
     if not total_time or not avg_hr or not max_hr:
         return 0
     return total_time * (avg_hr / max_hr)
+
 
 def _weighted_avg(rows, field, coerce=None):
     vals = [(coerce(r.get(field)) if coerce else r.get(field)) for r in rows if r.get(field) is not None]
@@ -262,6 +286,7 @@ def _weighted_avg(rows, field, coerce=None):
         weight_sum += w
     return sum(weighted_vals) / weight_sum if weight_sum else 0.0
 
+
 def compute_body_battery(user_id: str) -> dict:
     today = datetime.today().date()
     today_str = today.isoformat()
@@ -279,8 +304,12 @@ def compute_body_battery(user_id: str) -> dict:
         elif sleep_hours < 6:
             battery -= 25
 
-
-    stress_rows = [r for r in health if r.get("calendar_date", "")[:10] >= (today - timedelta(days=2)).isoformat() and r.get("calendar_date", "")[:10] < today.isoformat()]
+    stress_rows = [
+        r
+        for r in health
+        if r.get("calendar_date", "")[:10] >= (today - timedelta(days=2)).isoformat()
+        and r.get("calendar_date", "")[:10] < today.isoformat()
+    ]
     stress = _weighted_avg(stress_rows, "stress")
     if stress and stress > 0:
         if stress > 75:
@@ -303,7 +332,7 @@ def compute_body_battery(user_id: str) -> dict:
         weight = 1.0
         if dt:
             dt_parsed = datetime.fromisoformat(dt[:10]).date()
-            diff = (today - dt_parsed).days 
+            diff = (today - dt_parsed).days
             if diff == 1:
                 weight = 0.6
             elif diff == 2:
@@ -330,8 +359,11 @@ def compute_body_battery(user_id: str) -> dict:
         "stress": stress,
         "hrv": hrv,
         "num_activities": len(activities),
-        "last_activity": {"miles": miles, "avg_hr": avg_hr, "total_time": total_time, "calendar_date": calendar_date} if last_activity else None
+        "last_activity": {"miles": miles, "avg_hr": avg_hr, "total_time": total_time, "calendar_date": calendar_date}
+        if last_activity
+        else None,
     }
+
 
 # add knowledge maybe?
 def compute_load(user_id: str) -> dict:
@@ -350,8 +382,4 @@ def compute_load(user_id: str) -> dict:
 
     acwr = acute_load / chronic_load if chronic_load > 0 else None
 
-    return {
-        "acute_load": acute_load,
-        "chronic_load": chronic_load,
-        "acwr": acwr
-    }
+    return {"acute_load": acute_load, "chronic_load": chronic_load, "acwr": acwr}

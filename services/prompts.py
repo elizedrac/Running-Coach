@@ -1,6 +1,6 @@
 # All prompt strings in one place. Single source of truth for prompt engineering.
-from datetime import date
 import json
+from datetime import date
 from pathlib import Path
 
 HEALTH_METRICS_KNOWLEDGE = json.loads(
@@ -12,19 +12,22 @@ RACE_DISTANCES_KNOWLEDGE = json.loads(
 )
 
 TOOL_METADATA = {
-    "garmin_sync":        "Sync latest Garmin activity and health data into the DB. Only use if the user explicitly asks to sync, refresh, or update their Garmin data (e.g. 'sync my Garmin', 'pull my latest data', 'my run isn't showing up'). Do NOT trigger just because the user mentions going for a run or describes a recent workout.",
-    "query_data":         "Query the user's RECORDED data from Garmin — actual workouts completed, health metrics, and trends. Handles raw values, trend comparisons (improving/declining/stable), training load (ACWR / injury risk), and recovery readiness (body battery). Use for ANY question about past/completed runs and workouts, steps, sleep, HRV, stress, pace, mileage, HR, body battery, how they're feeling, whether to run, etc. This is RECORDED history — what the user actually did, not what they're scheduled to do.",
-    "get_plan":           "Retrieve the user's SCHEDULED training plan — the structured workout schedule they created. Completely separate from recorded activity data. Use only when the user asks about their training plan, upcoming workouts, what's on the schedule, this week's plan, a specific day's workout, etc. Defaults to the current week if no dates specified. Also call alongside query_data for any 'should I run today', recovery readiness, or 'am I recovered enough' questions so the coach knows what's scheduled.",
-    "pacing_calculator":  "Calculate target paces for easy, tempo, threshold, interval, and repetition workouts given a goal race time and distance. Use whenever the user asks about training paces, workout paces, or race pace for a goal time/distance — even if they only specify a distance (e.g. 'what's a good easy pace for a half marathon') OR only a goal time without distance. The system will prompt the user for any missing required args, so prefer invoking this tool over giving generic verbal advice. Do NOT use if the conversation context shows the user is mid-discussion about updating or adjusting their training plan.",
-    "get_race":           "Get the user's upcoming race details — race type, date, goal time, and distance. Use for any question about race preparation, race strategy, what to focus on, time until race, or taper advice.",
-    "get_weather":        "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
+    "garmin_sync": "Sync latest Garmin activity and health data into the DB. Only use if the user explicitly asks to sync, refresh, or update their Garmin data (e.g. 'sync my Garmin', 'pull my latest data', 'my run isn't showing up'). Do NOT trigger just because the user mentions going for a run or describes a recent workout.",
+    "query_data": "Query the user's RECORDED data from Garmin — actual workouts completed, health metrics, and trends. Handles raw values, trend comparisons (improving/declining/stable), training load (ACWR / injury risk), and recovery readiness (body battery). Use for ANY question about past/completed runs and workouts, steps, sleep, HRV, stress, pace, mileage, HR, body battery, how they're feeling, whether to run, etc. This is RECORDED history — what the user actually did, not what they're scheduled to do.",
+    "get_plan": "Retrieve the user's SCHEDULED training plan — the structured workout schedule they created. Completely separate from recorded activity data. Use only when the user asks about their training plan, upcoming workouts, what's on the schedule, this week's plan, a specific day's workout, etc. Defaults to the current week if no dates specified. Also call alongside query_data for any 'should I run today', recovery readiness, or 'am I recovered enough' questions so the coach knows what's scheduled.",
+    "pacing_calculator": "Calculate target paces for easy, tempo, threshold, interval, and repetition workouts given a goal race time and distance. Use whenever the user asks about training paces, workout paces, or race pace for a goal time/distance — even if they only specify a distance (e.g. 'what's a good easy pace for a half marathon') OR only a goal time without distance. The system will prompt the user for any missing required args, so prefer invoking this tool over giving generic verbal advice. Do NOT use if the conversation context shows the user is mid-discussion about updating or adjusting their training plan.",
+    "get_race": "Get the user's upcoming race details — race type, date, goal time, and distance. Use for any question about race preparation, race strategy, what to focus on, time until race, or taper advice.",
+    "race_prep_info": "Retrieve race day preparation knowledge — nutrition plan, race morning routine, warm-up, pacing strategy, and gear advice. Use only when the user explicitly asks about race day prep, what to eat before/during a race, race morning routine, warm-up protocol, or how to execute the race itself.",
+    "get_weather": "Get weather forecast for the user's location on a given date (now + 12 hours in advance). Used if user asks about weather conditions or if it's a good day to run.",
     "get_course_details": "Get elevation profile and terrain info for a race course via web search.",
     "update_preferences": "Update a specific training preference when the user explicitly asks to change it — days per week, preferred training days, mileage targets, or time vs mileage based training.",
-    "update_plan":        "Modify the user's training plan for specific days within ±7 days of today. Use when the user explicitly asks to update, change, or add something to their plan (e.g. add mileage, add paces, swap workouts), when they are sick/hurt/feeling off, or when they respond affirmatively to a plan change the coach previously recommended. Also use when the user wants to reconcile their plan with recent activities (e.g. 'update plan based on my run', 'I did X yesterday, adjust plan', 'sync my workouts to the plan'). Do NOT use for: wholesale restructuring (changing days per week, rebuilding the plan from scratch) — those require a delete + recreate flow. Do NOT use for changes spanning more than ±7 days from today — tell the user to click the day directly to edit it, or regenerate the plan if early in training. CRITICAL: Do NOT use for questions like 'should I...', 'can I...', 'is it okay if...', 'what if I...' — these are advice-seeking questions, not change requests. Answer the question; only propose or execute a change if the user explicitly says to do it.",
+    "update_plan": "Modify the user's training plan for specific days within ±7 days of today. Use when the user explicitly asks to update, change, or add something to their plan (e.g. add mileage, add paces, swap workouts), when they are sick/hurt/feeling off, or when they respond affirmatively to a plan change the coach previously recommended. Also use when the user wants to reconcile their plan with recent activities (e.g. 'update plan based on my run', 'I did X yesterday, adjust plan', 'sync my workouts to the plan'). Do NOT use for: wholesale restructuring (changing days per week, rebuilding the plan from scratch) — those require a delete + recreate flow. Do NOT use for changes spanning more than ±7 days from today — tell the user to click the day directly to edit it, or regenerate the plan if early in training. CRITICAL: Do NOT use for questions like 'should I...', 'can I...', 'is it okay if...', 'what if I...' — these are advice-seeking questions, not change requests. Answer the question; only propose or execute a change if the user explicitly says to do it.",
 }
+
 
 def build_planner_system(min_date: str = "2020-01-01", local_today: str = None) -> str:
     from datetime import timedelta
+
     today_dt = date.fromisoformat(local_today) if local_today else date.today()
     today = today_dt.isoformat()
     weekday = today_dt.weekday()  # 0=Mon, 6=Sun
@@ -34,8 +37,7 @@ def build_planner_system(min_date: str = "2020-01-01", local_today: str = None) 
     seven_days_ago = today_dt - timedelta(days=6)
     day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
     week_day_map = "\n".join(
-        f"- {day_names[i]} = {(this_week_monday + timedelta(days=i)).isoformat()}"
-        for i in range(7)
+        f"- {day_names[i]} = {(this_week_monday + timedelta(days=i)).isoformat()}" for i in range(7)
     )
     tool_list = "\n".join(f"- {name}: {desc}" for name, desc in TOOL_METADATA.items())
     return f"""You are a planning assistant for a personal AI running coach.
@@ -63,6 +65,7 @@ Date interpretation rules (use these exact dates — do not compute your own):
 
 Args contracts (only include args listed here):
 - get_race: {{}}  # no args needed
+- race_prep_info: {{}}  # no args needed
 - get_weather: {{"date": "YYYY-MM-DD"}}  # optional, omit for today
 - garmin_sync: {{"day_iso_start": "YYYY-MM-DD", "day_iso_end": "YYYY-MM-DD"}}  # If the user explicitly states a date or range, include those dates. If NO dates are stated by the user, include garmin_sync with empty args {{}} — do NOT invent dates. The system will ask the user for dates.
 - query_data: {{"query_intent": "description of what to fetch", "start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD", "prev_start": "YYYY-MM-DD (optional)", "prev_end": "YYYY-MM-DD (optional)"}}
@@ -100,7 +103,7 @@ Activities: calories_burned, activity_type, miles, avg_hr, max_hr, total_time, a
 Sleep data is keyed to the wake date, not the night it started — so last night's sleep appears under today's date. When discussing sleep, always reference it as "last night's sleep" regardless of which date it's stored under. \
 If the user asks for data not in these fields, respond gracefully that you don't have access to it. \
 If you suggest or trigger a Garmin sync, note that it may take some time depending on the date range being synced. Also mention that the user can sync independently at any time using the Garmin Sync button at the top of the page, separate from this chat. \
-AVOID REPETITION: You have access to the conversation history. If a metric (e.g. training load, ACWR, body battery) was already explained in detail in a prior message, do not re-explain it — briefly reference it instead (e.g. 'as we covered, your ACWR is 1.4'). Only provide full detail on a metric the first time it appears in the conversation."""
+AVOID REPETITION — this is critical: Never restate specific numbers, facts, or context that appeared in your immediately preceding message. The user just read it seconds ago. For follow-up questions on the same topic, give a direct answer in 1-3 sentences maximum — do not use bullet points, do not re-list metrics, do not re-explain reasoning already given. If a number needs to be referenced, use a phrase like "given what we just covered" rather than repeating the value. Full detail on a metric is only warranted the first time it comes up in the conversation."""
 
 SQL_SELECTOR_SYSTEM = """You are a query selector for a running coach app.
 Given a user's query intent and a registry of available query functions, select which queries to run.
@@ -123,44 +126,45 @@ Return ONLY valid JSON — no extra text, no markdown fences:
 }"""
 
 TOOL_SNIPPETS = {
-    "garmin_sync":        "If the data says the user needs to enter a date range: do NOT say sync failed or that something went wrong. Simply ask the user which dates they'd like to sync (e.g. 'which dates would you like me to pull?') and mention they can also use the Garmin Sync button at the top of the page. "
-                          "If the data has status='success': confirm their data is updated and they can ask about recent runs or health metrics. "
-                          "If the data has status='error' and the error mentions 'No Garmin credentials': tell the user they need to connect their Garmin account first — they can do this by clicking the Garmin Sync button at the top of the page, which will prompt them to enter their Garmin email and password. "
-                          "If the data has status='error' for any other reason: acknowledge something went wrong and suggest using the Garmin Sync button.",
-    "get_race":           "Use race_type, race_date, goal_time, and race_distance_miles to give personalized advice. Compute weeks until race from today's date. If any field is missing, give general advice and suggest they set it via the race settings.",
-    "get_plan":           "Data is a list of plan days plus a plan_overview block. CRITICAL: NEVER invent or fabricate workout details — only state what is explicitly in the returned data. If plan_overview is null/empty AND the list is empty, the user has no training plan at all — say so directly (e.g. 'you don't have a training plan set up yet') and tell them to use the Create Plan button. If plan_overview exists but the list is empty for the requested period, the plan doesn't cover that period — use plan_overview to explain why (e.g. plan started after that date). If days are returned: for each day include date/day of week, workout type, target miles (if set), target pace (if set), and notes (if set). For INTERVAL days mention the session type from notes. For TEMPO days state the pace from target_pace. Keep it scannable — short list format. IMPORTANT: Never infer the user's goal time from workout notes — notes may be outdated or incorrect. The authoritative goal time is in the race metadata (plan_overview), not in individual day notes.",
-    "create_plan":        "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
-    "update_plan":        "The result contains a 'changes' list with what was actually updated — treat it as absolute ground truth. If changes is non-empty and status is success: the update succeeded. Summarize what changed in 1-2 sentences. NEVER refuse, apologize, or say the change can't be done — it already happened. Do NOT re-analyze or second-guess the changes. Do NOT say 'let me try again' or 'let me fix that'. NEVER echo raw data, dict/JSON output, or bracket-style labels like [get_preferences] or [preferences data] — those are internal system artifacts, never show them to the user. If changes is empty because the requested dates fall outside the ±7-day edit window: explain that the plan editor only covers the rolling 2-week window around today, then tell the user they can click directly on the day in the plan view to edit it manually, or — if they're early enough in their training schedule — delete and regenerate the plan to apply larger structural changes. If changes is empty for any other reason or status is not success, say something went wrong on your end in plain prose.",
-    "clear_plan":         "Confirm the plan was cleared and ask if the user wants to create a new one.",
-    "pacing_calculator":  "Match your response to the user's intent. If they asked a simple pace question (e.g. 'what pace is 30 min for 4 miles?', 'what's my average pace?'), respond with just the pace in 1-2 sentences — do NOT show training zones. Only show the full zones table if the user asked about training zones, workout paces, or race preparation. \n\n"
-                          "IMPORTANT — interpreting fields:\n"
-                          "- `goal_time`: the exact goal time the user provided — always state this verbatim. Never recompute or estimate it from the paces.\n"
-                          "- `goal_pace`: pace per mile required to hit the goal time exactly (goal_time / distance).\n"
-                          "- `gps_adjusted_pace`: the pace your WATCH should show during the race to actually hit the goal time. It's faster than goal_pace by ~2.5% because GPS over-measures (you don't run perfect tangents, GPS adds noise). This is a RACE-DAY TACTICAL ADJUSTMENT, NOT a comment on the user's fitness. Do NOT say things like 'your fitness can support a faster pace' — say something like 'aim for ~X:XX/mi on your watch so you actually cross at goal_time'.\n"
-                          "- Zones are derived from equivalent marathon pace using Daniels-style offsets:\n"
-                          "  • easy: marathon pace + 1:30/mi — conversational, aerobic base building\n"
-                          "  • aerobic: marathon pace + 0:45/mi — general aerobic, comfortably hard, bulk of mid-week miles\n"
-                          "  • marathon: race goal pace\n"
-                          "  • threshold: marathon pace - 0:15/mi — lactate threshold, comfortably hard for 20-40 min\n"
-                          "  • interval: marathon pace - 1:00/mi — VO2 max work, 800m-1200m reps with equal jog recovery\n"
-                          "  • repetition: marathon pace - 1:30/mi — speed/economy, 200m-400m with full rest\n"
-                          "- `current_easy_pace`: easy pace derived from the user's 30-day average VO2 max (~70% effort, ACSM formula). Garmin VO2 max is an estimate that fluctuates with heat, fatigue, and HR data availability — treat this as a rough directional signal, not a precise number. Only mention the comparison if the gap vs goal easy_pace is more than 60 seconds/mile. Do not over-interpret small differences. May be null if no VO2 data available.",
-    "get_weather":        "The weather API is only capable of fetching current day weather + 12 hour forecasts. Reference this data naturally when answering the user or advising them if they should run and when the best time is and give reasoning grounded in data (be sure to consider the 'feels like' as well). Suggest treadmill if conditions are poor (ie. too hot/humid (above 75°F), too cold (below 32°F)), or rainy). If they do prefer to go outside, suggest the best time window and what to wear based on the forecast. If they ask for weather data either from the past or more than 12 hours in the future, gracefully explain the limitations of the API and provide advice based on the current conditions.",
-    "get_race_results":   "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",
+    "garmin_sync": "If the data says the user needs to enter a date range: do NOT say sync failed or that something went wrong. Simply ask the user which dates they'd like to sync (e.g. 'which dates would you like me to pull?') and mention they can also use the Garmin Sync button at the top of the page. "
+    "If the data has status='success': confirm their data is updated and they can ask about recent runs or health metrics. "
+    "If the data has status='error' and the error mentions 'No Garmin credentials': tell the user they need to connect their Garmin account first — they can do this by clicking the Garmin Sync button at the top of the page, which will prompt them to enter their Garmin email and password. "
+    "If the data has status='error' for any other reason: acknowledge something went wrong and suggest using the Garmin Sync button.",
+    "get_race": "Use race_type, race_date, goal_time, and race_distance_miles to give personalized advice. Compute weeks until race from today's date. If any field is missing, give general advice and suggest they set it via the race settings.",
+    "race_prep_info": "Use the race prep knowledge to give specific, actionable advice tailored to the user's question. Cover the relevant section only (nutrition, morning routine, warm-up, pacing strategy, or gear) — don't dump everything. If the user asked about a specific distance, tailor advice to that distance.",
+    "get_plan": "Data is a list of plan days plus a plan_overview block. CRITICAL: NEVER invent or fabricate workout details — only state what is explicitly in the returned data. If plan_overview is null/empty AND the list is empty, the user has no training plan at all — say so directly (e.g. 'you don't have a training plan set up yet') and tell them to use the Create Plan button. If plan_overview exists but the list is empty for the requested period, the plan doesn't cover that period — use plan_overview to explain why (e.g. plan started after that date). If days are returned: for each day include date/day of week, workout type, target miles (if set), target pace (if set), and notes (if set). For INTERVAL days mention the session type from notes. For TEMPO days state the pace from target_pace. Keep it scannable — short list format. IMPORTANT: Never infer the user's goal time from workout notes — notes may be outdated or incorrect. The authoritative goal time is in the race metadata (plan_overview), not in individual day notes.",
+    "create_plan": "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
+    "update_plan": "The result contains a 'changes' list with what was actually updated — treat it as absolute ground truth. If changes is non-empty and status is success: the update succeeded. Summarize what changed in 1-2 sentences. NEVER refuse, apologize, or say the change can't be done — it already happened. Do NOT re-analyze or second-guess the changes. Do NOT say 'let me try again' or 'let me fix that'. NEVER echo raw data, dict/JSON output, or bracket-style labels like [get_preferences] or [preferences data] — those are internal system artifacts, never show them to the user. If changes is empty because the requested dates fall outside the ±7-day edit window: explain that the plan editor only covers the rolling 2-week window around today, then tell the user they can click directly on the day in the plan view to edit it manually, or — if they're early enough in their training schedule — delete and regenerate the plan to apply larger structural changes. If changes is empty for any other reason or status is not success, say something went wrong on your end in plain prose.",
+    "clear_plan": "Confirm the plan was cleared and ask if the user wants to create a new one.",
+    "pacing_calculator": "Match your response to the user's intent. If they asked a simple pace question (e.g. 'what pace is 30 min for 4 miles?', 'what's my average pace?'), respond with just the pace in 1-2 sentences — do NOT show training zones. Only show the full zones table if the user asked about training zones, workout paces, or race preparation. \n\n"
+    "IMPORTANT — interpreting fields:\n"
+    "- `goal_time`: the exact goal time the user provided — always state this verbatim. Never recompute or estimate it from the paces.\n"
+    "- `goal_pace`: pace per mile required to hit the goal time exactly (goal_time / distance).\n"
+    "- `gps_adjusted_pace`: the pace your WATCH should show during the race to actually hit the goal time. It's faster than goal_pace by ~2.5% because GPS over-measures (you don't run perfect tangents, GPS adds noise). This is a RACE-DAY TACTICAL ADJUSTMENT, NOT a comment on the user's fitness. Do NOT say things like 'your fitness can support a faster pace' — say something like 'aim for ~X:XX/mi on your watch so you actually cross at goal_time'.\n"
+    "- Zones are derived from equivalent marathon pace using Daniels-style offsets:\n"
+    "  • easy: marathon pace + 1:30/mi — conversational, aerobic base building\n"
+    "  • aerobic: marathon pace + 0:45/mi — general aerobic, comfortably hard, bulk of mid-week miles\n"
+    "  • marathon: race goal pace\n"
+    "  • threshold: marathon pace - 0:15/mi — lactate threshold, comfortably hard for 20-40 min\n"
+    "  • interval: marathon pace - 1:00/mi — VO2 max work, 800m-1200m reps with equal jog recovery\n"
+    "  • repetition: marathon pace - 1:30/mi — speed/economy, 200m-400m with full rest\n"
+    "- `current_easy_pace`: easy pace derived from the user's 30-day average VO2 max (~70% effort, ACSM formula). Garmin VO2 max is an estimate that fluctuates with heat, fatigue, and HR data availability — treat this as a rough directional signal, not a precise number. Only mention the comparison if the gap vs goal easy_pace is more than 60 seconds/mile. Do not over-interpret small differences. May be null if no VO2 data available.",
+    "get_weather": "The weather API is only capable of fetching current day weather + 12 hour forecasts. Reference this data naturally when answering the user or advising them if they should run and when the best time is and give reasoning grounded in data (be sure to consider the 'feels like' as well). Suggest treadmill if conditions are poor (ie. too hot/humid (above 75°F), too cold (below 32°F)), or rainy). If they do prefer to go outside, suggest the best time window and what to wear based on the forecast. If they ask for weather data either from the past or more than 12 hours in the future, gracefully explain the limitations of the API and provide advice based on the current conditions.",
+    "get_race_results": "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",
     "update_preferences": "Confirm the preference was updated naturally — e.g. 'Done, I've updated your training to 5 days a week.' If the update failed, let the user know and suggest using the Edit Training Preferences button at the top of the page.",
     "get_course_details": "Returns {{'query': <semantic label of what was extracted>, 'details': <3-5 sentence course summary>}}. Use `details` to answer the user, covering elevation, terrain, key sections, logistics. Connect to pacing strategy when relevant (e.g. 'go out conservative if there are early climbs'). Flag major climbs / technical sections. Lead with the direct answer if the user asked something specific. IMPORTANT: if `query` doesn't closely match what the user actually asked, caveat the response (e.g. 'I found general course info but not specifics on your question').",
-    "query_data":         "Query results are provided — could be raw health/activity rows, trend comparisons (current vs previous window), training load (ACWR), or recovery readiness (body battery). Always ground your response in specific data points. \n\n"
-                          "TIMEFRAMES: NEVER use vague words like 'this period' or 'last period'. Always name the timeframe explicitly using the actual dates or natural labels: 'this week (May 7-13)' vs 'the same week last month (Apr 7-13)', 'last 14 days' vs 'the 14 days before', etc. If the comparison window was 30 days back, say 'compared to the same X-day window 30 days earlier'. If the user explicitly asked for week-over-week, say 'this week vs last week' with dates.\n\n"
-                          "TRENDS: If a trend is present, lead with the direction (improving / declining / stable), then cite the numbers, then give 1-2 actionable insights.\n\n"
-                          "MISSING COMPARISON: If a trend result has ONLY a 'current' field (no 'previous' or 'trend' keys), it means no valid comparison window exists (not enough prior data). Say something like 'I don't have enough prior data to detect a trend' — do NOT say it's a single data point (the current value is still an average over the requested window). State the current value with the date range it covers.\n\n"
-                          "MIN_DATE: The user's data starts from {min_date}. If the user asked for a date range starting before that, the window was shifted forward to start at {min_date} (preserving its length). When that happens, briefly tell the user their requested range was shifted and why. If the entire requested range was before {min_date}, gracefully say no data is available.\n\n"
-                          "PARTIAL WEEK: You are told today's date and day of week in the prompt. If the current comparison window ends today and today is not Sunday, the current week is incomplete — it has fewer days of data than the prior 7-day window. Always acknowledge this before making any comparison, regardless of what day it is. Use per-day averages (e.g. miles/day, activities/day) to make a fair apples-to-apples comparison, and state the number of days in each window explicitly (e.g. 'through Thursday, 4 days vs a full 7-day prior week'). Never frame a partial week's raw totals as comparable to a full week's totals, and never call a trend 'down' just because the partial window hasn't had time to accumulate the same volume.\n"
-                          "TREADMILL PACE: For any activity with activity_type containing 'treadmill', pace from Garmin is unreliable — the watch uses wrist accelerometer data indoors and typically reads slower than actual effort. Flag this when discussing pace for treadmill runs. For interval workouts on a treadmill, average_pace is especially misleading (it blends warmup, reps, and rest) — treat it as approximate only and note the caveat.\n"
-                          "COMPUTE_BODY_BATTERY: The result includes body_battery (0-100), component values (sleep_hours, hrv, stress), and last_activity (the most recent activity, or null). "
-                          "IMPORTANT: sleep_hours, hrv, and stress are 3-day recency-weighted averages, NOT last night's values. Do NOT say 'last night you slept X hours' — say 'your average sleep over the past 3 days is ~X hours'. "
-                          "If body_battery is close to or exactly 100 and all components are 0 or missing, Garmin likely hasn't synced yet — ask if the user wants to resync. "
-                          "If last_activity is present and its calendar_date is today, factor it into your recommendation — e.g. if they already did a hard run today, recommend rest or easy effort regardless of the battery score. "
-                          "If last_activity is from a prior day, mention it as context but don't let it override the current battery score."
+    "query_data": "Query results are provided — could be raw health/activity rows, trend comparisons (current vs previous window), training load (ACWR), or recovery readiness (body battery). Always ground your response in specific data points. \n\n"
+    "TIMEFRAMES: NEVER use vague words like 'this period' or 'last period'. Always name the timeframe explicitly using the actual dates or natural labels: 'this week (May 7-13)' vs 'the same week last month (Apr 7-13)', 'last 14 days' vs 'the 14 days before', etc. If the comparison window was 30 days back, say 'compared to the same X-day window 30 days earlier'. If the user explicitly asked for week-over-week, say 'this week vs last week' with dates.\n\n"
+    "TRENDS: If a trend is present, lead with the direction (improving / declining / stable), then cite the numbers, then give 1-2 actionable insights.\n\n"
+    "MISSING COMPARISON: If a trend result has ONLY a 'current' field (no 'previous' or 'trend' keys), it means no valid comparison window exists (not enough prior data). Say something like 'I don't have enough prior data to detect a trend' — do NOT say it's a single data point (the current value is still an average over the requested window). State the current value with the date range it covers.\n\n"
+    "MIN_DATE: The user's data starts from {min_date}. If the user asked for a date range starting before that, the window was shifted forward to start at {min_date} (preserving its length). When that happens, briefly tell the user their requested range was shifted and why. If the entire requested range was before {min_date}, gracefully say no data is available.\n\n"
+    "PARTIAL WEEK: You are told today's date and day of week in the prompt. If the current comparison window ends today and today is not Sunday, the current week is incomplete — it has fewer days of data than the prior 7-day window. Always acknowledge this before making any comparison, regardless of what day it is. Use per-day averages (e.g. miles/day, activities/day) to make a fair apples-to-apples comparison, and state the number of days in each window explicitly (e.g. 'through Thursday, 4 days vs a full 7-day prior week'). Never frame a partial week's raw totals as comparable to a full week's totals, and never call a trend 'down' just because the partial window hasn't had time to accumulate the same volume.\n"
+    "TREADMILL PACE: For any activity with activity_type containing 'treadmill', pace from Garmin is unreliable — the watch uses wrist accelerometer data indoors and typically reads slower than actual effort. Flag this when discussing pace for treadmill runs. For interval workouts on a treadmill, average_pace is especially misleading (it blends warmup, reps, and rest) — treat it as approximate only and note the caveat.\n"
+    "COMPUTE_BODY_BATTERY: The result includes body_battery (0-100), component values (sleep_hours, hrv, stress), and last_activity (the most recent activity, or null). "
+    "IMPORTANT: sleep_hours, hrv, and stress are 3-day recency-weighted averages, NOT last night's values. Do NOT say 'last night you slept X hours' — say 'your average sleep over the past 3 days is ~X hours'. "
+    "If body_battery is close to or exactly 100 and all components are 0 or missing, Garmin likely hasn't synced yet — ask if the user wants to resync. "
+    "If last_activity is present and its calendar_date is today, factor it into your recommendation — e.g. if they already did a hard run today, recommend rest or easy effort regardless of the battery score. "
+    "If last_activity is from a prior day, mention it as context but don't let it override the current battery score.",
 }
 
 COMPRESSION = """You are in charge of compressing conversation memory every five turns between a running coach system and user. You will be provided with the current compressed memory and most recent 5 turns. Extract all important details: any current injuries, pains, or physical concerns mentioned; any race goals mentioned or asked about; fitness baselines established (easy pace, VO2 max, weekly mileage); any user decisions made about training plan, adjustments, or desired training context; any important data insights discussed. Discard pleasantries and greetings, Garmin sync confirmations, weather queries, repeated information, and superseded info. Return only plain text — no JSON, no markdown, no headers. Be concise."""
@@ -176,7 +180,7 @@ Rules:
 - Short affirmatives ("ok", "ok agreed", "sounds good", "sure", "yeah") are NOT conversation-ending if the prior coach message contained a concrete recommendation (e.g. skip a run, rest today, swap a workout). The user is affirming the action, not signing off.
 - Only return true if the user is clearly wrapping up with no pending action (e.g. "thanks bye", "that's all", "got it thanks")."""
 
-COURSE_DETAILS="""You are a JSON-only assistant. Return valid JSON, nothing else. Extract key details about this running race course and return as JSON with FOUR fields:
+COURSE_DETAILS = """You are a JSON-only assistant. Return valid JSON, nothing else. Extract key details about this running race course and return as JSON with FOUR fields:
 - "location": city/place fully spelled out (e.g. "New York City" NOT "NYC", "Philadelphia" NOT "Philly")
 - "race": race type fully spelled out (e.g. "marathon", "half marathon", "10k") NOT abbreviations
 - "query": a short semantic label summarising what the user asked (used for search)
@@ -279,9 +283,7 @@ Return ONLY:
 
 Return {"violations": []} if no issues are found."""
 
-_RACE_MILES_KNOWLEDGE = json.loads(
-    Path(__file__).parent.parent.joinpath("knowledge/race_miles.json").read_text()
-)
+_RACE_MILES_KNOWLEDGE = json.loads(Path(__file__).parent.parent.joinpath("knowledge/race_miles.json").read_text())
 
 CREATE_PLAN_SYSTEM = """You are a training plan generator for a running coach app. Use the available tools to gather context about the athlete, then call save_training_plan as your final action with the complete day-by-day plan.
 
@@ -415,10 +417,10 @@ PLAN_CREATOR_TOOLS = [
             "type": "object",
             "properties": {
                 "goal_time": {"type": "string", "description": "Goal race time in HH:MM:SS or MM:SS"},
-                "distance":  {"type": "number", "description": "Race distance in miles"}
+                "distance": {"type": "number", "description": "Race distance in miles"},
             },
-            "required": ["goal_time", "distance"]
-        }
+            "required": ["goal_time", "distance"],
+        },
     },
     {
         "name": "query_data",
@@ -427,11 +429,11 @@ PLAN_CREATOR_TOOLS = [
             "type": "object",
             "properties": {
                 "query_intent": {"type": "string", "description": "Description of what to fetch"},
-                "start_date":   {"type": "string", "description": "YYYY-MM-DD. Omit for training load / ACWR queries."},
-                "end_date":     {"type": "string", "description": "YYYY-MM-DD. Omit for training load / ACWR queries."}
+                "start_date": {"type": "string", "description": "YYYY-MM-DD. Omit for training load / ACWR queries."},
+                "end_date": {"type": "string", "description": "YYYY-MM-DD. Omit for training load / ACWR queries."},
             },
-            "required": ["query_intent"]
-        }
+            "required": ["query_intent"],
+        },
     },
     {
         "name": "get_course_details",
@@ -439,12 +441,15 @@ PLAN_CREATOR_TOOLS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "location": {"type": "string", "description": "City or place, fully spelled out (e.g. 'Philadelphia' not 'Philly')"},
-                "race":     {"type": "string", "description": "Race type, fully spelled out (e.g. 'marathon' not 'M')"},
-                "query":    {"type": "string", "description": "What to look up, e.g. 'elevation and terrain profile'"}
+                "location": {
+                    "type": "string",
+                    "description": "City or place, fully spelled out (e.g. 'Philadelphia' not 'Philly')",
+                },
+                "race": {"type": "string", "description": "Race type, fully spelled out (e.g. 'marathon' not 'M')"},
+                "query": {"type": "string", "description": "What to look up, e.g. 'elevation and terrain profile'"},
             },
-            "required": ["location", "race", "query"]
-        }
+            "required": ["location", "race", "query"],
+        },
     },
     {
         "name": "save_training_plan",
@@ -458,51 +463,62 @@ PLAN_CREATOR_TOOLS = [
                     "items": {
                         "type": "object",
                         "properties": {
-                            "plan_date":    {"type": "string", "description": "YYYY-MM-DD"},
-                            "week_number":  {"type": "integer"},
-                            "day_of_week":  {"type": "string", "enum": ["MON","TUE","WED","THU","FRI","SAT","SUN"]},
-                            "workout_type": {"type": "string", "enum": ["EASY","AEROBIC","LONG","TEMPO","INTERVAL","STRENGTH","REST","CROSS"]},
+                            "plan_date": {"type": "string", "description": "YYYY-MM-DD"},
+                            "week_number": {"type": "integer"},
+                            "day_of_week": {
+                                "type": "string",
+                                "enum": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"],
+                            },
+                            "workout_type": {
+                                "type": "string",
+                                "enum": ["EASY", "AEROBIC", "LONG", "TEMPO", "INTERVAL", "STRENGTH", "REST", "CROSS"],
+                            },
                             "target_miles": {"type": ["number", "null"]},
-                            "target_pace":  {"type": ["string", "null"]},
-                            "notes":        {"type": ["string", "null"]},
+                            "target_pace": {"type": ["string", "null"]},
+                            "notes": {"type": ["string", "null"]},
                             "intervals": {
                                 "type": "array",
                                 "items": {
                                     "type": "object",
                                     "properties": {
-                                        "interval_num":   {"type": "integer"},
-                                        "interval_type":  {"type": "string", "enum": ["WARMUP","WORK","REST","COOLDOWN"]},
-                                        "distance":       {"type": ["string", "null"]},
-                                        "target_pace":    {"type": ["string", "null"]},
-                                        "duration":       {"type": ["string", "null"]},
-                                        "rest_duration":  {"type": ["string", "null"]},
-                                        "notes":          {"type": ["string", "null"]}
+                                        "interval_num": {"type": "integer"},
+                                        "interval_type": {
+                                            "type": "string",
+                                            "enum": ["WARMUP", "WORK", "REST", "COOLDOWN"],
+                                        },
+                                        "distance": {"type": ["string", "null"]},
+                                        "target_pace": {"type": ["string", "null"]},
+                                        "duration": {"type": ["string", "null"]},
+                                        "rest_duration": {"type": ["string", "null"]},
+                                        "notes": {"type": ["string", "null"]},
                                     },
-                                    "required": ["interval_num", "interval_type"]
-                                }
-                            }
+                                    "required": ["interval_num", "interval_type"],
+                                },
+                            },
                         },
-                        "required": ["plan_date", "week_number", "day_of_week", "workout_type", "intervals"]
-                    }
+                        "required": ["plan_date", "week_number", "day_of_week", "workout_type", "intervals"],
+                    },
                 }
             },
-            "required": ["days"]
-        }
-    }
+            "required": ["days"],
+        },
+    },
 ]
 
 
-def build_create_plan_prompt(race: dict, prefs: dict, total_weeks: int, acwr: float = None, acute_load: float = None) -> str:
-    today          = date.today().isoformat()
-    race_type      = race.get("race_type", "unknown")
-    race_date      = race.get("race_date", "")
-    goal_time      = race.get("goal_time", "not set")
-    race_dist      = race.get("race_distance_miles", "unknown")
-    days_per_week  = prefs.get("days_per_week") or 4
+def build_create_plan_prompt(
+    race: dict, prefs: dict, total_weeks: int, acwr: float = None, acute_load: float = None
+) -> str:
+    today = date.today().isoformat()
+    race_type = race.get("race_type", "unknown")
+    race_date = race.get("race_date", "")
+    goal_time = race.get("goal_time", "not set")
+    race_dist = race.get("race_distance_miles", "unknown")
+    days_per_week = prefs.get("days_per_week") or 4
     preferred_days = prefs.get("preferred_days") or []
     avg_miles_user = prefs.get("avg_miles")
     max_miles_user = prefs.get("max_miles")
-    user_notes     = prefs.get("notes")
+    user_notes = prefs.get("notes")
 
     user_miles_block = ""
     if avg_miles_user or max_miles_user:

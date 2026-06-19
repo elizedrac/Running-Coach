@@ -1,5 +1,7 @@
 from fastapi import Header, HTTPException
+
 from db.client import get_supabase_client
+
 
 async def get_current_user(authorization: str = Header(None)) -> str:
     if not authorization or not authorization.startswith("Bearer "):

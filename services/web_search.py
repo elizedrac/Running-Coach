@@ -1,11 +1,13 @@
 # Anthropic web search wrapper + persistence to search_cache.
 import os
-from dotenv import load_dotenv
+
 import anthropic
+from dotenv import load_dotenv
 
 load_dotenv()
 
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
+
 
 def web_search(user_id: str, query: str) -> str:
     """Run Anthropic web search tool and cache results in search_cache."""
@@ -18,4 +20,3 @@ def web_search(user_id: str, query: str) -> str:
 
     text_parts = [block.text for block in response.content if hasattr(block, "text")]
     return "\n".join(text_parts).strip()
-

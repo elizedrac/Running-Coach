@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException
+
 from db.client import get_supabase_client
 from models.planner import LoginRequest
 
 router = APIRouter()
+
 
 @router.post("/auth/login")
 def login(body: LoginRequest):

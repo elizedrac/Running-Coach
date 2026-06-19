@@ -1,12 +1,14 @@
 # FastAPI app entry point (Phase 4). Registers routes/.
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from routes.ask import router as ask_router
+
 from routes.activities import router as data_router
-from routes.plan import router as plan_router
+from routes.ask import router as ask_router
 from routes.auth import router as auth_router
-import os
+from routes.plan import router as plan_router
 
 app = FastAPI()
 

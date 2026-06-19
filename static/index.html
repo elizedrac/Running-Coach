@@ -2055,7 +2055,7 @@ async function openDayModal(dayId, fromMonth = false) {
     let html = '';
     if (day.target_miles) html += `<div class="stat-row"><span class="stat-label">Target Miles</span><span class="stat-value">${day.target_miles.toFixed(1)} mi</span></div>`;
     if (day.target_pace)  html += `<div class="stat-row"><span class="stat-label">Target Pace</span><span class="stat-value">${day.target_pace}</span></div>`;
-    if (day.notes)        html += `<div style="font-size:13px;color:#7A7A7A;margin-top:12px;line-height:1.5">${day.notes}</div>`;
+    if (day.notes)        html += `<div style="font-size:13px;color:#7A7A7A;margin-top:12px;line-height:1.5;white-space:pre-wrap">${day.notes}</div>`;
     if (!html)            html  = `<div class="placeholder-text" style="padding:12px 0">Rest day.</div>`;
 
     const dayActs = _weekActivities[day.plan_date] || [];

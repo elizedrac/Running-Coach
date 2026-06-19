@@ -1,21 +1,24 @@
 # Garmin data extraction and parsing
 # Run directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
 import os
+import sys
 import tempfile
-from dotenv import load_dotenv
-from garminconnect import Garmin
 from datetime import datetime, timedelta
 from time import sleep
-import sys
+
+from dotenv import load_dotenv
+from garminconnect import Garmin
+
 from db.activity_history import insert_activities
-from db.health_history import insert_health_history
 from db.garmin import get_garmin_credentials, save_garmin_token
+from db.health_history import insert_health_history
 
 # Load environment variables from .env file
 load_dotenv()
 
 DAY_PAUSE = 2  # Seconds to sleep between Garmin API calls to avoidw rate limits
 CALL_PAUSE = 1  # Seconds to sleep between individual API calls within a day
+
 
 def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
     try:
@@ -26,12 +29,14 @@ def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
     if activities:
         insert_activities([{**a, "user_id": user_id} for a in activities])
     else:
-        if "--debug" in sys.argv: print("No Garmin activities to insert.")
+        if "--debug" in sys.argv:
+            print("No Garmin activities to insert.")
 
     if stats:
         insert_health_history([{**s, "user_id": user_id} for s in stats])
     else:
-        if "--debug" in sys.argv: print("No Garmin health stats to insert.")
+        if "--debug" in sys.argv:
+            print("No Garmin health stats to insert.")
 
     return {
         "status": "success",
@@ -40,10 +45,12 @@ def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
         "days_synced": len(stats),
     }
 
+
 def _token_dir(user_id: str) -> str:
     path = os.path.join(tempfile.gettempdir(), f"garmin_{user_id}")
     os.makedirs(path, exist_ok=True)
     return path
+
 
 def _get_client(user_id: str) -> Garmin:
     creds = get_garmin_credentials(user_id)
@@ -77,15 +84,17 @@ def _get_client(user_id: str) -> Garmin:
     client.client.dump(token_path)
     return client
 
+
 def fetch_garmin_data(user_id: str, day_iso_start: str, day_iso_end: str) -> tuple[list[dict], dict] | None:
     all_activities = []
     all_stats = []
 
     try:
         client = _get_client(user_id)
-        
+
         while day_iso_start <= day_iso_end:
-            if "--debug" in sys.argv: print(f"Fetching Garmin data for {day_iso_start}...")
+            if "--debug" in sys.argv:
+                print(f"Fetching Garmin data for {day_iso_start}...")
             all_stats.append(get_daily_stats(client, day_iso_start))
             all_activities.extend(extract_activities(client, day_iso_start))
             day_iso_start = (datetime.fromisoformat(day_iso_start) + timedelta(days=1)).date().isoformat()
@@ -95,7 +104,7 @@ def fetch_garmin_data(user_id: str, day_iso_start: str, day_iso_end: str) -> tup
     except Exception as e:
         print(f"Error fetching Garmin data: {e}")
         raise
-    
+
 
 def get_daily_stats(client: Garmin, day_iso: str) -> dict:
     sleep_raw = _call(client, "get_sleep_data", day_iso)
@@ -111,18 +120,19 @@ def get_daily_stats(client: Garmin, day_iso: str) -> dict:
     vo2_raw = _call(client, "get_training_status", day_iso)
 
     return {
-        "calendar_date":  day_iso,
-        "total_steps":    _to_int(_pick(stats, ("totalSteps",))),
-        "sleep_score":    _to_int(_sleep_score(sleep_raw)),
-        "total_sleep":    _seconds_to_interval(_sleep_main_seconds(sleep_raw)),
-        "rhr":            _to_int(_resting_hr(hr_raw)),
-        "hrv":            _to_int(_hrv_value(hrv)),
-        "stress":         _to_int(_stress_value(stress)),
+        "calendar_date": day_iso,
+        "total_steps": _to_int(_pick(stats, ("totalSteps",))),
+        "sleep_score": _to_int(_sleep_score(sleep_raw)),
+        "total_sleep": _seconds_to_interval(_sleep_main_seconds(sleep_raw)),
+        "rhr": _to_int(_resting_hr(hr_raw)),
+        "hrv": _to_int(_hrv_value(hrv)),
+        "stress": _to_int(_stress_value(stress)),
         "active_minutes": _to_int(_pick(stats, ("activeMinutes", "moderateIntensityMinutes"))),
-        "total_kcal":     _to_int(_pick(stats, ("totalKilocalories",))),
-        "active_kcal":    _to_int(_pick(stats, ("activeKilocalories",))),
-        "vo2_max":        _to_int(_vo2_max(vo2_raw))
+        "total_kcal": _to_int(_pick(stats, ("totalKilocalories",))),
+        "active_kcal": _to_int(_pick(stats, ("activeKilocalories",))),
+        "vo2_max": _to_int(_vo2_max(vo2_raw)),
     }
+
 
 def extract_activities(client: Garmin, day_iso: str) -> list[dict]:
     raw = _call(client, "get_activities_by_date", day_iso, day_iso)
@@ -135,19 +145,22 @@ def extract_activities(client: Garmin, day_iso: str) -> list[dict]:
         if activity_id:
             sleep(CALL_PAUSE)
             splits = _parse_splits(_call(client, "get_activity_splits", activity_id))
-        activities.append({
-            "garmin_activity_id": activity_id,
-            "calendar_date":      day_iso,
-            "activity_type":      a.get("activityType", {}).get("typeKey"),
-            "calories_burned":    a.get("calories"),
-            "miles":              (a.get("distance") or 0) / 1609.34,
-            "avg_hr":             a.get("averageHR"),
-            "max_hr":             a.get("maxHR"),
-            "total_time":         _seconds_to_interval(a.get("duration")),
-            "average_pace":       _mps_to_pace(a.get("averageSpeed")),
-            "splits":             splits,
-        })
+        activities.append(
+            {
+                "garmin_activity_id": activity_id,
+                "calendar_date": day_iso,
+                "activity_type": a.get("activityType", {}).get("typeKey"),
+                "calories_burned": a.get("calories"),
+                "miles": (a.get("distance") or 0) / 1609.34,
+                "avg_hr": a.get("averageHR"),
+                "max_hr": a.get("maxHR"),
+                "total_time": _seconds_to_interval(a.get("duration")),
+                "average_pace": _mps_to_pace(a.get("averageSpeed")),
+                "splits": splits,
+            }
+        )
     return activities
+
 
 def _parse_splits(raw) -> list[dict] | None:
     if not isinstance(raw, dict):
@@ -159,14 +172,16 @@ def _parse_splits(raw) -> list[dict] | None:
     for i, lap in enumerate(laps):
         dist_m = lap.get("distance") or 0
         elev_m = lap.get("elevationGain")
-        result.append({
-            "lap":            i + 1,
-            "miles":          round(dist_m / 1609.34, 2),
-            "pace":           _mps_to_pace(lap.get("averageSpeed")),
-            "avg_hr":         _to_int(lap.get("averageHR")),
-            "duration":       _seconds_to_interval(lap.get("duration")),
-            "elevation_gain": round(elev_m * 3.28084) if elev_m is not None else None,
-        })
+        result.append(
+            {
+                "lap": i + 1,
+                "miles": round(dist_m / 1609.34, 2),
+                "pace": _mps_to_pace(lap.get("averageSpeed")),
+                "avg_hr": _to_int(lap.get("averageHR")),
+                "duration": _seconds_to_interval(lap.get("duration")),
+                "elevation_gain": round(elev_m * 3.28084) if elev_m is not None else None,
+            }
+        )
     return result or None
 
 
@@ -179,13 +194,15 @@ def _to_int(v) -> int | None:
     except (ValueError, TypeError):
         return None
 
+
 def _call(client: Garmin, method: str, *args):
     try:
         return getattr(client, method)(*args)
     except Exception as e:
         print(f"Error calling Garmin method {method} with args {args}: {e}")
         return None
-    
+
+
 def _pick(data: dict, keys: tuple) -> any:
     if not isinstance(data, dict):
         print(f"Expected dict for _pick, got {type(data)}")
@@ -194,18 +211,21 @@ def _pick(data: dict, keys: tuple) -> any:
         if key in data:
             return data[key]
     return None
-    
+
+
 def _resting_hr(hr_raw) -> int | None:
     if not isinstance(hr_raw, dict):
         return None
     return hr_raw.get("restingHeartRate")
 
+
 def _hrv_value(hrv_raw) -> int | None:
     if not isinstance(hrv_raw, dict):
         return None
-    
+
     summary = hrv_raw.get("hrvSummary", {})
     return summary.get("lastNightAvg") if isinstance(summary, dict) else None
+
 
 def _vo2_max(training_status_raw) -> float | None:
     if not isinstance(training_status_raw, dict):
@@ -214,10 +234,12 @@ def _vo2_max(training_status_raw) -> float | None:
     generic = vo2.get("generic", {}) if isinstance(vo2, dict) else {}
     return generic.get("vo2MaxValue") if isinstance(generic, dict) else None
 
+
 def _stress_value(stress_raw) -> int | None:
     if not isinstance(stress_raw, dict):
         return None
     return stress_raw.get("avgStressLevel")
+
 
 def _sleep_main_seconds(sleep_raw) -> int | None:
     if not isinstance(sleep_raw, dict):
@@ -226,12 +248,14 @@ def _sleep_main_seconds(sleep_raw) -> int | None:
     sec = dto.get("sleepTimeSeconds")
     return int(sec) if sec is not None else None
 
+
 def _sleep_score(sleep_raw) -> int | None:
     if not isinstance(sleep_raw, dict):
         return None
     dto = sleep_raw.get("dailySleepDTO", {})
     scores = dto.get("sleepScores", {}) if isinstance(dto, dict) else {}
     return scores.get("overall", {}).get("value") if isinstance(scores, dict) else None
+
 
 def _seconds_to_interval(seconds) -> str | None:
     if seconds is None:
@@ -241,11 +265,13 @@ def _seconds_to_interval(seconds) -> str | None:
     m, sec = divmod(rem, 60)
     return f"{h:02d}:{m:02d}:{sec:02d}"
 
+
 def _mps_to_pace(mps) -> str | None:
     if not mps or mps <= 0:
         return None
     spm = 1609.344 / mps
     return f"{int(spm // 60)}:{int(spm % 60):02d}/mi"
+
 
 # allow running directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
 if __name__ == "__main__":

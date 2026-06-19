@@ -1,10 +1,22 @@
 # Final LLM call (Sonnet). Builds system prompt from BASE + per-tool snippets and produces the user-facing coaching response.
-from services.prompts import BASE_COACH, TOOL_SNIPPETS, HEALTH_METRICS_KNOWLEDGE
-from services.llm import stream_llm
+from pathlib import Path
+
 from db.plan import get_current_plan
 from models.planner import PlannerOutput
+from services.llm import stream_llm
+from services.prompts import BASE_COACH, HEALTH_METRICS_KNOWLEDGE, TOOL_SNIPPETS
 
-def final_output(user_query: str, planner_decision: PlannerOutput, tool_results: dict = None, user_id: str = None, min_date: str = "2020-01-01", has_plan: bool = False):
+RACE_PREP_KNOWLEDGE = (Path(__file__).parent.parent / "knowledge" / "race_prep.md").read_text()
+
+
+def final_output(
+    user_query: str,
+    planner_decision: PlannerOutput,
+    tool_results: dict = None,
+    user_id: str = None,
+    min_date: str = "2020-01-01",
+    has_plan: bool = False,
+):
     tool_results = tool_results or {}
     system_prompt = BASE_COACH  # static — cacheable
 
@@ -27,10 +39,13 @@ def final_output(user_query: str, planner_decision: PlannerOutput, tool_results:
             if (tool.name == "query_data" or tool.name == "trend_analysis") and not knowledge:
                 knowledge = f"\n\n[health_data_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
 
-            if (tool.name == "get_plan"):
+            if tool.name == "get_plan":
                 plan_details = get_current_plan(user_id)
                 knowledge += f"\n\n[plan/race_meta]\n{plan_details}"
-                
+
+            if tool.name == "race_prep_info":
+                knowledge += f"\n\n[race_prep_knowledge]\n{RACE_PREP_KNOWLEDGE}"
+
         user_prompt += knowledge
 
     yield from stream_llm(system_prompt, user_prompt, cache_system=True)

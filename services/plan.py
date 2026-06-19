@@ -1,27 +1,30 @@
 # Training plan creation, update, injury logic.
+import os
 import sys
-from services.prompts import CREATE_PLAN_SYSTEM, UPDATE_PLAN_SYSTEM, PLAN_CREATOR_TOOLS, build_create_plan_prompt
-from services.llm import client, call_llm
-from services.pacing import pacing_calculator
-from services.sql_selector import execute_query
-from services.course_details import get_course_details
-from services.guardrails import challenger
-from services.trend_analysis import compute_load
-from db.race import get_race
-from db.preferences import get_preferences
-from db.plan import save_plan, get_plan_days, get_plan_id, update_plan_day
-from db.activity_history import get_activities
-from models.planner import UpdatePlanOutput
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
-import os
+
 from dotenv import load_dotenv
+
+from db.activity_history import get_activities
+from db.plan import get_plan_days, get_plan_id, save_plan, update_plan_day
+from db.preferences import get_preferences
+from db.race import get_race
+from models.planner import UpdatePlanOutput
+from services.course_details import get_course_details
+from services.guardrails import challenger
+from services.llm import call_llm, client
+from services.pacing import pacing_calculator
+from services.prompts import CREATE_PLAN_SYSTEM, PLAN_CREATOR_TOOLS, UPDATE_PLAN_SYSTEM, build_create_plan_prompt
+from services.sql_selector import execute_query
+from services.trend_analysis import compute_load
 
 PLAN_TOOL_REGISTRY = {
     "pacing_calculator": pacing_calculator,
     "query_data": execute_query,
     "get_course_details": get_course_details,
 }
+
 
 def create_plan(user_id: str) -> dict:
     race = get_race(user_id)
@@ -33,7 +36,12 @@ def create_plan(user_id: str) -> dict:
     acwr = load_data.get("acwr")
     acute_load = load_data.get("acute_load")
 
-    messages = [{"role": "user", "content": build_create_plan_prompt(race, prefs, total_weeks, acwr=acwr, acute_load=acute_load)}]
+    messages = [
+        {
+            "role": "user",
+            "content": build_create_plan_prompt(race, prefs, total_weeks, acwr=acwr, acute_load=acute_load),
+        }
+    ]
 
     validated = False
     for i in range(10):
@@ -42,18 +50,20 @@ def create_plan(user_id: str) -> dict:
             system=[{"type": "text", "text": CREATE_PLAN_SYSTEM, "cache_control": {"type": "ephemeral"}}],
             tools=PLAN_CREATOR_TOOLS,
             messages=messages,
-            max_tokens=32768
+            max_tokens=32768,
         ) as stream:
             response = stream.get_final_message()
 
-        print(f"[plan] iter {i+1}: stop_reason={response.stop_reason}, blocks={[b.type for b in response.content]}")
+        print(f"[plan] iter {i + 1}: stop_reason={response.stop_reason}, blocks={[b.type for b in response.content]}")
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":
             print(f"[plan] loop ended without save_training_plan, stop_reason={response.stop_reason}")
             break
 
-        save_block = next((b for b in response.content if b.type == "tool_use" and b.name == "save_training_plan"), None)
+        save_block = next(
+            (b for b in response.content if b.type == "tool_use" and b.name == "save_training_plan"), None
+        )
         other_blocks = [b for b in response.content if b.type == "tool_use" and b.name != "save_training_plan"]
 
         def run_tool(block):
@@ -74,11 +84,14 @@ def create_plan(user_id: str) -> dict:
             if violations:
                 validated = True
                 print(f"[plan] violations found: {violations}")
-                tool_results.append({
-                    "type": "tool_result",
-                    "tool_use_id": save_block.id,
-                    "content": "Plan not saved. Fix these issues and call save_training_plan again:\n" + "\n".join(f"- {v}" for v in violations)
-                })
+                tool_results.append(
+                    {
+                        "type": "tool_result",
+                        "tool_use_id": save_block.id,
+                        "content": "Plan not saved. Fix these issues and call save_training_plan again:\n"
+                        + "\n".join(f"- {v}" for v in violations),
+                    }
+                )
             else:
                 result = save_plan(user_id, days)
                 print(f"[plan] save_plan result: {result}")
@@ -95,7 +108,9 @@ def update_plan(user_id, intent, include_activities: bool = False, local_today: 
     start_date = today - timedelta(days=7)
     end_date = today + timedelta(days=8)
     plan = get_plan_days(plan_id, start_date=start_date.isoformat(), end_date=end_date.isoformat())
-    print(f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}, include_activities={include_activities}")
+    print(
+        f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}, include_activities={include_activities}"
+    )
 
     prefs = get_preferences(user_id)
     race = get_race(user_id)
@@ -126,7 +141,7 @@ def update_plan(user_id, intent, include_activities: bool = False, local_today: 
     start = response.find("{")
     end = response.rfind("}") + 1
     if start == -1 or end <= start:
-        print(f"[update_plan] ERROR: no JSON found in response")
+        print("[update_plan] ERROR: no JSON found in response")
         return {"status": "fail with error: LLM returned no valid JSON"}
     response = response[start:end]
     try:
@@ -140,13 +155,15 @@ def update_plan(user_id, intent, include_activities: bool = False, local_today: 
     except Exception as e:
         print(f"[update_plan] ERROR: {e}")
         return {"status": f"fail with error {e}"}
-    
+
+
 if __name__ == "__main__":
     load_dotenv()
 
     user_id = os.getenv("USER_ID")
 
-    if not user_id: raise ValueError()
+    if not user_id:
+        raise ValueError()
 
     today = date.today()
     weekday = today.weekday()  # 0=Mon
@@ -166,15 +183,19 @@ if __name__ == "__main__":
         else "ACWR unavailable — proceed with standard week-over-week progression rules. "
     )
 
+    prefs = get_preferences(user_id)
+    notes = prefs.get("notes") if prefs else None
+    notes_block = f"ATHLETE NOTES (mandatory — take precedence over all other rules): {notes} " if notes else ""
+
     intent = (
         f"Weekly refresh ({today.isoformat()}): review last week's completed workouts ({last_monday.isoformat()} to {last_sunday.isoformat()}) "
         f"and adjust this week's plan ({this_monday.isoformat()} to {next_sunday.isoformat()}) accordingly. "
-        "This is a light adjustment pass — treat the existing plan as the baseline, not a rebuild. "
+        + notes_block
+        + "MANDATORY: Reschedule workouts to match preferred training days and days-per-week from preferences — any day not listed as a preferred training day must be REST or STRENGTH. Move workouts to preferred days even if it means restructuring the whole week. "
         "Compare completed activities against what was planned last week: ease hard days if load was high, reduce mileage if significantly under-ran, adjust paces if last week skewed harder or easier than planned. "
         + acwr_block
         + f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date}). "
-        "IMPORTANT: reschedule workouts to match updated preferred training days and days-per-week preferences — this takes priority over all other adjustments. "
-        "When rescheduling, all spacing rules must still be respected: no hard days (INTERVAL, TEMPO, LONG) on consecutive days, LONG run must be the last running day of the week and must have a REST or STRENGTH day after it, never place a run on a non-preferred day. "
+        "Spacing rules must be respected: no hard days (INTERVAL, TEMPO, LONG) on consecutive days, LONG run must be the last running day of the week and must have a REST or STRENGTH day after it. "
         f"Only modify days from {this_monday.isoformat()} to {next_sunday.isoformat()}. Do not touch any earlier days."
     )
 

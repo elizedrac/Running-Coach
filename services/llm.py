@@ -2,6 +2,7 @@
 import os
 import random
 import time
+
 import anthropic
 from dotenv import load_dotenv
 
@@ -13,7 +14,13 @@ MAX_RETRIES = 3
 client = anthropic.Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"), timeout=600.0)
 
 
-def call_llm(system_prompt: str, user_prompt: str = None, model: str = DEFAULT_MODEL, max_tokens: int = 1024, cache_system: bool = False) -> str:
+def call_llm(
+    system_prompt: str,
+    user_prompt: str = None,
+    model: str = DEFAULT_MODEL,
+    max_tokens: int = 1024,
+    cache_system: bool = False,
+) -> str:
     system = (
         [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
         if cache_system
@@ -40,7 +47,10 @@ def call_llm(system_prompt: str, user_prompt: str = None, model: str = DEFAULT_M
 
     raise RuntimeError(f"call_llm failed after {MAX_RETRIES} retries")
 
-def stream_llm(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL, max_tokens: int = 1024, cache_system: bool = False):
+
+def stream_llm(
+    system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL, max_tokens: int = 1024, cache_system: bool = False
+):
     """Yields text chunks as Claude generates them."""
     system = (
         [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
@@ -60,6 +70,6 @@ def stream_llm(system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL,
 def _backoff(attempt: int, error: Exception) -> None:
     if attempt == MAX_RETRIES - 1:
         raise error
-    wait = (2 ** attempt) + random.uniform(0, 1)
+    wait = (2**attempt) + random.uniform(0, 1)
     print(f"LLM error ({error}), retrying in {wait:.1f}s...")
     time.sleep(wait)

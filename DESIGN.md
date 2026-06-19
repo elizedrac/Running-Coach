@@ -47,6 +47,8 @@ A personal AI running coach that ingests Garmin health and activity data, stores
 | Weather | WeatherAPI.com | Free tier, API key required, current day + 12-hour forecast |
 | Web search | Anthropic web search tool | Built-in, no extra API key |
 | Race results | Athlinks via web search | Event ID extracted from search results |
+| Package manager | uv | `uv sync` installs deps; `uv run` executes in venv |
+| Linter | ruff | Lint + format via `make lint` / `make fix` |
 | CI/CD | GitHub Actions | Daily Garmin sync cron |
 
 ---
@@ -58,8 +60,12 @@ runcoach/
 │
 ├── cli.py                         # CLI entry point (V1) — thin wrapper, calls services/coach.py::ask()
 ├── main.py                        # FastAPI app entry point (Phase 4) — registers routes/
+├── conftest.py                    # pytest fixtures (Supabase client mock)
+├── pyproject.toml                 # project deps + ruff + pytest config
+├── uv.lock                        # locked dependency versions
+├── Makefile                       # dev workflow shortcuts (sync, test, lint, fix, run, build, up, down, logs)
 ├── .env                           # API keys, Supabase URL/key, hardcoded user_id for V1
-├── requirements.txt
+├── requirements.txt               # generated from uv.lock via make sync-requirements; used by Docker
 ├── DESIGN.md
 │
 ├── static/
@@ -86,7 +92,6 @@ runcoach/
 │   ├── guardrails.py              # challenger() — validates plan against hard rules before save; input_check() — blocks short/long queries
 │   ├── web_search.py              # Anthropic web search wrapper + persistence
 │   ├── weather.py                 # WeatherAPI wrapper (current day + 12-hour forecast)
-│   ├── export.py                  # CSV export. Local file in CLI mode, HTTP attachment stream in server mode (V2)
 │   ├── cache.py                   # TTLCache singleton + range-aware cache logic (get_cached, set_cached)
 │   ├── auth.py                    # get_current_user() FastAPI dependency — validates Bearer JWT via Supabase, returns user_id
 │   ├── pacing.py                  # pacing_calculator() — Riegel equivalent marathon pace → Daniels-style zones + GPS-adjusted pace + VO2-derived easy pace
@@ -102,11 +107,12 @@ runcoach/
 │
 ├── db/
 │   ├── client.py                  # create_client() — imported everywhere
-│   ├── queries.py                 # Empty — REGISTRY lives in services/sql_selector.py
+│   ├── queries.py                 # REGISTRY of callable SQL functions (name → callable + description + args); Haiku selects from this list
 │   ├── activity_history.py        # insert_activities, get_activities (self-caching via services/cache.py)
 │   ├── health_history.py          # insert_health_history, get_health_history (self-caching via services/cache.py)
+│   ├── garmin.py                  # Garmin credential CRUD: get/save/delete credentials + save_garmin_token
 │   ├── race.py                    # Read/write for the user's target race
-│   ├── preferences.py             # Read/write for training_preferences
+│   ├── preferences.py             # Read/write for training_preferences; set_notes() saves athlete notes field
 │   └── plan.py                    # Plan read/write queries (current_plan, plan_days, plan_intervals, plan_history)
 │
 ├── models/
@@ -116,6 +122,8 @@ runcoach/
 ├── knowledge/
 │   ├── health_metrics.json        # Per-metric descriptions, typical ranges, interpretation (injected into final prompt when health data present)
 │   ├── race_distances.json        # Standard distances in miles — used by pacing_calculator for race_type autofill
+│   ├── race_miles.json            # Race distance → miles mapping for pacing lookups
+│   ├── race_prep.md               # Race day knowledge base (nutrition, warm-up, pacing strategy, gear) — loaded into final.py and injected when race_prep_info tool runs
 │   └── course_chunks.json         # RAG store for race course details — embeddings inline, keyed by location + race
 │
 ├── tests/
@@ -154,7 +162,20 @@ create table training_preferences (
     preferred_days  text[],                                     -- e.g. {'MON','WED','FRI','SAT'}
     avg_miles       float,
     max_miles       float,
-    time_based      boolean default false                       -- false = mile based, true = time based
+    time_based      boolean default false,                      -- false = mile based, true = time based
+    notes           text                                        -- athlete notes: injury history, constraints, preferences (set via set_notes tool)
+);
+```
+
+### garmin_credentials (one per user)
+```sql
+create table garmin_credentials (
+    id          uuid default gen_random_uuid() primary key,
+    user_id     uuid references auth.users(id) on delete cascade unique,
+    email       text,
+    password    text,
+    token_json  text,                                           -- cached session tokens to avoid repeated logins
+    updated_at  timestamptz default now()
 );
 ```
 
@@ -486,22 +507,54 @@ Question arrives
 - Final LLM confirms naturally ("Done, I've updated your training to 5 days a week")
 - If update fails, user directed to Edit Training Preferences button
 
-### 9. Search Race Info
+### 8a. Set Athlete Notes ✓
+- Saves free-text athlete notes to `training_preferences.notes` via `db/preferences.py::set_notes()`
+- Notes field is injected into the weekly plan refresh intent as a mandatory block that takes precedence over all other rules
+- Used to persist injury history, training constraints, and personal preferences across sessions
+
+### 9. Get Race ✓
+- Returns the user's upcoming race details: race type, race date, goal time, distance in miles
+- Used for race prep questions, taper advice, time-until-race calculations, and general race context
+- Reads from the `race` table; returns empty dict if no race set
+
+### 10. Race Prep Info ✓
+- Injects `knowledge/race_prep.md` into the final LLM system prompt when triggered
+- Covers: pre-race nutrition, race morning routine, warm-up protocol, pacing strategy, and gear
+- Loaded once at startup in `services/final.py` (`RACE_PREP_KNOWLEDGE`); injected as `[race_prep_knowledge]` block when the tool runs
+- Only triggered when the user explicitly asks about race day prep, nutrition, warm-up, or how to execute the race — not for general race questions
+
+### 12. Query User Data ✓
+- Haiku call (via `sql_selector`) determines which query functions to run and what timeframes
+- Returns data as plain English with light knowledge context
+- Reroute to Garmin sync form if no data
+
+### 13. Trend Analysis ✓
+- 14 per-metric trend functions in `services/trend_analysis.py` (miles, pace, hr, calories x2, count, time, hrv, rhr, sleep score, sleep hours, stress, steps x2)
+- Each compares current window against the same-length window shifted back 30 days
+- Returns `{metric, current, previous?, trend: "improving"|"declining"|"stable"}` — comparison fields skipped if prev window has no data
+- Registered in `sql_selector.REGISTRY` alongside raw fetchers; Haiku picks one or many based on intent
+- Trend functions internally call the cached `get_activities`/`get_health_history` — no extra DB calls
+- **Per-user MIN_DATE** enforced in db layer: `get_user_min_date(user_id)` in `db/health_history.py` queries both `health_history` and `activity_history` for the user's earliest `calendar_date` row, falling back to `"2020-01-01"` if none found. This date is passed to the planner and final LLM so queries are bounded to data that actually exists. If the requested start is before MIN_DATE, the window shifts forward (preserving length); if the entire range is before MIN_DATE, returns `[]`. Final LLM is told to inform the user when shifting occurs.
+
+### 14. Get Course Details ✓
+- Anthropic web search + planner LLM-generated query
+- Second LLM call (Haiku) to consolidate search results into plain English summary
+- RAG via `knowledge/course_chunks.json`: first tries word-overlap (≥0.7 Jaccard), then Voyage embedding similarity (threshold 0.7). Falls back to web search on miss.
+- Voyage client lazily initialized (only if `VOYAGE_API_KEY` is set) to avoid import-time crashes in environments without the key
+- Cached locally in `course_chunks.json` with embeddings inline
+
+### 15. Race Time Prediction
+- XGBoost model (see ML Model section)
+- Not current priority — V2 feature
+
+### 16. Search Race Info (planned)
 - Web search for time-sensitive race data: qualifying standards, registration dates/status, entry fees, lottery odds, race date
 - Do NOT rely on model knowledge for this — standards and dates change yearly
 - Always caveats results and directs user to verify on official race website
 - Args: `{race, location, query}` — query is the specific aspect (e.g. "qualifying standards 2026")
-- **Caching**: NOT stored in the permanent RAG store (`course_chunks.json`) since data goes stale year-to-year. Within a session, results are preserved naturally in conversation history. Cross-session: cache in `search_cache` (Supabase) with 7-day TTL.
-- Implemented in `services/race_info.py`
+- **Caching**: NOT stored in the permanent RAG store (`course_chunks.json`) since data goes stale year-to-year. Cross-session: cache in `search_cache` (Supabase) with 7-day TTL.
 
-### 9. Get Heart Rate Zones
-- Pulls `max_hr` from last 30 days of activity data (highest recorded), `rhr` from today's health record
-- Returns two zone tables: % max HR (Garmin-style) and Karvonen/HR Reserve (more accurate with resting HR)
-- 5 zones: Recovery (50-60%), Aerobic (60-70%), Tempo (70-80%), Threshold (80-90%), VO2 Max (90-100%)
-- If no max HR data: returns guidance to do a max effort or use 220-age estimate
-- Implemented in `services/hr_zones.py`
-
-### 10. Get Race Results
+### 17. Get Race Results (planned)
 - Anthropic web search to find Athlinks event ID
 - Ask user for bib number
 - Extract event ID from search result URL via regex
@@ -509,31 +562,7 @@ Question arrives
 - Encouraging final LLM response either way
 - If no data found: state no access gracefully
 
-### 9. Query User Data ✓
-- Second LLM call to determine tables + timeframes (metadata + all possibilities)
-- Returns data as plain English with light knowledge context
-- Reroute to Garmin sync form if no data
-
-### 10. Trend Analysis ✓
-- 14 per-metric trend functions in `services/trend_analysis.py` (miles, pace, hr, calories x2, count, time, hrv, rhr, sleep score, sleep hours, stress, steps x2)
-- Each compares current window against the same-length window shifted back 30 days
-- Returns `{metric, current, previous?, trend: "improving"|"declining"|"stable"}` — comparison fields skipped if prev window has no data
-- Registered in `sql_selector.REGISTRY` alongside raw fetchers; Haiku picks one or many based on intent
-- Trend functions internally call the cached `get_activities`/`get_health_history` — no extra DB calls
-- MIN_DATE = `"2026-01-01"` enforced in db layer: if requested start is before MIN_DATE, window shifts forward (preserves length); if entire range is before MIN_DATE, returns `[]`. Final LLM is told to inform the user when shifting occurs.
-
-### 11. Get Course Details ✓
-- Anthropic web search + planner LLM-generated query
-- Second LLM call (Haiku) to consolidate search results into plain English summary
-- RAG via `knowledge/course_chunks.json`: first tries word-overlap (≥0.7 Jaccard), then Voyage embedding similarity (threshold 0.7). Falls back to web search on miss.
-- Voyage client lazily initialized (only if `VOYAGE_API_KEY` is set) to avoid import-time crashes in environments without the key
-- Cached locally in `course_chunks.json` with embeddings inline
-
-### 12. Race Time Prediction
-- XGBoost model (see ML Model section)
-- Not current priority — V2 feature
-
-### 13. Compute Body Battery ✓
+### 18. Compute Body Battery ✓
 - Recovery readiness score computed from today's sleep hours, yesterday's stress, today's HRV, and the past 24h of activity load
 - Returns `{body_battery, sleep_hours, stress, hrv, num_activities, last_activity}` — component values included so LLM can caveat missing data or account for a hard run today
 - `sleep_hours`, `hrv`, `stress` are **3-day recency-weighted averages** via `_weighted_avg()` (weights: today=1.0, yesterday=0.67, 2 days ago=0.5). Zero/missing days excluded from average.
@@ -544,7 +573,7 @@ Question arrives
 - Also exposed as `GET /health/body-battery` route for dashboard display
 - Registered in `sql_selector.REGISTRY`; Haiku instructed to use only for readiness/recovery questions
 
-### 14. Compute Training Load ✓
+### 19. Compute Training Load ✓
 - Returns `{acute_load, chronic_load, acwr}` — acute=last 7 days, chronic=28-day weekly avg, ACWR=acute/chronic (flag >1.3)
 - Activity load formula: `total_minutes × (avg_hr / max_hr)`
 - Implemented in `services/trend_analysis.py::compute_load(user_id)`
@@ -958,4 +987,4 @@ on:
 
 ---
 
-*Last updated: June 2026*
+*Last updated: June 2026 — reflects uv/ruff/Makefile setup, race_prep_info tool, get_race tool, set_notes, garmin_credentials table, per-user MIN_DATE*

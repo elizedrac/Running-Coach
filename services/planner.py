@@ -1,8 +1,10 @@
 # Planner LLM call (Sonnet) + ToolPlan validation + REGISTRY-derived prompt.
 import sys
-from services.prompts import build_planner_system
+
 from models.planner import PlannerOutput
 from services.llm import call_llm
+from services.prompts import build_planner_system
+
 
 def planner(user_query: str, min_date: str = "2020-01-01", local_today: str = None) -> PlannerOutput:
     system_prompt = build_planner_system(min_date=min_date, local_today=local_today)
@@ -15,6 +17,7 @@ def planner(user_query: str, min_date: str = "2020-01-01", local_today: str = No
     try:
         plan = PlannerOutput.model_validate_json(response)
         return plan
-    except Exception as e:
-        if "--debug" in sys.argv: print("Raw response was:", response)
+    except Exception:
+        if "--debug" in sys.argv:
+            print("Raw response was:", response)
         raise

@@ -1,0 +1,37 @@
+[project]
+name = "runcoach"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "python-dotenv",
+    "supabase",
+    "anthropic",
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic",
+    "cachetools",
+    "xgboost",
+    "requests",
+    "garminconnect>=0.3.4",
+    "curl-cffi",
+    "pytest",
+    "voyageai",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",  # line too long — codebase has many long prompt strings
+    "E731",  # lambda assignments — used intentionally in tool registry
+    "F401",  # unused imports — some are re-exports
+]
+
+[tool.ruff.lint.per-file-ignores]
+"services/prompts.py" = ["E501"]  # long prompt strings can't be wrapped

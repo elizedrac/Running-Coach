@@ -3,10 +3,12 @@ import json
 import os
 import re
 import sys
+from pathlib import Path
+
 import numpy as np
 import voyageai
-from pathlib import Path
 from dotenv import load_dotenv
+
 from models.planner import CourseDetailsPlan
 from services.llm import call_llm
 from services.prompts import COURSE_DETAILS
@@ -24,6 +26,7 @@ voyage_client = voyageai.Client(api_key=VOYAGE_API_KEY) if VOYAGE_API_KEY else N
 
 CHUNKS_FILE = Path(__file__).parent.parent.joinpath("knowledge/course_chunks.json")
 
+
 def _load_chunks():
     global _cached_chunks, _file_hash
     if CHUNKS_FILE.exists():
@@ -38,7 +41,8 @@ def _load_chunks():
         _cached_chunks = []
         _file_hash = None
         return _cached_chunks
-    
+
+
 def _embed_chunks(all_chunks, candidates):
     unembedded = [chunk for chunk in candidates if "embedding" not in chunk]
     if not unembedded:
@@ -49,8 +53,10 @@ def _embed_chunks(all_chunks, candidates):
         chunk["embedding"] = embedding
     CHUNKS_FILE.write_text(json.dumps({"courses": all_chunks}, indent=2))
 
+
 def _compute_similarity(vec1, vec2):
     return sum(a * b for a, b in zip(vec1, vec2))
+
 
 def _word_overlap(a: str, b: str) -> float:
     wa = set(re.sub(r"[^a-z0-9 ]", "", a.lower()).split())
@@ -58,11 +64,14 @@ def _word_overlap(a: str, b: str) -> float:
     union = wa | wb
     return len(wa & wb) / len(union) if union else 0.0
 
+
 def find_relevant_chunks(location: str, race: str, query: str):
     chunks = _load_chunks()
-    candidates = [c for c in chunks
-                  if c.get("location", "").lower() == location.lower()
-                  and c.get("race", "").lower() == race.lower()]
+    candidates = [
+        c
+        for c in chunks
+        if c.get("location", "").lower() == location.lower() and c.get("race", "").lower() == race.lower()
+    ]
     if not candidates:
         return None
 
@@ -75,27 +84,36 @@ def find_relevant_chunks(location: str, race: str, query: str):
 
     _embed_chunks(chunks, candidates)
     embedded_query = voyage_client.embed([query], model="voyage-3-lite").embeddings[0]
-    similarities = np.array([_compute_similarity(embedded_query, c["embedding"]) for c in candidates if "embedding" in c])
+    similarities = np.array(
+        [_compute_similarity(embedded_query, c["embedding"]) for c in candidates if "embedding" in c]
+    )
 
     if len(similarities) > 0:
         best_idx = int(np.argmax(similarities))
         if "--debug" in sys.argv:
-            print(f"[course_details] top match score: {similarities[best_idx]:.3f} | chunk query: {candidates[best_idx]['query']}", file=sys.stderr)
+            print(
+                f"[course_details] top match score: {similarities[best_idx]:.3f} | chunk query: {candidates[best_idx]['query']}",
+                file=sys.stderr,
+            )
         if similarities[best_idx] > THRESHOLD_SIMILARITY:
             return {"query": candidates[best_idx]["query"], "details": candidates[best_idx]["details"]}
     return None
 
+
 def _add_course_chunk(location: str, race: str, query: str, details: str) -> None:
     chunks = _load_chunks()
     embedded_query = voyage_client.embed([query], model="voyage-3-lite").embeddings[0]
-    chunks.append({
-        "location": location,
-        "race": race,
-        "query": query,
-        "details": details,
-        "embedding": embedded_query,
-    })
+    chunks.append(
+        {
+            "location": location,
+            "race": race,
+            "query": query,
+            "details": details,
+            "embedding": embedded_query,
+        }
+    )
     CHUNKS_FILE.write_text(json.dumps({"courses": chunks}, indent=2))
+
 
 def get_course_details(user_id: str, location: str, race: str, query: str):
     relevant = find_relevant_chunks(location, race, query)
@@ -103,7 +121,7 @@ def get_course_details(user_id: str, location: str, race: str, query: str):
         if "--debug" in sys.argv:
             print("Found relevant course chunk with query:", relevant["query"])
         return relevant
-    
+
     results = web_search(user_id, query)
 
     prompt = f"""
@@ -115,9 +133,10 @@ def get_course_details(user_id: str, location: str, race: str, query: str):
     Return ONLY valid JSON, no extra text:
     {{"location": "...", "race": "...", "query": "...", "details": "..."}}"""
 
-    response = call_llm(system_prompt=COURSE_DETAILS, user_prompt=prompt,
-        model="claude-haiku-4-5-20251001", cache_system=True)
-    
+    response = call_llm(
+        system_prompt=COURSE_DETAILS, user_prompt=prompt, model="claude-haiku-4-5-20251001", cache_system=True
+    )
+
     response = response.strip()
     start = response.find("{")
     end = response.rfind("}") + 1
@@ -129,7 +148,6 @@ def get_course_details(user_id: str, location: str, race: str, query: str):
 
     except Exception as e:
         print("Error parsing course details output:", e)
-        if "--debug" in sys.argv: print("Raw response was:", response)
-        raise    
-
-
+        if "--debug" in sys.argv:
+            print("Raw response was:", response)
+        raise

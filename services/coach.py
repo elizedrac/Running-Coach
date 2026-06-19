@@ -1,37 +1,49 @@
 # Orchestrator. ask(question, user_id): single-shot planner + dispatch (no_tools / sql / tools).
-from services.planner import planner
-from services.final import final_output
-from services.weather import get_weather
-from services.garmin import garmin_sync
-from services.sql_selector import execute_query
-from services.pacing import _time_to_mins, pacing_calculator
-from services.course_details import get_course_details
-from services.memory import compress_history
-from services.guardrails import input_check
-from services.plan import update_plan
-from db.plan import get_plan_days as get_plan, get_plan_id, get_current_plan
-from db.race import get_race
-from db.preferences import update_preferences
-from db.health_history import get_user_min_date
-from datetime import date, timedelta
-from models.planner import History
-from pathlib import Path
-import os
 import json
+import os
 import sys
+from datetime import date, timedelta
+from pathlib import Path
 
+from db.health_history import get_user_min_date
+from db.plan import get_current_plan, get_plan_id
+from db.plan import get_plan_days as get_plan
+from db.preferences import update_preferences
+from db.race import get_race
+from models.planner import History
+from services.course_details import get_course_details
+from services.final import final_output
+from services.garmin import garmin_sync
+from services.guardrails import input_check
+from services.memory import compress_history
+from services.pacing import _time_to_mins, pacing_calculator
+from services.plan import update_plan
+from services.planner import planner
+from services.sql_selector import execute_query
+from services.weather import get_weather
 
 RACE_DISTANCES_KNOWLEDGE = json.loads(
     Path(__file__).parent.parent.joinpath("knowledge/race_distances.json").read_text()
 )
 
-def _query_data(user_id: str, query_intent: str = "", start_date: str = None, end_date: str = None, prev_start: str = None, prev_end: str = None):
-    return execute_query(user_id, query_intent, start_date or None, end_date or None, prev_start or None, prev_end or None)
+
+def _query_data(
+    user_id: str,
+    query_intent: str = "",
+    start_date: str = None,
+    end_date: str = None,
+    prev_start: str = None,
+    prev_end: str = None,
+):
+    return execute_query(
+        user_id, query_intent, start_date or None, end_date or None, prev_start or None, prev_end or None
+    )
+
 
 TOOL_REGISTRY = {
     "get_weather": get_weather,
     "garmin_sync": garmin_sync,
-    "query_data":  _query_data,
+    "query_data": _query_data,
     "trend_analysis": _query_data,
     "pacing_calculator": pacing_calculator,
     "get_course_details": get_course_details,
@@ -39,22 +51,26 @@ TOOL_REGISTRY = {
     "get_plan": get_plan,
     "update_plan": update_plan,
     "get_race": get_race,
+    "race_prep_info": lambda user_id, **kwargs: None,
 }
+
 
 def call_tool(name: str, args: dict, user_id: str, location: str = "New York"):
     fn = TOOL_REGISTRY.get(name)
     if name == "garmin_sync" and "day_iso_start" not in args:
         if os.getenv("SERVER_MODE"):
             return "NOT AN ERROR. No date range was specified. Ask the user which dates to sync (e.g. 'which dates would you like me to pull?'). They can also use the Garmin Sync button at the top of the page."
-        start_date = ''
-        end_date = ''
+        start_date = ""
+        end_date = ""
         while not start_date or not end_date:
-            date_range = input("Please enter date range in the following format for Garmin sync (YYYY-MM-DD, YYYY-MM-DD): ")
+            date_range = input(
+                "Please enter date range in the following format for Garmin sync (YYYY-MM-DD, YYYY-MM-DD): "
+            )
             try:
                 start_date, end_date = [d.strip() for d in date_range.split(",")]
             except ValueError:
-                choice = input(f"Invalid format. Defaulting to last 7 days. Press Enter to continue or 'r' to retry: ")
-                if choice.lower() != 'r':
+                choice = input("Invalid format. Defaulting to last 7 days. Press Enter to continue or 'r' to retry: ")
+                if choice.lower() != "r":
                     start_date = (date.today() - timedelta(days=7)).isoformat()
                     end_date = date.today().isoformat()
 
@@ -107,20 +123,24 @@ def call_tool(name: str, args: dict, user_id: str, location: str = "New York"):
         return f"Tool '{name}' not yet implemented"
     return fn(user_id, **args)
 
-def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, location: str = "New York, NY", today: str = None):
+
+def orchestrate(
+    user_query, user_id, hist=None, has_plan: bool = False, location: str = "New York, NY", today: str = None
+):
     debug = "--debug" in sys.argv
 
     hist = hist or History()
 
     b, s = input_check(user_query)
     if b:
-        yield("chunk", s)
-        yield("done", hist)
-        return 
-    
+        yield ("chunk", s)
+        yield ("done", hist)
+        return
+
     def _msg_str(msg):
-        content = msg['content'] if isinstance(msg['content'], str) else str(msg['content'])
+        content = msg["content"] if isinstance(msg["content"], str) else str(msg["content"])
         return f"{msg['role']}: {content}"
+
     full_context = "\n".join(_msg_str(m) for m in hist.recent[-8:])
     recent_context = full_context[-3000:] if len(full_context) > 3000 else full_context
     planner_prompt = f"User query: {user_query}"
@@ -141,15 +161,15 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, locati
         # garmin sync has priority
         if "garmin_sync" in [tool.name for tool in planner_response.tools]:
             tool = next(tool for tool in planner_response.tools if tool.name == "garmin_sync")
-            if "day_iso_start" not in tool.args: # back up check
+            if "day_iso_start" not in tool.args:  # back up check
                 direct = "To sync your Garmin data I'll need a date range — which dates would you like me to pull? For example: 'sync from May 10 to May 17'. You can also use the Garmin Sync button at the top of the page."
                 hist.recent.append({"role": "user", "content": user_query})
                 hist.recent.append({"role": "assistant", "content": direct})
                 yield ("chunk", direct)
-                yield("done", hist)
+                yield ("done", hist)
                 return
 
-            yield("status", "Please wait a few minutes, syncing Garmin data... ")
+            yield ("status", "Please wait a few minutes, syncing Garmin data... ")
             try:
                 tool_results["garmin_sync"] = call_tool("garmin_sync", tool.args, user_id)
             except Exception as e:
@@ -163,7 +183,7 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, locati
                 continue
             if name != "garmin_sync":
                 try:
-                    if name == 'get_plan':
+                    if name == "get_plan":
                         input_id = get_plan_id(user_id)
                     else:
                         input_id = user_id
@@ -197,7 +217,7 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, locati
     today_label = date.fromisoformat(today).strftime("%A, %B %d %Y") if today else date.today().strftime("%A, %B %d %Y")
     context = f"\n\n[Conversation context]\n{full_history}" if full_history else ""
     prompt = f"Today is {today_label}. Answer the user's most recent question: {user_query}{context}"
-    
+
     full_response = []
     for chunk in final_output(prompt, planner_response, tool_results, user_id, min_date=min_date, has_plan=has_plan):
         yield ("chunk", chunk)
@@ -206,7 +226,13 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, locati
     final_response = "".join(full_response)
 
     hist.recent.append({"role": "user", "content": user_query})
-    hist.recent.append({"role": "assistant", "content": final_response})
+    # Store head + tail so context doesn't bloat: head captures key data discussed,
+    # tail captures any offers/questions the coach asked at the end.
+    if len(final_response) > 900:
+        stored = final_response[:650] + "\n[...]\n" + final_response[-200:]
+    else:
+        stored = final_response
+    hist.recent.append({"role": "assistant", "content": stored})
 
     hist.turn_count += 1
 
@@ -214,8 +240,5 @@ def orchestrate(user_query, user_id, hist = None, has_plan: bool = False, locati
         hist.summary = compress_history(full_history)
         hist.recent = hist.recent[-2:]
 
-    yield("done", hist)
+    yield ("done", hist)
     return
-        
-
-
