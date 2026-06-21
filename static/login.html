@@ -4,61 +4,26 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>RunCoach — Sign In</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-    background: #F7F4F1;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .card {
-    background: white;
-    border-radius: 16px;
-    padding: 40px;
-    width: 100%;
-    max-width: 380px;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.08);
-  }
-  .logo { font-size: 22px; font-weight: 700; color: #1A1A1A; margin-bottom: 6px; }
-  .subtitle { font-size: 14px; color: #7A7A7A; margin-bottom: 32px; }
-  label { display: block; font-size: 13px; font-weight: 500; color: #1A1A1A; margin-bottom: 6px; }
-  input {
-    width: 100%;
-    padding: 10px 14px;
-    border: 1px solid #E8E4E0;
-    border-radius: 8px;
-    font-size: 14px;
-    color: #1A1A1A;
-    background: #FAFAF9;
-    margin-bottom: 18px;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-  input:focus { border-color: #2D5A7B; background: white; }
-  button {
-    width: 100%;
-    padding: 11px;
-    background: #2D5A7B;
-    color: white;
-    border: none;
-    border-radius: 8px;
-    font-size: 14px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: background 0.15s;
-  }
-  button:hover { background: #244d6b; }
-  button:disabled { background: #a0b8c8; cursor: not-allowed; }
-  .error { font-size: 13px; color: #c0392b; margin-top: 12px; display: none; }
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Hanken Grotesk',sans-serif;background:#f2f0ea;min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{background:#ffffff;border-radius:16px;padding:40px;width:100%;max-width:360px;border:1px solid #ebe6dc;box-shadow:0 4px 24px rgba(0,0,0,0.06)}
+.logo{font-family:'Archivo',sans-serif;font-weight:800;font-size:22px;color:#23283a;margin-bottom:6px;letter-spacing:-0.3px}
+.subtitle{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#a6abb8;letter-spacing:.1em;margin-bottom:32px}
+label{display:block;font-size:12px;font-weight:500;color:#8c93a1;margin-bottom:5px}
+input{width:100%;padding:10px 14px;border:1px solid #ebe6dc;border-radius:8px;font-size:14px;color:#23283a;background:#faf8f3;margin-bottom:16px;outline:none;transition:border-color .15s;font-family:'Hanken Grotesk',sans-serif}
+input:focus{border-color:#5f9c98;background:#fff}
+button{width:100%;padding:11px;background:#5f9c98;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s;font-family:'Hanken Grotesk',sans-serif}
+button:hover{background:#437a77}
+button:disabled{background:#a6abb8;cursor:not-allowed}
+.error{font-size:12px;color:#8b4a42;margin-top:12px;display:none}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="logo">RunCoach</div>
-  <div class="subtitle">Sign in to your account</div>
+  <div class="subtitle">SIGN IN TO YOUR ACCOUNT</div>
   <form id="login-form" onsubmit="handleLogin(event)">
     <label>Email</label>
     <input type="email" id="email" autocomplete="email" required placeholder="you@example.com">
@@ -69,36 +34,18 @@
   </form>
 </div>
 <script>
-  if (localStorage.getItem('rc_token')) {
-    window.location.href = '/';
-  }
-
+  if (localStorage.getItem('rc_token')) window.location.href = '/';
   async function handleLogin(e) {
     e.preventDefault();
-    const btn = document.getElementById('submit-btn');
-    const err = document.getElementById('error-msg');
-    btn.disabled = true;
-    btn.textContent = 'Signing in…';
-    err.style.display = 'none';
-
+    const btn = document.getElementById('submit-btn'), err = document.getElementById('error-msg');
+    btn.disabled = true; btn.textContent = 'Signing in…'; err.style.display = 'none';
     try {
-      const res = await fetch('/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: document.getElementById('email').value,
-          password: document.getElementById('password').value
-        })
-      });
+      const res = await fetch('/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value }) });
       if (!res.ok) throw new Error();
       const data = await res.json();
       localStorage.setItem('rc_token', data.access_token);
       window.location.href = '/';
-    } catch {
-      err.style.display = 'block';
-      btn.disabled = false;
-      btn.textContent = 'Sign in';
-    }
+    } catch { err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Sign in'; }
   }
 </script>
 </body>

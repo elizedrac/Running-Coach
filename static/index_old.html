@@ -1,0 +1,2220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RunCoach</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #FAFAF8; color: #1A1A1A; min-height: 100vh; }
+
+        /* ── Header ── */
+        header { background: #1A1A1A; padding: 12px 24px 12px 24px; padding-right: 35px; display: flex; align-items: center; justify-content: space-between; position: relative; z-index: 100; }
+        .logo { display: flex; align-items: center; gap: 10px; color: white; font-size: 18px; font-weight: 600; }
+        .header-btns { display: flex; gap: 10px; position: relative; }
+        .header-btn { background: transparent; border: 1px solid #555; color: white; padding: 7px 16px; border-radius: 20px; cursor: pointer; font-size: 13px; transition: border-color 0.2s; display: flex; align-items: center; gap: 6px; position: relative; }
+        .header-btn:hover { border-color: white; }
+        .header-btn[data-tip]:hover::after { content: attr(data-tip); position: absolute; top: calc(100% + 8px); left: 50%; transform: translateX(-50%); background: #fff; color: #333; font-size: 11px; padding: 5px 9px; border-radius: 6px; white-space: normal; width: 140px; text-align: center; pointer-events: none; z-index: 999; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+
+        /* ── Garmin sync popover ── */
+        .sync-popover { display: none; position: absolute; top: calc(100% + 10px); right: 0; background: white; border-radius: 12px; padding: 16px; box-shadow: 0 8px 24px rgba(0,0,0,0.15); width: 280px; z-index: 200; }
+        .sync-popover.open { display: block; }
+        .sync-popover-title { font-size: 13px; font-weight: 600; color: #1A1A1A; margin-bottom: 12px; }
+        .sync-field { margin-bottom: 10px; }
+        .sync-field label { display: block; font-size: 12px; color: #7A7A7A; margin-bottom: 4px; }
+        .sync-field input { width: 100%; border: 1px solid #E8E4E0; border-radius: 8px; padding: 7px 10px; font-size: 13px; outline: none; color: #1A1A1A; }
+        .sync-field input:focus { border-color: #2D5A7B; }
+        .sync-actions { display: flex; gap: 8px; margin-top: 12px; }
+        .sync-default-btn { flex: 1; background: #F0EDE8; border: none; border-radius: 8px; padding: 8px; font-size: 12px; cursor: pointer; color: #7A7A7A; }
+        .sync-default-btn:hover { background: #E8E4E0; }
+        .sync-go-btn { flex: 1; background: #2D5A7B; border: none; border-radius: 8px; padding: 8px; font-size: 12px; color: white; cursor: pointer; font-weight: 500; }
+        .sync-go-btn:hover { background: #1E3E58; }
+        .sync-error { font-size: 11px; color: #3A8B8B; margin-top: 8px; display: none; }
+
+        /* ── Layout ── */
+        .main { display: grid; grid-template-columns: minmax(0, 1fr) 620px; gap: 16px; padding: 28px 16px 12px; align-items: stretch; }
+        .left-col { display: flex; flex-direction: column; gap: 16px; min-width: 0; overflow: hidden; }
+        .top-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; min-width: 0; }
+        .health-card { flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+        .spark-grid { flex: 1; display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: 1fr; gap: 8px; min-height: 0; }
+        #mileage-card { display: flex; flex-direction: column; }
+        #activity-card { display: flex; flex-direction: column; }
+        .mileage-card-inner { flex: 1; min-height: 0; }
+
+        /* ── Cards ── */
+        .card { background: white; border-radius: 12px; padding: 14px 16px; border: 1px solid #E8E4E0; min-width: 0; overflow: hidden; }
+        .card-title { font-size: 15px; font-weight: 600; margin-bottom: 16px; }
+
+        /* ── Health sparklines ── */
+        .spark-card { background: #F0EDE8; border-radius: 10px; padding: 10px 12px; display: flex; flex-direction: column; min-height: 0; min-width: 0; overflow: hidden; }
+        .spark-label { font-size: 10px; font-weight: 600; color: #7A7A7A; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 4px; }
+        .spark-value { font-size: 22px; font-weight: 700; color: #1A1A1A; line-height: 1.1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .spark-trend { font-size: 10px; color: #7A7A7A; margin-bottom: 8px; min-height: 14px; }
+        .spark-wrap { position: relative; }
+        .metric-card { background: #F0EDE8; border-radius: 10px; padding: 8px 10px; display: flex; justify-content: space-between; align-items: center; }
+        .metric-label { font-size: 10px; color: #7A7A7A; }
+        .metric-value { font-size: 20px; font-weight: 700; color: #1A1A1A; }
+
+        /* ── Activity card ── */
+        .activity-name { font-size: 17px; font-weight: 600; margin-bottom: 3px; }
+        .activity-date { font-size: 12px; color: #7A7A7A; margin-bottom: 12px; }
+        .stat-row { display: flex; justify-content: space-between; font-size: 13px; padding: 5px 0; border-bottom: 1px solid #F0EDE8; }
+        .stat-row:last-child { border-bottom: none; }
+        .stat-label { color: #7A7A7A; }
+        .stat-value { font-weight: 500; }
+        .placeholder-text { color: #A8A8A8; font-size: 13px; text-align: center; padding: 20px 0; }
+
+        /* ── Weather pill ── */
+        .weather-corner { display: inline-flex; align-items: center; gap: 5px; background: #F0EDE8; border-radius: 6px; padding: 3px 8px; font-size: 11px; color: #7A7A7A; margin-top: 3px; }
+        .location-input { border: none; background: transparent; font-size: 11px; color: #7A7A7A; width: 120px; outline: none; cursor: text; }
+        .location-input:focus { color: #333; }
+
+        /* ── Mileage chart card ── */
+        .mileage-card-inner { position: relative; }
+        .mileage-total { font-size: 11px; color: #A8A8A8; margin-top: 4px; text-align: right; }
+
+        /* ── Chatbot ── */
+        .chat-card {
+            display: flex; flex-direction: column;
+            overflow: hidden; min-height: 0;
+            height: calc(100vh - 136px);
+            max-height: calc(100vh - 136px);
+        }
+        .chat-header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid #E8E4E0; margin-bottom: 14px; flex-shrink: 0; }
+        .chat-title { font-size: 16px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+
+        .chat-messages { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 14px; padding-right: 4px; min-height: 0; }
+        .chat-messages::-webkit-scrollbar { width: 4px; }
+        .chat-messages::-webkit-scrollbar-thumb { background: #E8E4E0; border-radius: 2px; }
+
+        /* coach — plain text on white */
+        .msg { display: flex; flex-direction: column; gap: 2px; padding: 8px 0; }
+        .msg-label { font-size: 11px; font-weight: 600; color: #B0B0B0; letter-spacing: 0.04em; text-transform: uppercase; margin-bottom: 2px; }
+        .msg-bubble { font-size: 13.5px; line-height: 1.6; color: #1A1A1A; background: none; padding: 0; }
+        .msg-time { font-size: 11px; color: #C8C8C8; }
+
+        /* user — bubble */
+        .msg.user { align-items: flex-end; }
+        .msg.user .msg-label { color: #2D5A7B; }
+        .msg.user .msg-bubble { background: #2D5A7B; color: white; padding: 10px 14px; border-radius: 14px; border-bottom-right-radius: 4px; max-width: 85%; }
+        .msg.user .msg-time { text-align: right; }
+
+        .msg.coach .msg-bubble strong { font-weight: 600; }
+        .msg.coach .msg-bubble ul, .msg.coach .msg-bubble ol { padding-left: 16px; margin: 6px 0; }
+        .msg.coach .msg-bubble li { margin: 3px 0; }
+        .msg.coach .msg-bubble h3, .msg.coach .msg-bubble h4 { margin: 8px 0 4px; font-size: 14px; }
+        .msg.coach .msg-bubble table { width: 100%; border-collapse: collapse; margin: 8px 0; font-size: 12.5px; }
+        .msg.coach .msg-bubble td, .msg.coach .msg-bubble th { border: 1px solid #E8E4E0; padding: 5px 9px; }
+        .msg.coach .msg-bubble th { background: #F0EDE8; font-weight: 600; }
+        .msg.coach .msg-bubble p { margin: 4px 0; }
+        .msg.coach .msg-bubble hr { border: none; border-top: 1px solid #E8E4E0; margin: 8px 0; }
+
+        /* ── Analyzing dots (inline) ── */
+        .dots { display: flex; gap: 4px; }
+        .dots span { width: 6px; height: 6px; background: #2D5A7B; border-radius: 50%; animation: bounce 1.2s infinite; }
+        .dots span:nth-child(2) { animation-delay: 0.2s; }
+        .dots span:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes bounce { 0%,60%,100% { transform: translateY(0); } 30% { transform: translateY(-5px); } }
+        .analyzing-inline { display: none; align-items: center; gap: 6px; padding: 6px 0 2px; flex-shrink: 0; }
+        .analyzing-inline span { font-size: 12px; color: #A8A8A8; }
+
+        /* ── Input row ── */
+        .chat-input-row { display: flex; gap: 8px; align-items: center; padding-top: 12px; border-top: 1px solid #E8E4E0; margin-top: 8px; flex-shrink: 0; }
+        .chat-input-wrap { flex: 1; display: flex; align-items: center; background: white; border: 1px solid #E8E4E0; border-radius: 24px; padding: 4px 6px 4px 18px; gap: 6px; }
+        .chat-input { flex: 1; background: transparent; border: none; font-size: 13.5px; outline: none; color: #1A1A1A; padding: 7px 0; }
+        .chat-input::placeholder { color: #B0B0B0; }
+        .stop-btn { display: none; width: 30px; height: 30px; background: #1A1A1A; border: none; border-radius: 50%; cursor: pointer; align-items: center; justify-content: center; flex-shrink: 0; }
+        .send-btn { width: 38px; height: 38px; background: #2D5A7B; border: none; border-radius: 50%; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; transition: background 0.2s; }
+        .send-btn:hover { background: #1E3E58; }
+
+        /* ── Training plan ── */
+        .plan-section { padding: 0 16px 20px; }
+        .plan-card { background: white; border-radius: 12px; padding: 20px; border: 1px solid #E8E4E0; }
+        .plan-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; }
+        .plan-title { font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 8px; }
+        .plan-view-btn { background: #2D5A7B; color: white; border: none; padding: 8px 16px; border-radius: 20px; font-size: 13px; cursor: pointer; }
+        .plan-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid #E8E4E0; border-radius: 8px; overflow: hidden; }
+        .plan-day-header { background: #F0EDE8; color: #7A7A7A; text-align: center; padding: 8px 10px; font-size: 11px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase; border-bottom: 1px solid #E8E4E0; }
+        .plan-day-header.today { background: #2D5A7B; color: white; border-bottom-color: #2D5A7B; }
+        .plan-placeholder { grid-column: span 7; text-align: center; padding: 28px; color: #B0B0B0; font-size: 13px; border-top: 1px solid #E8E4E0; }
+
+        /* ── Plan modal ── */
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 300; align-items: center; justify-content: center; }
+        .modal-overlay.open { display: flex; }
+        .modal { background: white; border-radius: 16px; padding: 28px; width: 460px; max-width: 90vw; box-shadow: 0 20px 60px rgba(0,0,0,0.2); }
+        .modal-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+        .modal-title { font-size: 16px; font-weight: 600; }
+        .modal-close { background: none; border: none; font-size: 20px; color: #A8A8A8; cursor: pointer; line-height: 1; }
+        .modal-close:hover { color: #1A1A1A; }
+        .modal-step-indicator { font-size: 12px; color: #A8A8A8; margin-bottom: 20px; }
+        .modal-field { margin-bottom: 14px; }
+        .modal-field label { display: block; font-size: 12px; color: #7A7A7A; margin-bottom: 5px; font-weight: 500; }
+        .modal-field input, .modal-field select { width: 100%; border: 1px solid #E8E4E0; border-radius: 8px; padding: 9px 12px; font-size: 13.5px; outline: none; color: #1A1A1A; }
+        .modal-field input:focus, .modal-field select:focus { border-color: #2D5A7B; }
+        .modal-days { display: flex; gap: 6px; flex-wrap: wrap; }
+        .day-chip { padding: 6px 12px; border: 1px solid #E8E4E0; border-radius: 20px; font-size: 12px; cursor: pointer; color: #7A7A7A; transition: all 0.15s; user-select: none; }
+        .day-chip.selected { background: #2D5A7B; border-color: #2D5A7B; color: white; }
+        .modal-toggle { display: flex; gap: 0; border: 1px solid #E8E4E0; border-radius: 8px; overflow: hidden; }
+        .modal-toggle button { flex: 1; background: none; border: none; padding: 8px; font-size: 13px; cursor: pointer; color: #7A7A7A; transition: all 0.15s; }
+        .modal-toggle button.active { background: #2D5A7B; color: white; }
+        .modal-actions { display: flex; gap: 10px; margin-top: 22px; }
+        .modal-btn-secondary { flex: 1; background: #F0EDE8; border: none; border-radius: 8px; padding: 10px; font-size: 13px; cursor: pointer; color: #7A7A7A; }
+        .modal-btn-primary { flex: 1; background: #2D5A7B; border: none; border-radius: 8px; padding: 10px; font-size: 13px; color: white; cursor: pointer; font-weight: 500; }
+        .modal-btn-primary:hover { background: #1E3E58; }
+        .modal-error { font-size: 12px; color: #3A8B8B; margin-top: 8px; display: none; }
+        .create-plan-btn { background: #2D5A7B; color: white; border: none; padding: 10px 20px; border-radius: 8px; font-size: 13px; cursor: pointer; font-weight: 500; margin-top: 8px; }
+        .create-plan-btn:hover { background: #1E3E58; }
+
+        /* ── Follow-up chips ── */
+        .followup-chips { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; max-width: 90%; }
+        .followup-chip { background: white; border: 1px solid #E8E4E0; border-radius: 16px; padding: 8px 14px; font-size: 13px; color: #7A7A7A; cursor: pointer; text-align: left; transition: border-color 0.15s, color 0.15s; }
+        .followup-chip:hover { border-color: #2D5A7B; color: #2D5A7B; }
+
+        /* ── Chat empty state ── */
+        .chat-empty { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; flex: 1; padding: 16px; text-align: center; min-height: 0; }
+        .chat-empty-health:empty { display: none; }
+        .chat-empty-brand { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+        .chat-empty-brand-name { font-size: 18px; font-weight: 700; color: #1A1A1A; }
+        .chat-empty-brand-sub { font-size: 12px; color: #A8A8A8; }
+        .chat-empty-health { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+        .chat-empty-pill { background: #F0EDE8; border-radius: 20px; padding: 5px 12px; font-size: 12px; color: #7A7A7A; }
+        .chat-empty-pill strong { color: #1A1A1A; font-weight: 600; }
+        .chat-empty-prompts { width: 100%; max-width: 380px; }
+        .chat-empty-prompts-label { font-size: 10px; color: #C8C8C8; letter-spacing: 0.06em; font-weight: 600; text-transform: uppercase; margin-bottom: 8px; }
+        .prompt-chip { display: block; width: 100%; background: white; border: 1px solid #E8E4E0; border-radius: 10px; padding: 10px 14px; font-size: 13px; color: #1A1A1A; cursor: pointer; text-align: left; transition: border-color 0.15s, background 0.15s; margin-bottom: 6px; }
+        .prompt-chip:last-child { margin-bottom: 0; }
+        .prompt-chip:hover { border-color: #2D5A7B; background: #F5F8FC; }
+
+        /* ── Resize handle hint ── */
+        .chat-card::after { content: ''; display: block; height: 4px; background: linear-gradient(to right, #E8E4E0, #D8D4D0, #E8E4E0); border-radius: 2px; margin-top: 4px; cursor: ns-resize; flex-shrink: 0; }
+
+        /* ── Plan day cells ── */
+        .plan-day-cell { padding: 10px 6px; text-align: center; cursor: pointer; border-right: 1px solid #E8E4E0; border-top: 1px solid #E8E4E0; transition: background 0.15s; min-height: 84px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; position: relative; }
+        .plan-day-cell:last-child { border-right: none; }
+        .plan-day-cell:hover { background: #F4F1EE; }
+        .plan-day-cell.today { background: #EDF3F8; }
+        .plan-day-cell.rest-day { background: #FAFAF8; opacity: 0.75; }
+        .plan-day-cell.rest-day:hover { opacity: 1; background: #F4F1EE; }
+        .plan-day-miles { font-size: 12px; font-weight: 500; color: #1A1A1A; }
+        .plan-day-pace  { font-size: 11px; color: #7A7A7A; }
+        .plan-day-notes { font-size: 10px; color: #B0B0B0; }
+        .activity-logged-btn { position: absolute; bottom: 5px; right: 5px; background: none; border: none; padding: 0; font-size: 9px; font-weight: 500; color: #B0B0B0; cursor: pointer; letter-spacing: 0.02em; }
+        .activity-logged-btn:hover { color: #3A8B8B; }
+        .plan-day-cell.completed { background: #E8F5EE; border-left: 3px solid #4A8B6E; }
+        .plan-check { position: absolute; top: 5px; right: 6px; font-size: 10px; color: #4A8B6E; font-weight: 700; line-height: 1; pointer-events: none; }
+        .activity-divider { border: none; border-top: 1px solid #E8E4E0; margin: 12px 0 10px; }
+        .activity-section-label { font-size: 11px; font-weight: 600; color: #A8A8A8; letter-spacing: 0.05em; text-transform: uppercase; margin-bottom: 8px; }
+
+        /* ── Workout type badges ── */
+        .workout-badge { font-size: 10px; font-weight: 600; padding: 2px 7px; border-radius: 10px; letter-spacing: 0.04em; }
+        .badge-EASY     { background: #E8F5EE; color: #2D7A5A; }
+        .badge-AEROBIC  { background: #E8F5EE; color: #2D7A5A; }
+        .badge-LONG     { background: #E8EEF5; color: #1E3E58; }
+        .badge-TEMPO    { background: #FDF2E3; color: #A87828; }
+        .badge-INTERVAL { background: #FDEDEA; color: #B04030; }
+        .badge-STRENGTH { background: #DCE9F5; color: #2D5A7B; }
+        .badge-REST     { background: #EBEBEB; color: #A8A8A8; }
+        .badge-CROSS    { background: #EDE9FE; color: #7C3AED; }
+        .month-cell { min-height: 64px; border-radius: 10px; padding: 6px; background: #FAFAF8; border: 1px solid #E8E4E0; cursor: pointer; transition: background 0.15s; }
+        .month-cell:hover { background: #F0EDE8; }
+        .month-cell.empty { background: transparent; border-color: transparent; cursor: default; }
+        .month-cell.today { border-color: #1A1A1A; }
+        .month-cell-date { font-size: 11px; color: #999; margin-bottom: 4px; }
+        .month-cell.today .month-cell-date { color: #1A1A1A; font-weight: 600; }
+        .month-day-header { font-size: 11px; color: #B0B0B0; text-align: center; padding-bottom: 4px; font-weight: 500; }
+
+        /* ── Plan generation progress bar ── */
+        .plan-generating { padding: 28px; text-align: center; }
+        .plan-generating-label { font-size: 13px; color: #7A7A7A; margin-bottom: 12px; }
+        .plan-progress-track { background: #E8E4E0; border-radius: 99px; height: 6px; overflow: hidden; }
+        .plan-progress-fill  { height: 100%; background: #2D5A7B; border-radius: 99px; width: 0%; transition: width 0.8s ease; }
+        .plan-generating-sub { font-size: 11px; color: #B0B0B0; margin-top: 8px; }
+
+        /* ── Plan week nav ── */
+        .plan-week-nav  { display: flex; align-items: center; gap: 10px; }
+        .plan-week-btn  { background: none; border: 1px solid #E8E4E0; border-radius: 8px; padding: 4px 12px; cursor: pointer; font-size: 13px; color: #7A7A7A; transition: border-color 0.15s; }
+        .plan-week-btn:hover { border-color: #2D5A7B; color: #2D5A7B; }
+        .plan-week-label { font-size: 13px; color: #7A7A7A; min-width: 160px; text-align: center; }
+
+        /* ── Interval table ── */
+        .interval-table { width: 100%; border-collapse: collapse; font-size: 12.5px; margin-top: 14px; }
+        .interval-table th { background: #F0EDE8; padding: 7px 10px; text-align: left; font-weight: 600; font-size: 11px; color: #7A7A7A; }
+        .interval-table td { padding: 7px 10px; border-top: 1px solid #E8E4E0; vertical-align: middle; }
+    </style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+    <div class="logo">
+        <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="#2D5A7B" stroke-width="2.5">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l3-8 4 16 3-8 2 4 2-4h2"/>
+        </svg>
+        RunCoach
+    </div>
+    <div class="header-btns">
+        <div style="position:relative">
+            <button class="header-btn" onclick="toggleSyncPopover(event)" id="sync-btn" data-tip="Import your latest runs and health data from Garmin Connect">
+                <svg width="13" height="13" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+                </svg>
+                Garmin Sync
+            </button>
+            <div class="sync-popover" id="sync-popover">
+                <div class="sync-popover-title">Sync Garmin Data</div>
+                <div class="sync-field">
+                    <label>Start date</label>
+                    <input type="date" id="sync-start"/>
+                </div>
+                <div class="sync-field">
+                    <label>End date</label>
+                    <input type="date" id="sync-end"/>
+                </div>
+                <div class="sync-error" id="sync-error"></div>
+                <div class="sync-actions">
+                    <button class="sync-default-btn" onclick="setDefaultDates()">Last 7 days</button>
+                    <button class="sync-go-btn" onclick="runSync()">Sync</button>
+                </div>
+                <div style="margin-top:10px;text-align:center;">
+                    <button onclick="disconnectGarmin()" style="background:none;border:none;font-size:11px;color:#A8A8A8;cursor:pointer;text-decoration:underline;padding:0;">Disconnect Garmin</button>
+                </div>
+            </div>
+        </div>
+        <button class="header-btn" id="plan-sync-btn" onclick="runPlanSync()" style="display:none" data-tip="Reconcile your training plan with recent Garmin activities — updates mileage and pace based on what you actually ran">
+            Sync Plan
+        </button>
+        <button class="header-btn" onclick="openEditRaceModal()" data-tip="Set your goal race, race date, goal finish time, and distance">Edit Race</button>
+        <button class="header-btn" onclick="openEditPrefsModal()" data-tip="Set your weekly training days, mileage targets, and preferences for plan generation">Edit Training Preferences</button>
+        <button class="header-btn" onclick="notImplemented('Predictions')" data-tip="Predict your race finish time based on current fitness (coming soon)">Predictions</button>
+    </div>
+</header>
+
+<!-- Main grid -->
+<div class="main">
+
+    <!-- Left column -->
+    <div class="left-col">
+
+        <!-- Activity + Mileage (top) -->
+        <div class="top-row">
+            <div class="card" id="activity-card">
+                <div class="card-title">Most Recent Activity</div>
+                <div class="placeholder-text">Loading...</div>
+            </div>
+            <div class="card" id="mileage-card">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                    <div class="card-title" style="margin:0;font-size:14px">Weekly Mileage</div>
+                    <span id="mileage-this-week" style="font-size:12px;color:#1A1A1A;font-weight:600;"></span>
+                </div>
+                <div class="mileage-card-inner" style="flex:1;min-height:0;"><canvas id="mileageChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Health data sparklines (bottom) -->
+        <div class="card health-card">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px;flex-shrink:0">
+                <div>
+                    <div style="font-size:14px;font-weight:600;margin-bottom:3px">Health Data</div>
+                    <div class="weather-corner" id="weather-corner">
+                        <span id="weather-mini-text">—</span>
+                        <span style="color:#7A7A7A">·</span>
+                        <input class="location-input" id="location-input" value="New York, NY" title="Click to change location" />
+                    </div>
+                </div>
+            </div>
+            <div class="spark-grid">
+                <div class="spark-card">
+                    <div class="spark-label">Steps</div>
+                    <div class="spark-value" id="spark-steps-val">—</div>
+                    <div class="spark-trend" id="spark-steps-trend"></div>
+                    <div class="spark-wrap" style="flex:1;min-height:0;position:relative;"><canvas id="spark-steps-chart"></canvas></div>
+                </div>
+                <div class="spark-card">
+                    <div class="spark-label">Sleep</div>
+                    <div class="spark-value" id="spark-sleep-val">—</div>
+                    <div class="spark-trend" id="spark-sleep-trend"></div>
+                    <div class="spark-wrap" style="flex:1;min-height:0;position:relative;"><canvas id="spark-sleep-chart"></canvas></div>
+                </div>
+                <div class="spark-card">
+                    <div class="spark-label">Resting HR</div>
+                    <div class="spark-value" id="spark-rhr-val">—</div>
+                    <div class="spark-trend" id="spark-rhr-trend"></div>
+                    <div class="spark-wrap" style="flex:1;min-height:0;position:relative;"><canvas id="spark-rhr-chart"></canvas></div>
+                </div>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px;flex-shrink:0">
+                <div class="metric-card"><div class="metric-label">VO₂ Max</div><div class="metric-value" id="metric-vo2-val">—</div></div>
+                <div class="metric-card"><div class="metric-label">Body Battery</div><div class="metric-value" id="metric-bb-val">—</div></div>
+                <div class="metric-card"><div class="metric-label">Active Cal</div><div class="metric-value" id="metric-kcal-val">—</div></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Chatbot -->
+    <div class="card chat-card">
+        <div class="chat-header">
+            <div class="chat-title">
+                <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="#2D5A7B" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l3-8 4 16 3-8 2 4 2-4h2"/>
+                </svg>
+                Coach
+            </div>
+            <button onclick="clearChat()" title="New conversation" style="background:none;border:none;cursor:pointer;padding:4px 8px;color:#C8C8C8;font-size:11px;letter-spacing:0.02em;transition:color 0.15s;" onmouseover="this.style.color='#7A7A7A'" onmouseout="this.style.color='#C8C8C8'">New chat</button>
+        </div>
+
+        <!-- Empty state -->
+        <div class="chat-empty" id="chat-empty">
+            <div class="chat-empty-brand">
+                <svg width="36" height="36" fill="none" viewBox="0 0 24 24" stroke="#2D5A7B" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 12h2l3-8 4 16 3-8 2 4 2-4h2"/>
+                </svg>
+                <div class="chat-empty-brand-name">RunCoach</div>
+                <div class="chat-empty-brand-sub">Your personal running coach</div>
+            </div>
+            <div class="chat-empty-health" id="chat-empty-health"></div>
+            <div class="chat-empty-prompts">
+                <div class="chat-empty-prompts-label">Try asking</div>
+                <div id="chat-prompt-chips"></div>
+            </div>
+        </div>
+
+        <div class="chat-messages" id="chat-messages" style="display:none"></div>
+
+        <div class="analyzing-inline" id="analyzing-bar">
+            <div class="dots"><span></span><span></span><span></span></div>
+            <span id="analyzing-text">Analyzing...</span>
+        </div>
+
+        <div class="chat-input-row">
+            <div class="chat-input-wrap">
+                <input class="chat-input" id="chat-input" placeholder="Type a message..."
+                    onkeydown="if(event.key==='Enter' && !event.shiftKey){ event.preventDefault(); sendMessage(); }"/>
+                <button class="stop-btn" id="stop-btn" onclick="cancelRequest()" title="Stop">
+                    <svg width="12" height="12" viewBox="0 0 12 12" fill="white">
+                        <rect x="2" y="2" width="8" height="8" rx="1"/>
+                    </svg>
+                </button>
+            </div>
+            <button class="send-btn" id="send-btn" onclick="sendMessage()">
+                <svg width="15" height="15" fill="none" viewBox="0 0 24 24" stroke="white" stroke-width="2.5">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+            </button>
+        </div>
+    </div><!-- end chat-card -->
+
+</div>
+
+<!-- Training Plan -->
+<div class="plan-section">
+    <div class="plan-card">
+        <div class="plan-header">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <div class="plan-title">
+                    <svg width="17" height="17" fill="none" viewBox="0 0 24 24" stroke="#1a1a1a" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M8 7V3m8 4V3m-9 8h10M5 21h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v12a2 2 0 002 2z"/>
+                    </svg>
+                    Training Plan
+                </div>
+                <button id="month-view-btn" onclick="openMonthModal()" style="background:none;border:1px solid #ddd;border-radius:8px;cursor:pointer;padding:4px 10px;font-size:12px;color:#666;display:none;">View Full Month</button>
+            </div>
+            <div style="display:flex;align-items:center;gap:10px;">
+                <div class="plan-week-nav">
+                    <button class="plan-week-btn" onclick="shiftWeek(-1)">← Prev</button>
+                    <span class="plan-week-label" id="plan-week-label"></span>
+                    <button class="plan-week-btn" onclick="shiftWeek(1)">Next →</button>
+                    <button class="plan-week-btn" id="jump-today-btn" onclick="jumpToToday()" style="display:none;">Today</button>
+                </div>
+                <button id="delete-plan-btn" onclick="confirmDeletePlan()" title="Delete plan" style="background:none;border:none;cursor:pointer;padding:4px 8px;display:none;font-size:11px;color:#C8C8C8;letter-spacing:0.02em;transition:color 0.15s;" onmouseover="this.style.color='#7A7A7A'" onmouseout="this.style.color='#C8C8C8'">Delete plan</button>
+            </div>
+        </div>
+        <div class="plan-grid" id="plan-grid"></div>
+    </div>
+</div>
+
+<!-- Month view modal -->
+<div id="month-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto;">
+    <div style="background:#fff;border-radius:20px;width:100%;max-width:700px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,0.18);margin:auto;">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;">
+            <button onclick="shiftMonth(-1)" style="background:none;border:1px solid #eee;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;">← Prev</button>
+            <div style="font-weight:600;font-size:15px;" id="month-modal-label"></div>
+            <div style="display:flex;gap:8px;">
+                <button onclick="shiftMonth(1)" style="background:none;border:1px solid #eee;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:13px;">Next →</button>
+                <button onclick="closeMonthModal()" style="background:none;border:none;cursor:pointer;font-size:20px;color:#999;line-height:1;">×</button>
+            </div>
+        </div>
+        <div id="month-grid" style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;"></div>
+    </div>
+</div>
+
+<!-- Delete plan confirmation modal -->
+<div id="delete-plan-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.4);z-index:1000;display:none;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:16px;padding:28px 24px;max-width:320px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+        <div style="font-size:17px;font-weight:600;margin-bottom:8px;">Delete training plan?</div>
+        <div style="font-size:14px;color:#666;margin-bottom:24px;">This will remove your current plan. You can generate a new one anytime.</div>
+        <div style="display:flex;gap:10px;justify-content:center;">
+            <button onclick="closeDeleteModal()" style="flex:1;padding:10px;border:1px solid #ddd;border-radius:10px;background:#fff;cursor:pointer;font-size:14px;">Cancel</button>
+            <button onclick="deletePlan()" style="flex:1;padding:10px;border:none;border-radius:10px;background:#e53935;color:#fff;cursor:pointer;font-size:14px;font-weight:600;">Delete</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit training preferences modal -->
+<div class="modal-overlay" id="edit-prefs-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">Edit Training Preferences</div>
+            <button class="modal-close" onclick="closeEditPrefsModal()">×</button>
+        </div>
+        <div class="modal-step-indicator" style="color:#aaa;font-size:12px;margin-bottom:20px">Update your training preferences</div>
+        <div class="modal-field">
+            <label>Days per week</label>
+            <input type="number" id="ep-days" min="1" max="7" placeholder="e.g. 4"/>
+        </div>
+        <div class="modal-field">
+            <label>Preferred training days</label>
+            <div class="modal-days" id="ep-pref-days">
+                <span class="day-chip" onclick="toggleDay(this)">Mon</span>
+                <span class="day-chip" onclick="toggleDay(this)">Tue</span>
+                <span class="day-chip" onclick="toggleDay(this)">Wed</span>
+                <span class="day-chip" onclick="toggleDay(this)">Thu</span>
+                <span class="day-chip" onclick="toggleDay(this)">Fri</span>
+                <span class="day-chip" onclick="toggleDay(this)">Sat</span>
+                <span class="day-chip" onclick="toggleDay(this)">Sun</span>
+            </div>
+        </div>
+        <div class="modal-field">
+            <label>Average miles/week</label>
+            <input type="number" id="ep-avg-miles" placeholder="e.g. 30" step="1"/>
+        </div>
+        <div class="modal-field">
+            <label>Max miles/week (peak week)</label>
+            <input type="number" id="ep-max-miles" placeholder="e.g. 45" step="1"/>
+        </div>
+        <div class="modal-field">
+            <label>Personal notes <span style="color:#A8A8A8;font-weight:400">(injuries, preferences, things to keep in mind)</span></label>
+            <textarea id="ep-notes" rows="3" placeholder="e.g. left knee tends to flare up, prefer morning runs, avoid back-to-back hard days..." style="width:100%;border:1px solid #E8E4E0;border-radius:8px;padding:9px 12px;font-size:13.5px;outline:none;color:#1A1A1A;resize:vertical;font-family:inherit;"></textarea>
+        </div>
+        <div class="modal-error" id="ep-error"></div>
+        <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="closeEditPrefsModal()">Cancel</button>
+            <button class="modal-btn-primary" onclick="saveEditedPrefs()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Garmin setup modal -->
+<div class="modal-overlay" id="garmin-setup-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">Connect Garmin</div>
+            <button class="modal-close" onclick="document.getElementById('garmin-setup-modal').classList.remove('open')">×</button>
+        </div>
+        <div class="modal-step-indicator" style="color:#aaa;font-size:12px;margin-bottom:20px">Enter your Garmin Connect credentials to enable syncing</div>
+        <div class="modal-field">
+            <label>Garmin email</label>
+            <input type="text" id="gs-email" placeholder="you@example.com" autocomplete="new-password"/>
+        </div>
+        <div class="modal-field">
+            <label>Garmin password</label>
+            <input type="password" id="gs-password" placeholder="••••••••" autocomplete="new-password"/>
+        </div>
+        <div class="modal-error" id="gs-error" style="display:none"></div>
+        <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="document.getElementById('garmin-setup-modal').classList.remove('open')">Cancel</button>
+            <button class="modal-btn-primary" onclick="saveGarminSetup()">Connect</button>
+        </div>
+    </div>
+</div>
+
+<!-- Edit race modal -->
+<div class="modal-overlay" id="edit-race-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title">Edit Race</div>
+            <button class="modal-close" onclick="closeEditRaceModal()">×</button>
+        </div>
+        <div class="modal-step-indicator" style="color:#aaa;font-size:12px;margin-bottom:20px">Current race details</div>
+        <div class="modal-field">
+            <label>Race name</label>
+            <input type="text" id="er-race-name" placeholder="e.g. Boston Marathon"/>
+        </div>
+        <div class="modal-field">
+            <label>Race date</label>
+            <input type="date" id="er-race-date"/>
+        </div>
+        <div class="modal-field">
+            <label>Goal time</label>
+            <input type="text" id="er-goal-time" placeholder="HH:MM:SS"/>
+        </div>
+        <div class="modal-field">
+            <label>Distance</label>
+            <select id="er-distance" onchange="toggleEditCustomDistance(this.value)">
+                <option value="">Select distance</option>
+                <option value="3.107">5K</option>
+                <option value="6.214">10K</option>
+                <option value="13.1094">Half Marathon</option>
+                <option value="26.2188">Marathon</option>
+                <option value="custom">Custom</option>
+            </select>
+        </div>
+        <div class="modal-field" id="er-custom-distance-field" style="display:none">
+            <label>Distance in miles</label>
+            <input type="number" id="er-custom-miles" placeholder="e.g. 31.07" step="0.01"/>
+        </div>
+        <div class="modal-error" id="er-error"></div>
+        <div class="modal-actions">
+            <button class="modal-btn-secondary" onclick="closeEditRaceModal()">Cancel</button>
+            <button class="modal-btn-primary" onclick="saveEditedRace()">Save Changes</button>
+        </div>
+    </div>
+</div>
+
+<!-- Plan creation modal -->
+<div class="modal-overlay" id="plan-modal">
+    <div class="modal">
+        <div class="modal-header">
+            <div class="modal-title" id="modal-title">Set Up Your Race</div>
+            <button class="modal-close" onclick="closePlanModal()">×</button>
+        </div>
+        <div class="modal-step-indicator" id="modal-step-indicator">Step 1 of 2</div>
+
+        <!-- Step 1: Race -->
+        <div id="plan-step-1">
+            <div class="modal-field">
+                <label>Race name</label>
+                <input type="text" id="p-race-name" placeholder="e.g. Boston Marathon"/>
+            </div>
+            <div class="modal-field">
+                <label>Race date</label>
+                <input type="date" id="p-race-date"/>
+            </div>
+            <div class="modal-field">
+                <label>Goal time</label>
+                <input type="text" id="p-goal-time" placeholder="HH:MM:SS"/>
+            </div>
+            <div class="modal-field">
+                <label>Distance</label>
+                <select id="p-distance" onchange="toggleCustomDistance(this.value)">
+                    <option value="">Select distance</option>
+                    <option value="3.107">5K</option>
+                    <option value="6.214">10K</option>
+                    <option value="13.1094">Half Marathon</option>
+                    <option value="26.2188">Marathon</option>
+                    <option value="custom">Custom</option>
+                </select>
+            </div>
+            <div class="modal-field" id="custom-distance-field" style="display:none">
+                <label>Distance in miles</label>
+                <input type="number" id="p-custom-miles" placeholder="e.g. 31.07" step="0.01"/>
+            </div>
+            <div class="modal-error" id="step1-error"></div>
+            <div class="modal-actions">
+                <button class="modal-btn-secondary" onclick="closePlanModal()">Cancel</button>
+                <button class="modal-btn-primary" onclick="goToStep2()">Continue →</button>
+            </div>
+        </div>
+
+        <!-- Step 2: Preferences -->
+        <div id="plan-step-2" style="display:none">
+            <div class="modal-field">
+                <label>Days per week</label>
+                <input type="number" id="p-days" min="1" max="7" placeholder="e.g. 4"/>
+            </div>
+            <div class="modal-field">
+                <label>Preferred training days</label>
+                <div class="modal-days" id="p-pref-days">
+                    <span class="day-chip" onclick="toggleDay(this)">Mon</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Tue</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Wed</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Thu</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Fri</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Sat</span>
+                    <span class="day-chip" onclick="toggleDay(this)">Sun</span>
+                </div>
+            </div>
+            <div class="modal-field">
+                <label>Average miles/week</label>
+                <input type="number" id="p-avg-miles" placeholder="e.g. 30" step="1"/>
+            </div>
+            <div class="modal-field">
+                <label>Max miles/week (peak week)</label>
+                <input type="number" id="p-max-miles" placeholder="e.g. 45" step="1"/>
+            </div>
+            <div class="modal-error" id="step2-error"></div>
+            <div class="modal-actions">
+                <button class="modal-btn-secondary" onclick="goToStep1()">← Back</button>
+                <button class="modal-btn-primary" onclick="submitPlan()">Create Plan</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Day detail modal -->
+<div class="modal-overlay" id="day-modal">
+    <div class="modal" style="max-width:520px;width:90vw">
+        <div class="modal-header">
+            <div style="display:flex;align-items:center;gap:10px;">
+                <button id="day-modal-back" onclick="backToMonth()" style="display:none;background:none;border:none;cursor:pointer;font-size:13px;color:#888;padding:0;">← Month</button>
+                <div>
+                    <div class="modal-title" id="day-modal-title"></div>
+                    <div style="font-size:12px;color:#aaa;margin-top:3px" id="day-modal-date"></div>
+                </div>
+            </div>
+            <div style="display:flex;align-items:center;gap:12px;">
+                <button id="day-modal-edit-btn" onclick="enterDayEditMode()" style="background:none;border:none;cursor:pointer;font-size:13px;color:#7A7A7A;padding:0;">Edit</button>
+                <button class="modal-close" onclick="closeDayModal()">×</button>
+            </div>
+        </div>
+        <div id="day-modal-body"></div>
+        <!-- Edit form (hidden by default) -->
+        <div id="day-modal-edit" style="display:none;">
+            <div class="modal-field">
+                <label>Workout Type</label>
+                <select id="edit-workout-type">
+                    <option value="EASY">EASY</option>
+                    <option value="AEROBIC">AEROBIC</option>
+                    <option value="LONG">LONG</option>
+                    <option value="TEMPO">TEMPO</option>
+                    <option value="INTERVAL">INTERVAL</option>
+                    <option value="STRENGTH">STRENGTH</option>
+                    <option value="CROSS">CROSS</option>
+                    <option value="REST">REST</option>
+                </select>
+            </div>
+            <div class="modal-field">
+                <label>Target Miles</label>
+                <input type="number" id="edit-target-miles" step="0.1" min="0" placeholder="e.g. 6.0">
+            </div>
+            <div class="modal-field">
+                <label>Target Pace</label>
+                <input type="text" id="edit-target-pace" placeholder="e.g. 8:30/mi">
+            </div>
+            <div class="modal-field">
+                <label>Notes</label>
+                <textarea id="edit-notes" rows="3" style="width:100%;border:1px solid #E8E4E0;border-radius:8px;padding:9px 12px;font-size:13.5px;outline:none;color:#1A1A1A;resize:vertical;font-family:inherit;" placeholder="Workout notes..."></textarea>
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn-secondary" onclick="exitDayEditMode()">Cancel</button>
+                <button class="modal-btn-primary" onclick="saveDayEdit()">Save</button>
+            </div>
+            <div style="text-align:center;margin-top:12px;">
+                <button onclick="clearDayEdit()" style="background:none;border:none;cursor:pointer;font-size:12px;color:#C0392B;">Clear day</button>
+            </div>
+            <div id="day-edit-error" style="display:none;font-size:12px;color:#C0392B;margin-top:8px;text-align:center;"></div>
+        </div>
+    </div>
+</div>
+
+<!-- Activity detail modal -->
+<div class="modal-overlay" id="activity-modal">
+    <div class="modal" style="max-width:480px;width:90vw">
+        <div class="modal-header">
+            <div>
+                <div class="modal-title" id="activity-modal-title"></div>
+                <div style="font-size:12px;color:#aaa;margin-top:3px" id="activity-modal-date"></div>
+            </div>
+            <button class="modal-close" onclick="closeActivityModal()">×</button>
+        </div>
+        <div id="activity-modal-body"></div>
+    </div>
+</div>
+
+<script>
+const API   = "";
+const _uuid = () => crypto.randomUUID?.() ?? ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16));
+let   SID   = _uuid();
+const DAYS  = ["M","T","W","T","F","S","S"];
+const TODAY = new Date().getDay();
+let   hasPlan = false;
+let   userLocation = "New York, NY";
+let   abortController = null;
+let   _stepsChart = null, _sleepChart = null, _rhrChart = null;
+let   _latestHealth = {};
+
+(function checkAuth() {
+    if (!localStorage.getItem('rc_token')) window.location.href = '/login.html';
+})();
+
+function getToken() { return localStorage.getItem('rc_token'); }
+
+function logout() {
+    localStorage.removeItem('rc_token');
+    window.location.href = '/login.html';
+}
+
+async function apiFetch(url, options = {}) {
+    const headers = { ...(options.headers || {}), 'Authorization': `Bearer ${getToken()}` };
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) { logout(); return; }
+    return res;
+}
+
+const SUGGESTED_PROMPTS = [
+    "How did my training go this week?",
+    "What should my long run pace be?",
+    "Am I on track for my race goal?",
+    "Can you analyze my recent workout trends?",
+    "What are my heart rate zones based on my data?",
+    "How can I improve my race time?",
+    "Should I do a recovery run today?",
+    "What does my next week of training look like?",
+    "How is my sleep affecting my performance?",
+    "What's a good pre-race week plan?",
+];
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+
+function showToast(msg, color = '#1a1a1a') {
+    const t = document.createElement('div');
+    t.textContent = msg;
+    Object.assign(t.style, {
+        position:'fixed', bottom:'24px', left:'50%', transform:'translateX(-50%)',
+        background: color, color:'white', padding:'10px 20px', borderRadius:'8px',
+        fontSize:'13px', zIndex:'999', opacity:'1', transition:'opacity 0.4s', whiteSpace:'nowrap'
+    });
+    document.body.appendChild(t);
+    setTimeout(() => { t.style.opacity = '0'; setTimeout(() => t.remove(), 400); }, 2500);
+}
+
+function notImplemented(name) { showToast(`${name} coming soon`); }
+
+// ── Chat empty state ──────────────────────────────────────────────────────────
+
+function renderEmptyState() {
+    const emptyEl = document.getElementById('chat-empty');
+    const msgsEl  = document.getElementById('chat-messages');
+    if (!emptyEl) return;
+
+    // Only show empty state if no messages exist
+    const hasMessages = msgsEl && msgsEl.children.length > 0;
+    if (hasMessages) return;
+
+    const shuffled = [...SUGGESTED_PROMPTS].sort(() => Math.random() - 0.5).slice(0, 3);
+    const chipsEl = document.getElementById('chat-prompt-chips');
+    if (chipsEl) {
+        chipsEl.innerHTML = shuffled.map(p => `<button class="prompt-chip">${p}</button>`).join('');
+        chipsEl.querySelectorAll('.prompt-chip').forEach((btn, i) => {
+            btn.addEventListener('click', () => sendPrompt(shuffled[i]));
+        });
+    }
+
+    emptyEl.style.display = 'flex';
+    if (msgsEl) msgsEl.style.display = 'none';
+}
+
+function hideEmptyState() {
+    const emptyEl = document.getElementById('chat-empty');
+    const msgsEl  = document.getElementById('chat-messages');
+    if (emptyEl) emptyEl.style.display = 'none';
+    if (msgsEl)  msgsEl.style.display  = 'flex';
+}
+
+function sendPrompt(text) {
+    document.getElementById('chat-input').value = text;
+    sendMessage();
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+function isoDate(offsetDays = 0) {
+    return new Date(Date.now() + offsetDays * 864e5).toISOString().split('T')[0];
+}
+
+function fmtTime() {
+    return new Date().toLocaleTimeString('en-US', {hour:'numeric', minute:'2-digit'});
+}
+
+// ── Health sparklines ─────────────────────────────────────────────────────────
+
+async function loadHealthChart() {
+    try {
+        const res  = await apiFetch(`${API}/health/recent?start_date=${localOffset(-6)}&end_date=${localToday()}`);
+        const rows = await res.json();
+        _healthChartLoaded = true;
+        if (!rows || !rows.length) return;
+
+        const steps = rows.map(r => r.total_steps ? +(r.total_steps / 1000).toFixed(1) : null);
+        const rhr   = rows.map(r => r.rhr ?? 0);
+        const sleep = rows.map(r => {
+            if (!r.total_sleep) return 0;
+            const [h, m] = r.total_sleep.split(':');
+            return +(+h + +m / 60).toFixed(1);
+        });
+
+        // 7-day averages
+        const last = rows[rows.length - 1];
+        const validSteps = steps.filter(x => x != null);
+        const validSleep = sleep.filter(x => x > 0);
+        const validRhr   = rhr.filter(x => x > 0);
+        const avgSteps = validSteps.length ? (validSteps.reduce((a,b) => a+b, 0) / validSteps.length).toFixed(1) + 'K' : '—';
+        const avgSleep = validSleep.length ? (validSleep.reduce((a,b) => a+b, 0) / validSleep.length).toFixed(1) + 'h' : '—';
+        const avgRhr   = validRhr.length   ? Math.round(validRhr.reduce((a,b) => a+b, 0) / validRhr.length) + ' bpm' : '—';
+        document.getElementById('spark-steps-val').textContent = avgSteps;
+        document.getElementById('spark-sleep-val').textContent = avgSleep;
+        document.getElementById('spark-rhr-val').textContent = avgRhr;
+
+        _latestHealth = {
+            steps: last.total_steps || null,
+            rhr:   last.rhr || null,
+            sleep: last.total_sleep ? (() => { const [h, m] = last.total_sleep.split(':'); return (+h + +m/60).toFixed(1); })() : null,
+        };
+        const kcalEl = document.getElementById('metric-kcal-val');
+        if (kcalEl && last.active_kcal) kcalEl.textContent = Math.round(last.active_kcal).toLocaleString();
+        renderEmptyState();
+
+        // Trend arrows: compare recent half vs older half
+        function trendArrow(arr, lowerIsBetter = false) {
+            const valid = arr.filter(x => x != null);
+            if (valid.length < 4) return '';
+            const half = Math.floor(valid.length / 2);
+            const older  = valid.slice(0, half).reduce((a,b) => a+b, 0) / half;
+            const recent = valid.slice(half).reduce((a,b) => a+b, 0) / (valid.length - half);
+            const diff = recent - older;
+            if (Math.abs(diff) < 0.01 * Math.abs(older)) return '';
+            const pct = Math.abs(diff / older * 100).toFixed(0);
+            const up  = diff > 0;
+            const good = lowerIsBetter ? !up : up;
+            const color = good ? '#4A8B6E' : '#3A8B8B';
+            return `<span style="color:${color}">${up ? '↑' : '↓'} ${pct}%</span>`;
+        }
+        document.getElementById('spark-steps-trend').innerHTML = trendArrow(steps);
+        document.getElementById('spark-sleep-trend').innerHTML = trendArrow(sleep);
+        document.getElementById('spark-rhr-trend').innerHTML   = trendArrow(rhr, true);
+
+        const dayLabels = rows.map(r => {
+            const [y, m, d] = r.calendar_date.split('T')[0].split('-');
+            return new Date(+y, +m-1, +d).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+        });
+
+        const sparkTip = (suffix) => ({
+            mode: 'index', intersect: false, displayColors: false,
+            backgroundColor: 'white', borderColor: '#E8E4E0', borderWidth: 1,
+            titleColor: '#1A1A1A', bodyColor: '#7A7A7A', padding: 8, cornerRadius: 8,
+            callbacks: { label: ctx => ctx.raw != null ? `${ctx.raw}${suffix}` : 'No data' }
+        });
+
+        const noAxes = { x: { display: false }, y: { display: false } };
+        const baseOpts = (suffix) => ({
+            responsive: true, maintainAspectRatio: false, animation: false,
+            plugins: { legend: { display: false }, tooltip: sparkTip(suffix) },
+            scales: noAxes
+        });
+
+        if (_stepsChart) { _stepsChart.destroy(); }
+        _stepsChart = new Chart(document.getElementById('spark-steps-chart'), {
+            type: 'bar',
+            data: { labels: dayLabels, datasets: [{ data: steps, backgroundColor: '#2D5A7B', borderRadius: 2, barPercentage: 0.7 }] },
+            options: { ...baseOpts('K'), scales: { x: { display: false }, y: { display: false, beginAtZero: true } } }
+        });
+
+        const lineOpts = (color, suffix) => ({
+            ...baseOpts(suffix), spanGaps: true,
+            elements: { point: { radius: 3, hoverRadius: 5, backgroundColor: color, borderColor: color, borderWidth: 1 } }
+        });
+
+        if (_sleepChart) { _sleepChart.destroy(); }
+        _sleepChart = new Chart(document.getElementById('spark-sleep-chart'), {
+            type: 'line',
+            data: { labels: dayLabels, datasets: [{ data: sleep, borderColor: '#3A8B8B', backgroundColor: 'rgba(58,139,139,0.12)', fill: true, tension: 0.4, borderWidth: 2, spanGaps: true }] },
+            options: lineOpts('#3A8B8B', 'h')
+        });
+
+        if (_rhrChart) { _rhrChart.destroy(); }
+        _rhrChart = new Chart(document.getElementById('spark-rhr-chart'), {
+            type: 'line',
+            data: { labels: dayLabels, datasets: [{ data: rhr, borderColor: '#3A8B8B', backgroundColor: 'rgba(58,139,139,0.1)', fill: true, tension: 0.4, borderWidth: 2, spanGaps: true }] },
+            options: lineOpts('#3A8B8B', ' bpm')
+        });
+    } catch(e) { console.error('Health sparklines:', e); }
+}
+
+// ── Activity card ─────────────────────────────────────────────────────────────
+
+let _allActivities = [];
+let _activityWeekView = false;
+
+function _fmtActivityType(t) {
+    return t ? t.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Run';
+}
+
+function openActivityModal(a) {
+    const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
+    const dateStr = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'});
+    document.getElementById('activity-modal-title').textContent = _fmtActivityType(a.activity_type);
+    document.getElementById('activity-modal-date').textContent = dateStr;
+    let html = '';
+    if (a.miles)           html += `<div class="stat-row"><span class="stat-label">Miles</span><span class="stat-value">${a.miles.toFixed(1)} mi</span></div>`;
+    if (a.average_pace)    html += `<div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${a.average_pace}</span></div>`;
+    if (a.avg_hr)          html += `<div class="stat-row"><span class="stat-label">Avg HR</span><span class="stat-value">${Math.round(a.avg_hr)} bpm</span></div>`;
+    if (a.calories_burned) html += `<div class="stat-row"><span class="stat-label">Calories</span><span class="stat-value">${Math.round(a.calories_burned)}</span></div>`;
+    if (a.total_time)      html += `<div class="stat-row"><span class="stat-label">Duration</span><span class="stat-value">${a.total_time}</span></div>`;
+    if (a.splits && a.splits.length) {
+        const hasElev = a.splits.some(s => s.elevation_gain != null);
+        const splitRows = a.splits.map(s => {
+            const elevTd = hasElev ? `<td>${s.elevation_gain != null ? s.elevation_gain + 'ft' : '—'}</td>` : '';
+            return `<tr><td>${s.lap}</td><td>${s.miles ?? '—'}</td><td>${s.pace || '—'}</td><td>${s.avg_hr ?? '—'}</td>${elevTd}</tr>`;
+        }).join('');
+        html += `<div style="margin-top:14px">
+            <div class="activity-section-label" style="margin-bottom:6px">Splits</div>
+            <table class="interval-table">
+                <thead><tr><th>Lap</th><th>Miles</th><th>Pace</th><th>HR</th>${hasElev ? '<th>Gain</th>' : ''}</tr></thead>
+                <tbody>${splitRows}</tbody>
+            </table>
+        </div>`;
+    }
+    document.getElementById('activity-modal-body').innerHTML = html;
+    document.getElementById('activity-modal').classList.add('open');
+}
+
+function closeActivityModal() {
+    document.getElementById('activity-modal').classList.remove('open');
+}
+
+function _renderActivityCard() {
+    const card = document.getElementById('activity-card');
+    const toggleBtn = `<button onclick="toggleActivityView()" style="background:none;border:1px solid #E8E4E0;border-radius:8px;padding:3px 10px;font-size:11px;cursor:pointer;color:#7A7A7A;">${_activityWeekView ? 'Latest' : 'This week'}</button>`;
+    const header = `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><div class="card-title" style="margin:0">${_activityWeekView ? 'This Week\'s Activities' : 'Most Recent Activity'}</div>${toggleBtn}</div>`;
+
+    const monday = isoFromDate(getWeekMonday(0));
+    const thisWeekActivities = _allActivities.filter(a => a.calendar_date.split('T')[0] >= monday);
+
+    if (_activityWeekView && !thisWeekActivities.length) {
+        card.innerHTML = header + '<div class="placeholder-text">No activities recorded for this week yet.</div>';
+        return;
+    }
+    if (!_activityWeekView && !_allActivities.length) {
+        card.innerHTML = header + '<div class="placeholder-text">No recent activity found.</div>';
+        return;
+    }
+
+    if (_activityWeekView) {
+        const reversedWeek = thisWeekActivities.slice().reverse();
+        const rows = reversedWeek.map((a, i) => {
+            const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
+            const d = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {weekday:'short', month:'short', day:'numeric'});
+            const origIdx = _allActivities.indexOf(a);
+            return `<div class="stat-row" style="cursor:pointer;" onclick="openActivityModal(_allActivities[${origIdx}])">
+                <span class="stat-label" style="flex:1">${d} · ${_fmtActivityType(a.activity_type)}</span>
+                <span class="stat-value" style="white-space:nowrap">${a.miles ? a.miles.toFixed(1)+' mi' : '—'} · ${a.average_pace || '—'}</span>
+            </div>`;
+        }).join('');
+        card.innerHTML = header + `<div style="overflow-y:auto;max-height:160px;">${rows}</div>`;
+    } else {
+        const runningActs = _allActivities.filter(a => (a.activity_type || '').toLowerCase().includes('run'));
+        const a = runningActs.length ? runningActs[runningActs.length - 1] : _allActivities[_allActivities.length - 1];
+        const aIdx = _allActivities.indexOf(a);
+        const [ay, am, ad] = a.calendar_date.split('T')[0].split('-');
+        const date = new Date(+ay, +am-1, +ad).toLocaleDateString('en-US', {month:'long', day:'numeric', year:'numeric'});
+        card.innerHTML = header +
+            `<div class="activity-name" style="cursor:pointer" onclick="openActivityModal(_allActivities[${aIdx}])">${_fmtActivityType(a.activity_type)}</div>
+            <div class="activity-date">${date}</div>
+            <div class="stat-row"><span class="stat-label">Total Mileage</span><span class="stat-value">${a.miles ? a.miles.toFixed(1)+' mi' : '—'}</span></div>
+            <div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${a.average_pace || '—'}</span></div>
+            <div class="stat-row"><span class="stat-label">Avg HR</span><span class="stat-value">${a.avg_hr ? Math.round(a.avg_hr)+' bpm' : '—'}</span></div>
+            <div class="stat-row"><span class="stat-label">Kcals Burned</span><span class="stat-value">${a.calories_burned ? Math.round(a.calories_burned) : '—'}</span></div>`;
+    }
+}
+
+function toggleActivityView() {
+    _activityWeekView = !_activityWeekView;
+    _renderActivityCard();
+}
+
+async function loadActivity() {
+    const card = document.getElementById('activity-card');
+    try {
+        const res  = await apiFetch(`${API}/activities/recent?start_date=${localOffset(-14)}&end_date=${localToday()}`);
+        const rows = await res.json();
+        _activityLoaded = true;
+        _allActivities = rows && rows.length ? rows.slice().sort((a, b) => a.calendar_date > b.calendar_date ? 1 : -1) : [];
+        _renderActivityCard();
+    } catch(e) {
+        card.innerHTML = '<div class="card-title">Most Recent Activity</div><div class="placeholder-text">Could not load activity.</div>';
+    }
+}
+
+// ── Weather card ──────────────────────────────────────────────────────────────
+
+async function loadWeather() {
+    const txt = document.getElementById('weather-mini-text');
+    try {
+        const res   = await apiFetch(`${API}/weather?location=${encodeURIComponent(userLocation)}`);
+        const hours = await res.json();
+        const h     = hours && hours.length ? hours[0] : null;
+        if (!h || !txt) return;
+        const bad = h.feels_like > 75 || h.feels_like < 32 || h.chance_of_rain > 50;
+        const feelColor = bad ? '#3A8B8B' : '#7A7A7A';
+        txt.innerHTML = `${Math.round(h.temperature)}°F &nbsp;·&nbsp; <span style="color:${feelColor}">Feels ${Math.round(h.feels_like)}°F</span> &nbsp;·&nbsp; ${h.wind_speed} mph &nbsp;·&nbsp; ${h.chance_of_rain}% rain`;
+    } catch(e) {
+        if (txt) txt.textContent = 'Weather unavailable';
+    }
+}
+
+// ── Weekly mileage chart ──────────────────────────────────────────────────────
+
+let _mileageChart = null;
+let _healthChartLoaded = false;
+let _activityLoaded = false;
+let _mileageChartLoaded = false;
+let _metricBadgesLoaded = false;
+
+async function loadMileageChart() {
+    const canvas = document.getElementById('mileageChart');
+    if (!canvas) return;
+    try {
+        const start = isoFromDate(getWeekMonday(-7)); // 8 weeks back
+        const end   = isoFromDate(new Date());
+        const res   = await apiFetch(`${API}/activities/recent?start_date=${start}&end_date=${end}`);
+        const acts  = await res.json();
+
+        // Bucket running miles by week (Mon as start)
+        const weekMap = {};
+        (acts || []).forEach(a => {
+            if (!a.miles) return;
+            const d = new Date(a.calendar_date.split('T')[0] + 'T12:00:00');
+            const day = d.getDay();
+            d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+            const key = isoFromDate(d);
+            weekMap[key] = (weekMap[key] || 0) + a.miles;
+        });
+
+        // Build 8-week array (oldest → current)
+        const weeks = [];
+        for (let i = 7; i >= 0; i--) {
+            const mon = getWeekMonday(-i);
+            const key = isoFromDate(mon);
+            const label = mon.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+            weeks.push({ key, label, miles: +(weekMap[key] || 0).toFixed(1) });
+        }
+
+        const currentMiles = weeks[weeks.length - 1].miles;
+        const thisWeekEl = document.getElementById('mileage-this-week');
+        if (thisWeekEl && currentMiles > 0) thisWeekEl.textContent = `${currentMiles} mi this week`;
+
+        if (_mileageChart) _mileageChart.destroy();
+        _mileageChartLoaded = true;
+        _mileageChart = new Chart(canvas, {
+            type: 'line',
+            data: {
+                labels: weeks.map(w => w.label),
+                datasets: [{
+                    data: weeks.map(w => w.miles),
+                    borderColor: '#2D5A7B',
+                    borderWidth: 2,
+                    pointBackgroundColor: weeks.map((_, i) => i === 7 ? '#2D5A7B' : 'white'),
+                    pointBorderColor: '#2D5A7B',
+                    pointRadius: weeks.map((_, i) => i === 7 ? 5 : 3),
+                    pointHoverRadius: 5,
+                    tension: 0.35,
+                    fill: true,
+                    backgroundColor: (ctx) => {
+                        const gradient = ctx.chart.ctx.createLinearGradient(0, 0, 0, ctx.chart.height);
+                        gradient.addColorStop(0, 'rgba(45,90,123,0.18)');
+                        gradient.addColorStop(1, 'rgba(45,90,123,0)');
+                        return gradient;
+                    },
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        displayColors: false,
+                        backgroundColor: 'white', borderColor: '#E8E4E0', borderWidth: 1,
+                        titleColor: '#1A1A1A', bodyColor: '#1A1A1A', padding: 8, cornerRadius: 8,
+                        callbacks: {
+                            title: ctx => ctx[0].label,
+                            label: ctx => `${ctx.raw} mi`
+                        }
+                    }
+                },
+                scales: {
+                    x: { grid: { display: false }, ticks: { color: '#B0B0B0', font: { size: 9 } } },
+                    y: { grid: { color: '#F0EDE8' }, ticks: { color: '#B0B0B0', font: { size: 9 } }, beginAtZero: true }
+                }
+            }
+        });
+    } catch(e) { console.error('Mileage chart:', e); }
+}
+
+// ── Training plan ─────────────────────────────────────────────────────────────
+
+function renderPlanGrid() {
+    const grid    = document.getElementById('plan-grid');
+    const todayIdx = TODAY === 0 ? 6 : TODAY - 1;
+    grid.innerHTML = DAYS.map((d, i) =>
+        `<div class="plan-day-header${i === todayIdx ? ' today' : ''}">${d}</div>`
+    ).join('') + `<div class="plan-placeholder">No training plan yet.<br><button class="create-plan-btn" onclick="openPlanModal()">+ Create Training Plan</button></div>`;
+}
+
+// ── Garmin sync popover ───────────────────────────────────────────────────────
+
+function localToday() {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+}
+
+function localOffset(days) {
+    const d = new Date(); d.setDate(d.getDate() + days);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+async function toggleSyncPopover(e) {
+    e.stopPropagation();
+    const res = await apiFetch(`${API}/garmin/credentials/status`);
+    const { connected } = await res.json();
+    if (!connected) {
+        document.getElementById('garmin-setup-modal').classList.add('open');
+        return;
+    }
+    const pop = document.getElementById('sync-popover');
+    pop.classList.toggle('open');
+    if (pop.classList.contains('open')) {
+        document.getElementById('sync-end').value   = localToday();
+        document.getElementById('sync-start').value = localToday();
+    }
+}
+
+async function saveGarminSetup() {
+    const email    = document.getElementById('gs-email').value.trim();
+    const password = document.getElementById('gs-password').value;
+    const err      = document.getElementById('gs-error');
+    if (!email || !password) { err.textContent = 'Email and password are required.'; err.style.display = 'block'; return; }
+    err.style.display = 'none';
+    const res = await apiFetch(`${API}/garmin/credentials`, {
+        method: 'POST', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ email, password })
+    });
+    if (!res.ok) { err.textContent = 'Failed to save — try again.'; err.style.display = 'block'; return; }
+    document.getElementById('garmin-setup-modal').classList.remove('open');
+    document.getElementById('gs-email').value = '';
+    document.getElementById('gs-password').value = '';
+    showToast('Garmin account connected', '#4A8B6E');
+}
+
+async function disconnectGarmin() {
+    document.getElementById('sync-popover').classList.remove('open');
+    await apiFetch(`${API}/garmin/credentials`, { method: 'DELETE' });
+    showToast('Garmin disconnected', '#3A8B8B');
+    document.getElementById('garmin-setup-modal').classList.add('open');
+}
+
+function setDefaultDates() {
+    document.getElementById('sync-start').value = localOffset(-7);
+    document.getElementById('sync-end').value   = localToday();
+}
+
+function syncValidationError(msg) {
+    const el = document.getElementById('sync-error');
+    el.textContent = msg;
+    el.style.display = msg ? 'block' : 'none';
+}
+
+async function runSync() {
+    const start = document.getElementById('sync-start').value;
+    const end   = document.getElementById('sync-end').value;
+    const today = localToday();
+
+    if (!start || !end) { syncValidationError('Please enter both dates.'); return; }
+    if (end > today)    { syncValidationError('End date cannot be in the future.'); return; }
+    if (start > end)    { syncValidationError('Start date must be before end date.'); return; }
+    syncValidationError('');
+    document.getElementById('sync-popover').classList.remove('open');
+    const btn = document.getElementById('sync-btn');
+    btn.textContent = 'Syncing...';
+    btn.disabled = true;
+    try {
+        const res  = await apiFetch(`${API}/garmin-sync`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ start_date: start, end_date: end })
+        });
+        const data = await res.json();
+        if (data.status === 'error') {
+            const msg = (data.error || '').toLowerCase();
+            btn.textContent = 'Failed';
+            if (msg.includes('rate limit') || msg.includes('429')) {
+                showToast('Garmin is rate limiting — try again in a few minutes', '#c0392b');
+            } else if (msg.includes('credentials') || msg.includes('no garmin')) {
+                showToast('Garmin account not connected — add credentials in settings', '#c0392b');
+            } else {
+                showToast('Sync failed — check your Garmin connection', '#3A8B8B');
+            }
+            setTimeout(() => { btn.innerHTML = '↺ Garmin Sync'; btn.disabled = false; }, 2000);
+            return;
+        }
+        btn.textContent = '✓ Synced';
+        showToast('Garmin sync complete', '#4A8B6E');
+        setTimeout(() => { btn.innerHTML = '↺ Garmin Sync'; btn.disabled = false; loadActivity(); loadHealthChart(); loadMileageChart(); }, 2000);
+    } catch(e) {
+        btn.textContent = 'Failed';
+        showToast('Sync failed — check your Garmin connection', '#3A8B8B');
+        setTimeout(() => { btn.innerHTML = '↺ Garmin Sync'; btn.disabled = false; }, 2000);
+    }
+}
+
+async function runPlanSync() {
+    const btn = document.getElementById('plan-sync-btn');
+    btn.textContent = 'Syncing...';
+    btn.disabled = true;
+    try {
+        const res  = await apiFetch(`${API}/plan/sync`, { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ today: localToday() }) });
+        const data = await res.json();
+        const count = data.changes ? data.changes.length : 0;
+        showToast(count > 0 ? `Plan updated — ${count} day${count !== 1 ? 's' : ''} changed` : 'Plan already up to date', '#4A8B6E');
+        loadPlan();
+    } catch(e) {
+        showToast('Sync failed — try again', '#3A8B8B');
+    } finally {
+        btn.innerHTML = `Sync Plan`;
+        btn.disabled = false;
+    }
+}
+
+document.getElementById('sync-popover').addEventListener('click', e => e.stopPropagation());
+document.addEventListener('click', e => {
+    if (!e.target.closest('#sync-btn') && !e.target.closest('#sync-popover')) {
+        document.getElementById('sync-popover').classList.remove('open');
+    }
+});
+
+// ── Chat ──────────────────────────────────────────────────────────────────────
+
+
+function addMessage(role, text, animate = false) {
+    hideEmptyState();
+    const container = document.getElementById('chat-messages');
+    const isUser    = role === 'user';
+    const div       = document.createElement('div');
+    div.className   = `msg ${isUser ? 'user' : 'coach'}`;
+    div.innerHTML   = `
+        <div class="msg-label">${isUser ? 'You' : 'Coach'}</div>
+        <div class="msg-bubble"></div>
+        <div class="msg-time">${fmtTime()}</div>`;
+    container.appendChild(div);
+
+    const bubble = div.querySelector('.msg-bubble');
+
+    if (isUser || !animate) {
+        bubble.innerHTML = isUser ? text.replace(/</g,'&lt;') : marked.parse(text);
+    } else {
+        // typewriter — speed scales so long responses don't take forever
+        const interval = Math.max(5, Math.min(25, 1800 / text.length));
+        let i = 0;
+        const tick = setInterval(() => {
+            i += 2;
+            bubble.textContent = text.slice(0, i);
+            container.scrollTop = container.scrollHeight;
+            if (i >= text.length) {
+                clearInterval(tick);
+                bubble.innerHTML = marked.parse(text);
+                container.scrollTop = container.scrollHeight;
+            }
+        }, interval);
+    }
+
+    container.scrollTop = container.scrollHeight;
+}
+
+function showFollowUpChips(questions) {
+    const container = document.getElementById('chat-messages');
+    const wrap = document.createElement('div');
+    wrap.className = 'followup-chips';
+    questions.forEach(q => {
+        const btn = document.createElement('button');
+        btn.className = 'followup-chip';
+        btn.textContent = q;
+        btn.onclick = () => {
+            wrap.remove();
+            const input = document.getElementById('chat-input');
+            input.value = q;
+            input.focus();
+        };
+        wrap.appendChild(btn);
+    });
+    container.appendChild(wrap);
+    container.scrollTop = container.scrollHeight;
+}
+
+function setAnalyzing(on) {
+    document.getElementById('analyzing-bar').style.display = on ? 'flex' : 'none';
+    document.getElementById('stop-btn').style.display  = on ? 'flex' : 'none';
+    document.getElementById('send-btn').style.display  = on ? 'none' : 'flex';
+    document.getElementById('chat-input').disabled = on;
+    if (on) document.getElementById('analyzing-text').textContent = 'Analyzing...';
+}
+
+function cancelRequest() {
+    if (abortController) { abortController.abort(); abortController = null; }
+    setAnalyzing(false);
+    document.getElementById('chat-input').focus();
+}
+
+function createCoachMessage() {
+    hideEmptyState();
+    const container = document.getElementById('chat-messages');
+    const div = document.createElement('div');
+    div.className = 'msg coach';
+    div.innerHTML = `<div class="msg-label">Coach</div><div class="msg-bubble"></div><div class="msg-time">${fmtTime()}</div>`;
+    container.appendChild(div);
+    container.scrollTop = container.scrollHeight;
+    return div.querySelector('.msg-bubble');
+}
+
+async function clearChat() {
+    await apiFetch(`${API}/session/${SID}`, { method: 'DELETE' });
+    SID = _uuid();
+    document.getElementById('chat-messages').innerHTML = '';
+    renderEmptyState();
+}
+
+async function sendMessage() {
+    const input = document.getElementById('chat-input');
+    const text  = input.value.trim();
+    if (!text || input.disabled) return;
+    input.value = '';
+    addMessage('user', text);
+    setAnalyzing(true);
+    abortController = new AbortController();
+
+    let bubble    = null;
+    let fullText  = '';
+    let hasChunks = false;
+
+    try {
+        const res = await apiFetch(`${API}/ask`, {
+            method:'POST', headers:{'Content-Type':'application/json'},
+            body: JSON.stringify({ query: text, session_id: SID, has_plan: hasPlan, location: userLocation, today: localToday() }),
+            signal: abortController.signal
+        });
+
+        const reader  = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let renderTimer = null;
+        const scheduleRender = () => {
+            if (renderTimer) return;
+            renderTimer = setTimeout(() => {
+                renderTimer = null;
+                if (bubble && fullText) bubble.innerHTML = marked.parse(fullText.replace(/~~([^~]+)~~/g, '$1'));
+            }, 150);
+        };
+
+        while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop();
+
+            for (const line of lines) {
+                if (!line.startsWith('data: ')) continue;
+                let event;
+                try { event = JSON.parse(line.slice(6)); } catch { continue; }
+
+                if (event.type === 'status') {
+                    document.getElementById('analyzing-text').textContent = event.text;
+
+                } else if (event.type === 'chunk') {
+                    if (!hasChunks) {
+                        hasChunks = true;
+                        setAnalyzing(false);
+                        bubble = createCoachMessage();
+                    }
+                    fullText += event.text;
+                    scheduleRender();
+                    document.getElementById('chat-messages').scrollTop = 999999;
+
+                } else if (event.type === 'done') {
+                    if (renderTimer) { clearTimeout(renderTimer); renderTimer = null; }
+                    if (bubble && fullText) bubble.innerHTML = marked.parse(fullText.replace(/~~([^~]+)~~/g, '$1'));
+
+                } else if (event.type === 'ended') {
+                    setAnalyzing(false);
+                    addMessage('coach', 'Great chatting! Here are some things to explore:');
+                    if (event.follow_ups && event.follow_ups.length) showFollowUpChips(event.follow_ups);
+
+                } else if (event.type === 'plan_updated') {
+                    loadPlan();
+                } else if (event.type === 'error') {
+                    setAnalyzing(false);
+                    addMessage('coach', 'Sorry, something went wrong. Please try again.');
+                }
+            }
+        }
+    } catch(e) {
+        setAnalyzing(false);
+        if (e.name !== 'AbortError') addMessage('coach', 'Sorry, I had trouble connecting. Please check the server is running.');
+    } finally {
+        if (bubble && fullText) bubble.innerHTML = marked.parse(fullText.replace(/~~([^~]+)~~/g, '$1'));
+        setAnalyzing(false);
+        abortController = null;
+        input.focus();
+    }
+}
+
+
+// ── VO2 + Body Battery ────────────────────────────────────────────────────────
+
+async function loadMetricBadges() {
+    try {
+        const vo2Res = await apiFetch(`${API}/health/v02`);
+        const vo2    = await vo2Res.json();
+        _metricBadgesLoaded = true;
+        const vo2Num = Number(vo2);
+        const vo2El  = document.getElementById('metric-vo2-val');
+        if (vo2El && !isNaN(vo2Num) && vo2Num > 0) vo2El.textContent = Math.round(vo2Num);
+    } catch(e) { console.error('VO2:', e); }
+    try {
+        const bbRes = await apiFetch(`${API}/health/body-battery`);
+        const bb    = await bbRes.json();
+        const bbEl  = document.getElementById('metric-bb-val');
+        if (bbEl && bb && bb.body_battery != null) bbEl.textContent = Math.round(bb.body_battery);
+    } catch(e) { console.error('Body battery:', e); }
+}
+
+// ── Edit Preferences modal ────────────────────────────────────────────────────
+
+async function openEditPrefsModal() {
+    document.getElementById('ep-error').style.display = 'none';
+    try {
+        const res   = await apiFetch(`${API}/preferences`);
+        const prefs = await res.json();
+        if (prefs.days_per_week) document.getElementById('ep-days').value     = prefs.days_per_week;
+        if (prefs.avg_miles)     document.getElementById('ep-avg-miles').value = prefs.avg_miles;
+        if (prefs.max_miles)     document.getElementById('ep-max-miles').value = prefs.max_miles;
+        document.getElementById('ep-notes').value = prefs.notes || '';
+        if (prefs.preferred_days) {
+            document.querySelectorAll('#ep-pref-days .day-chip').forEach(chip => {
+                chip.classList.toggle('selected', prefs.preferred_days.includes(chip.textContent));
+            });
+        }
+    } catch(e) { /* open with empty fields if no prefs yet */ }
+    document.getElementById('edit-prefs-modal').classList.add('open');
+}
+
+function closeEditPrefsModal() {
+    document.getElementById('edit-prefs-modal').classList.remove('open');
+}
+
+async function saveEditedPrefs() {
+    const post = (url, body) => apiFetch(`${API}${url}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const err  = document.getElementById('ep-error');
+    const days     = parseInt(document.getElementById('ep-days').value);
+    const avgMiles = parseFloat(document.getElementById('ep-avg-miles').value);
+    const maxMiles = parseFloat(document.getElementById('ep-max-miles').value);
+    const prefDays = [...document.querySelectorAll('#ep-pref-days .day-chip.selected')].map(d => d.textContent);
+
+    try {
+        const calls = [];
+        if (!isNaN(days))     calls.push(post('/preferences/total-days',    {days_per_week: days}));
+        if (!isNaN(avgMiles)) calls.push(post('/preferences/avg-miles',     {avg_miles: avgMiles}));
+        if (!isNaN(maxMiles)) calls.push(post('/preferences/max-miles',     {max_miles: maxMiles}));
+        if (prefDays.length)  calls.push(post('/preferences/preferred-days', {preferred_days: prefDays}));
+        const notes = document.getElementById('ep-notes').value.trim();
+        calls.push(post('/preferences/notes', {notes: notes || null}));
+        await Promise.all(calls);
+        closeEditPrefsModal();
+        showToast('Training preferences updated', '#4A8B6E');
+    } catch(e) {
+        err.textContent = 'Something went wrong. Please try again.';
+        err.style.display = 'block';
+    }
+}
+
+document.getElementById('edit-prefs-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('edit-prefs-modal')) closeEditPrefsModal();
+});
+
+// ── Edit Race modal ───────────────────────────────────────────────────────────
+
+const DIST_TO_LABEL = {"3.107":"5K","6.214":"10K","13.1094":"Half Marathon","26.2188":"Marathon"};
+
+async function openEditRaceModal() {
+    document.getElementById('er-error').style.display = 'none';
+    try {
+        const res  = await apiFetch(`${API}/race`);
+        const race = await res.json();
+        document.getElementById('er-race-name').value  = race.race_type || '';
+        document.getElementById('er-goal-time').value  = race.goal_time || '';
+        if (race.race_date) {
+            document.getElementById('er-race-date').value = race.race_date.split('T')[0];
+        }
+        if (race.race_distance_miles) {
+            const key = Object.keys(DIST_TO_LABEL).find(k => Math.abs(parseFloat(k) - race.race_distance_miles) < 0.01);
+            if (key) {
+                document.getElementById('er-distance').value = key;
+            } else {
+                document.getElementById('er-distance').value = 'custom';
+                document.getElementById('er-custom-distance-field').style.display = 'block';
+                document.getElementById('er-custom-miles').value = race.race_distance_miles;
+            }
+        }
+    } catch(e) { /* open with empty fields if no race yet */ }
+    document.getElementById('edit-race-modal').classList.add('open');
+}
+
+function closeEditRaceModal() {
+    document.getElementById('edit-race-modal').classList.remove('open');
+}
+
+function toggleEditCustomDistance(val) {
+    document.getElementById('er-custom-distance-field').style.display = val === 'custom' ? 'block' : 'none';
+}
+
+async function saveEditedRace() {
+    const post = (url, body) => apiFetch(`${API}${url}`, {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+    const err  = document.getElementById('er-error');
+    const distVal  = document.getElementById('er-distance').value;
+    const miles    = distVal === 'custom' ? parseFloat(document.getElementById('er-custom-miles').value) : parseFloat(distVal);
+    const raceName = document.getElementById('er-race-name').value.trim();
+    const goalTime = document.getElementById('er-goal-time').value.trim();
+    const raceDate = document.getElementById('er-race-date').value;
+
+    try {
+        const calls = [];
+        if (raceName) calls.push(post('/race/description', {race_description: raceName}));
+        if (goalTime) calls.push(post('/race/time',        {goal_time: goalTime}));
+        if (raceDate) calls.push(post('/race/date',        {race_date: raceDate}));
+        if (!isNaN(miles)) calls.push(post('/race/distance', {race_distance_miles: miles}));
+        await Promise.all(calls);
+        closeEditRaceModal();
+        showToast('Race updated', '#4A8B6E');
+    } catch(e) {
+        err.textContent = 'Something went wrong. Please try again.';
+        err.style.display = 'block';
+    }
+}
+
+document.getElementById('edit-race-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('edit-race-modal')) closeEditRaceModal();
+});
+
+// ── Plan modal ────────────────────────────────────────────────────────────────
+
+async function openPlanModal() {
+    document.getElementById('plan-modal').classList.add('open');
+    goToStep1();
+
+    const DIST_OPTIONS = [3.107, 6.214, 13.1094, 26.2188];
+
+    try {
+        const [race, prefs] = await Promise.all([
+            apiFetch(`${API}/race`).then(r => r.json()),
+            apiFetch(`${API}/preferences`).then(r => r.json())
+        ]);
+
+        if (race.race_type)  document.getElementById('p-race-name').value  = race.race_type;
+        if (race.race_date)  document.getElementById('p-race-date').value  = race.race_date.split('T')[0];
+        if (race.goal_time)  document.getElementById('p-goal-time').value  = race.goal_time;
+
+        if (race.race_distance_miles) {
+            const dist = parseFloat(race.race_distance_miles);
+            const match = DIST_OPTIONS.find(o => Math.abs(o - dist) < 0.01);
+            if (match) {
+                document.getElementById('p-distance').value = match;
+            } else {
+                document.getElementById('p-distance').value = 'custom';
+                document.getElementById('p-custom-miles').value = dist;
+                document.getElementById('custom-distance-field').style.display = 'block';
+            }
+        }
+
+        if (prefs.days_per_week) document.getElementById('p-days').value      = prefs.days_per_week;
+        if (prefs.avg_miles)     document.getElementById('p-avg-miles').value  = prefs.avg_miles;
+        if (prefs.max_miles)     document.getElementById('p-max-miles').value  = prefs.max_miles;
+        if (prefs.preferred_days) {
+            document.querySelectorAll('#p-pref-days .day-chip').forEach(chip =>
+                chip.classList.toggle('selected', prefs.preferred_days.includes(chip.textContent))
+            );
+        }
+    } catch(e) { /* silently skip prefill if fetch fails */ }
+}
+
+function closePlanModal() {
+    document.getElementById('plan-modal').classList.remove('open');
+}
+
+function goToStep1() {
+    document.getElementById('plan-step-1').style.display = 'block';
+    document.getElementById('plan-step-2').style.display = 'none';
+    document.getElementById('modal-title').textContent = 'Set Up Your Race';
+    document.getElementById('modal-step-indicator').textContent = 'Step 1 of 2';
+}
+
+function goToStep2() {
+    const date = document.getElementById('p-race-date').value;
+    const dist = document.getElementById('p-distance').value;
+    const err  = document.getElementById('step1-error');
+    if (!date) { err.textContent = 'Please enter a race date.'; err.style.display = 'block'; return; }
+    if (!dist) { err.textContent = 'Please select a distance.'; err.style.display = 'block'; return; }
+    if (dist === 'custom' && !document.getElementById('p-custom-miles').value) {
+        err.textContent = 'Please enter the distance in miles.'; err.style.display = 'block'; return;
+    }
+    err.style.display = 'none';
+    document.getElementById('plan-step-1').style.display = 'none';
+    document.getElementById('plan-step-2').style.display = 'block';
+    document.getElementById('modal-title').textContent = 'Training Preferences';
+    document.getElementById('modal-step-indicator').textContent = 'Step 2 of 2';
+}
+
+function toggleCustomDistance(val) {
+    document.getElementById('custom-distance-field').style.display = val === 'custom' ? 'block' : 'none';
+}
+
+function toggleDay(el) {
+    el.classList.toggle('selected');
+}
+
+async function submitPlan() {
+    const days = document.getElementById('p-days').value;
+    const err  = document.getElementById('step2-error');
+    if (!days) { err.textContent = 'Please enter days per week.'; err.style.display = 'block'; return; }
+    err.style.display = 'none';
+
+    const distVal  = document.getElementById('p-distance').value;
+    const miles    = distVal === 'custom' ? parseFloat(document.getElementById('p-custom-miles').value) : parseFloat(distVal);
+    const prefDays = [...document.querySelectorAll('#p-pref-days .day-chip.selected')].map(d => d.textContent);
+    const btn      = document.querySelector('#plan-step-2 .modal-btn-primary');
+
+    btn.disabled = true;
+    btn.textContent = 'Saving...';
+
+    try {
+        const post = (url, body) => apiFetch(`${API}${url}`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+        const goalTime = document.getElementById('p-goal-time').value.trim();
+        const raceName = document.getElementById('p-race-name').value.trim();
+        const avgMiles = parseFloat(document.getElementById('p-avg-miles').value);
+        const maxMiles = parseFloat(document.getElementById('p-max-miles').value);
+
+        const calls = [
+            post('/race/date',     {race_date: document.getElementById('p-race-date').value}),
+            post('/race/distance', {race_distance_miles: miles}),
+            post('/preferences/total-days', {days_per_week: parseInt(days)}),
+        ];
+        if (raceName)         calls.push(post('/race/description',        {race_description: raceName}));
+        if (goalTime)         calls.push(post('/race/time',               {goal_time: goalTime}));
+        if (!isNaN(avgMiles)) calls.push(post('/preferences/avg-miles',  {avg_miles: avgMiles}));
+        if (!isNaN(maxMiles)) calls.push(post('/preferences/max-miles',  {max_miles: maxMiles}));
+        if (prefDays.length)  calls.push(post('/preferences/preferred-days', {preferred_days: prefDays}));
+
+        await Promise.all(calls);
+
+        closePlanModal();
+        showPlanGenerating();
+
+        const planRes = await apiFetch(`${API}/plan/create`, { method: 'POST' });
+        hidePlanGenerating();
+
+        const planData = await planRes.json();
+        if (!planRes.ok || planData.status !== 'success') throw new Error(planData.detail || planData.status);
+        showToast('Training plan created!', '#4A8B6E');
+        _planWeekOffset = 0;
+        loadPlan();
+    } catch(e) {
+        hidePlanGenerating();
+        showToast('Failed to create plan. Please try again.', '#3A8B8B');
+        btn.disabled = false;
+        btn.textContent = 'Create Plan';
+    }
+}
+
+// ── Plan display ──────────────────────────────────────────────────────────────
+
+let _progressInterval = null;
+
+function showPlanGenerating() {
+    const grid = document.getElementById('plan-grid');
+    grid.innerHTML = `<div class="plan-generating" style="grid-column:span 7">
+        <div class="plan-generating-label">Building your training plan...</div>
+        <div class="plan-progress-track"><div class="plan-progress-fill" id="plan-progress-fill"></div></div>
+        <div class="plan-generating-sub">Analyzing your race goal, fitness data, and course details</div>
+    </div>`;
+    // animate progress bar slowly up to ~90% over 3 minutes, never reaching 100 until done
+    let pct = 0;
+    _progressInterval = setInterval(() => {
+        pct = Math.min(pct + (90 - pct) * 0.015, 90);
+        const el = document.getElementById('plan-progress-fill');
+        if (el) el.style.width = pct + '%';
+    }, 800);
+}
+
+function hidePlanGenerating() {
+    clearInterval(_progressInterval);
+    _progressInterval = null;
+    const el = document.getElementById('plan-progress-fill');
+    if (el) el.style.width = '100%';
+}
+
+let _planWeekOffset = 0;
+let _planDays = {};
+let _weekActivities = {};
+let _effectiveMiles = {};
+let _nonRunCompleted = new Set();
+const RUNNING_TYPES = new Set(['EASY', 'AEROBIC', 'LONG', 'TEMPO', 'INTERVAL']);
+const DOW_ORDER = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
+
+function isStrengthActivity(a) {
+    const t = (a.activity_type || '').toLowerCase();
+    return t.includes('strength') || t.includes('weight') || t.includes('resistance') || t.includes('gym') || t === 'fitness_equipment';
+}
+
+function isCrossActivity(a) {
+    const t = (a.activity_type || '').toLowerCase();
+    return t.includes('cycl') || t.includes('swim') || t.includes('elliptical') || t.includes('yoga') ||
+           t.includes('pilates') || t.includes('row') || t.includes('walk') || t.includes('hike') ||
+           t === 'virtual_ride' || t === 'ride';
+}
+
+function getWeekMonday(offsetWeeks = 0) {
+    const d = new Date();
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff + offsetWeeks * 7);
+    d.setHours(0, 0, 0, 0);
+    return d;
+}
+
+function isoFromDate(d) {
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+async function loadPlan() {
+    const grid   = document.getElementById('plan-grid');
+    const monday = getWeekMonday(_planWeekOffset);
+    const sunday = new Date(monday); sunday.setDate(sunday.getDate() + 6);
+
+    const fmt = d => d.toLocaleDateString('en-US', {month:'short', day:'numeric'});
+    document.getElementById('plan-week-label').textContent = `${fmt(monday)} – ${fmt(sunday)}`;
+
+    const todayDow     = (() => { const t = new Date().getDay(); return t === 0 ? 6 : t - 1; })();
+    const isCurrentWeek = _planWeekOffset === 0;
+
+    const headerHtml = DOW_ORDER.map((d, i) =>
+        `<div class="plan-day-header${isCurrentWeek && i === todayDow ? ' today' : ''}">${d[0]}</div>`
+    ).join('');
+
+    grid.innerHTML = headerHtml + `<div class="plan-placeholder">Loading...</div>`;
+
+    try {
+        const [daysRes, actsRes] = await Promise.all([
+            apiFetch(`${API}/plan/days?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`),
+            apiFetch(`${API}/activities/recent?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`)
+        ]);
+        const days = await daysRes.json();
+        const acts = await actsRes.json().catch(() => []);
+        _weekActivities = {};
+        (acts || []).forEach(a => {
+            const date = a.calendar_date.split('T')[0];
+            if (!_weekActivities[date]) _weekActivities[date] = [];
+            _weekActivities[date].push(a);
+        });
+
+        // Compute effective miles per running plan day (own miles + adjacent REST/CROSS/STRENGTH miles)
+        _effectiveMiles = {};
+        days.forEach(d => {
+            if (!RUNNING_TYPES.has(d.workout_type)) return;
+            let miles = (_weekActivities[d.plan_date] || []).reduce((s, a) => s + (a.miles || 0), 0);
+            for (const offset of [-1, 1]) {
+                const adj = new Date(d.plan_date + 'T12:00:00'); adj.setDate(adj.getDate() + offset);
+                const adjIso = isoFromDate(adj);
+                const adjPlan = days.find(p => p.plan_date === adjIso);
+                if (adjPlan && !RUNNING_TYPES.has(adjPlan.workout_type)) {
+                    miles += (_weekActivities[adjIso] || []).filter(a => !isStrengthActivity(a)).reduce((s, a) => s + (a.miles || 0), 0);
+                }
+            }
+            _effectiveMiles[d.plan_date] = miles;
+        });
+
+        // Compute completion for STRENGTH + CROSS plan days — fulfilled by either strength or cross activities
+        _nonRunCompleted = new Set();
+        const nonRunPlanDays = days.filter(d => d.workout_type === 'STRENGTH' || d.workout_type === 'CROSS')
+            .sort((a, b) => a.plan_date.localeCompare(b.plan_date));
+        const nonRunActDates = Object.entries(_weekActivities)
+            .filter(([, acts]) => acts.some(a => isStrengthActivity(a) || isCrossActivity(a)))
+            .map(([date]) => date);
+
+        const claimedActDates = new Set();
+        // Pass 1: exact date matches
+        nonRunPlanDays.forEach(d => {
+            if (nonRunActDates.includes(d.plan_date)) {
+                _nonRunCompleted.add(d.plan_date);
+                claimedActDates.add(d.plan_date);
+            }
+        });
+        // Pass 2: float remaining activities to first unclaimed STRENGTH/CROSS plan day
+        const remainingActs = nonRunActDates.filter(d => !claimedActDates.has(d));
+        const unclaimedPlanDays = nonRunPlanDays.filter(d => !_nonRunCompleted.has(d.plan_date));
+        remainingActs.forEach(() => {
+            if (unclaimedPlanDays.length) _nonRunCompleted.add(unclaimedPlanDays.shift().plan_date);
+        });
+
+        if (!days || !days.length) {
+            if (_planWeekOffset === 0) {
+                hasPlan = false;
+                document.getElementById('plan-sync-btn').style.display = 'none';
+                grid.innerHTML = headerHtml + `<div class="plan-placeholder">No training plan yet.<br><button class="create-plan-btn" onclick="openPlanModal()">+ Create Training Plan</button></div>`;
+            } else {
+                grid.innerHTML = headerHtml + `<div class="plan-placeholder">No workouts scheduled for this week.</div>`;
+            }
+            return;
+        }
+        if (_planWeekOffset === 0) {
+            hasPlan = true;
+            document.getElementById('plan-sync-btn').style.display = '';
+        }
+
+        _planDays = {};
+        const dayMap = {};
+        days.forEach(d => {
+            _planDays[d.id] = d;
+            const dow = d.day_of_week || DOW_ORDER[new Date(d.plan_date + 'T00:00:00').getDay() === 0 ? 6 : new Date(d.plan_date + 'T00:00:00').getDay() - 1];
+            dayMap[dow] = d;
+        });
+
+
+        const cellsHtml = DOW_ORDER.map((dow, i) => {
+            const day    = dayMap[dow];
+            const today  = isCurrentWeek && i === todayDow;
+            if (!day) return `<div class="plan-day-cell${today ? ' today' : ''}"></div>`;
+            const type    = day.workout_type;
+            const dayActs = _weekActivities[day.plan_date] || [];
+            let miles = day.target_miles ? `${day.target_miles.toFixed(1)} mi` : '';
+            let pace  = day.target_pace  || '';
+            if (type === 'CROSS' && (!miles || !pace)) {
+                const runAct = dayActs.find(a => (a.activity_type || '').toLowerCase().includes('run'));
+                if (runAct) {
+                    if (!miles && runAct.miles)         miles = `${runAct.miles.toFixed(1)} mi`;
+                    if (!pace  && runAct.average_pace)  pace  = runAct.average_pace;
+                }
+            }
+            const isRunning  = RUNNING_TYPES.has(type);
+            const effMiles   = _effectiveMiles[day.plan_date] || 0;
+            const completed  = (isRunning && effMiles > 0 && (!day.target_miles || effMiles >= day.target_miles * 0.95))
+                            || ((type === 'STRENGTH' || type === 'CROSS') && _nonRunCompleted.has(day.plan_date));
+            const isRest     = type === 'REST' || (type === 'CROSS' && !completed);
+            const stateClass = completed ? ' completed' : isRest ? ' rest-day' : '';
+            return `<div class="plan-day-cell${today ? ' today' : ''}${stateClass}" onclick="openDayModal('${day.id}')">
+                ${completed ? '<span class="plan-check">✓</span>' : ''}
+                <div class="workout-badge badge-${type}">${type}</div>
+                ${miles ? `<div class="plan-day-miles">${miles}</div>` : ''}
+                ${pace  ? `<div class="plan-day-pace">${pace}</div>`  : ''}
+                ${dayActs.length ? `<button class="activity-logged-btn" onclick="event.stopPropagation();openDayModal('${day.id}')">View activity</button>` : ''}
+            </div>`;
+        }).join('');
+
+        const totalMiles = days.reduce((sum, d) => sum + (d.target_miles || 0), 0);
+        if (totalMiles > 0) document.getElementById('plan-week-label').textContent += ` (${totalMiles.toFixed(1)} mi)`;
+        grid.innerHTML = headerHtml + cellsHtml;
+        document.getElementById('delete-plan-btn').style.display = 'block';
+        document.getElementById('month-view-btn').style.display = 'block';
+    } catch(e) {
+        grid.innerHTML = headerHtml + `<div class="plan-placeholder">Could not load plan.</div>`;
+    }
+}
+
+function shiftWeek(dir) {
+    _planWeekOffset += dir;
+    document.getElementById('jump-today-btn').style.display = _planWeekOffset !== 0 ? 'inline-block' : 'none';
+    loadPlan();
+}
+
+function jumpToToday() {
+    _planWeekOffset = 0;
+    document.getElementById('jump-today-btn').style.display = 'none';
+    loadPlan();
+}
+
+let _monthOffset = 0;
+
+function openMonthModal() {
+    _monthOffset = 0;
+    document.getElementById('month-modal').style.display = 'flex';
+    loadMonthView();
+}
+
+function closeMonthModal() {
+    document.getElementById('month-modal').style.display = 'none';
+}
+
+function shiftMonth(dir) {
+    _monthOffset += dir;
+    loadMonthView();
+}
+
+async function loadMonthView() {
+    const grid = document.getElementById('month-grid');
+    const today = new Date();
+    const target = new Date(today.getFullYear(), today.getMonth() + _monthOffset, 1);
+    const year = target.getFullYear();
+    const month = target.getMonth();
+
+    document.getElementById('month-modal-label').textContent =
+        target.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+
+    const firstDay = new Date(year, month, 1);
+    const lastDay  = new Date(year, month + 1, 0);
+    const startDow = (firstDay.getDay() + 6) % 7; // 0=Mon
+    const totalDays = lastDay.getDate();
+
+    const start = isoFromDate(firstDay);
+    const end   = isoFromDate(lastDay);
+
+    grid.innerHTML = ['M','T','W','T','F','S','S']
+        .map(d => `<div class="month-day-header">${d}</div>`).join('');
+
+    // empty leading cells
+    for (let i = 0; i < startDow; i++) {
+        grid.innerHTML += `<div class="month-cell empty"></div>`;
+    }
+
+    grid.innerHTML += `<div class="month-cell empty" style="grid-column:1/-1;text-align:center;padding:8px;color:#bbb;font-size:12px;">Loading...</div>`;
+
+    try {
+        const res  = await apiFetch(`${API}/plan/days?start_date=${start}&end_date=${end}`);
+        const days = await res.json();
+
+        const dayMap = {};
+        (days || []).forEach(d => {
+            dayMap[d.plan_date?.slice(0,10) || d.plan_date] = d;
+            _planDays[d.id] = d;
+        });
+
+        // re-render without loading placeholder
+        grid.innerHTML = ['M','T','W','T','F','S','S']
+            .map(d => `<div class="month-day-header">${d}</div>`).join('');
+        for (let i = 0; i < startDow; i++) {
+            grid.innerHTML += `<div class="month-cell empty"></div>`;
+        }
+
+        const todayIso = isoFromDate(today);
+        for (let day = 1; day <= totalDays; day++) {
+            const iso  = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+            const data = dayMap[iso];
+            const isToday = iso === todayIso;
+            if (data) {
+                const type  = data.workout_type;
+                const miles = data.target_miles ? `${data.target_miles.toFixed(1)} mi` : '';
+                grid.innerHTML += `<div class="month-cell${isToday ? ' today' : ''}" onclick="openDayModal('${data.id}', true)">
+                    <div class="month-cell-date">${day}</div>
+                    <div class="workout-badge badge-${type}" style="font-size:9px;padding:2px 5px;">${type}</div>
+                    ${miles ? `<div style="font-size:10px;color:#888;margin-top:2px;">${miles}</div>` : ''}
+                </div>`;
+            } else {
+                grid.innerHTML += `<div class="month-cell empty${isToday ? ' today' : ''}"><div class="month-cell-date">${day}</div></div>`;
+            }
+        }
+    } catch(e) {
+        grid.innerHTML += `<div style="grid-column:1/-1;text-align:center;color:#999;padding:16px;font-size:13px;">Could not load month.</div>`;
+    }
+}
+
+function confirmDeletePlan() {
+    document.getElementById('delete-plan-modal').style.display = 'flex';
+}
+
+function closeDeleteModal() {
+    document.getElementById('delete-plan-modal').style.display = 'none';
+}
+
+async function deletePlan() {
+    closeDeleteModal();
+    await apiFetch(`${API}/plan/delete`, { method: 'DELETE' });
+    document.getElementById('delete-plan-btn').style.display = 'none';
+    document.getElementById('month-view-btn').style.display = 'none';
+    _planWeekOffset = 0;
+    document.getElementById('jump-today-btn').style.display = 'none';
+    loadPlan();
+}
+
+let _dayModalFromMonth = false;
+let _currentDayId = null;
+
+async function openDayModal(dayId, fromMonth = false) {
+    const day = _planDays[dayId];
+    if (!day) return;
+
+    _currentDayId = dayId;
+    _dayModalFromMonth = fromMonth;
+    document.getElementById('day-modal-back').style.display = fromMonth ? 'block' : 'none';
+    closeMonthModal();
+    const modal  = document.getElementById('day-modal');
+    const body   = document.getElementById('day-modal-body');
+    const [y, m, d] = day.plan_date.split('-');
+    const dateStr = new Date(+y, +m-1, +d).toLocaleDateString('en-US', {weekday:'long', month:'long', day:'numeric'});
+
+    document.getElementById('day-modal-title').innerHTML =
+        `<span class="workout-badge badge-${day.workout_type}" style="font-size:13px;padding:4px 10px">${day.workout_type}</span>`;
+    document.getElementById('day-modal-date').textContent = dateStr;
+
+    let html = '';
+    if (day.target_miles) html += `<div class="stat-row"><span class="stat-label">Target Miles</span><span class="stat-value">${day.target_miles.toFixed(1)} mi</span></div>`;
+    if (day.target_pace)  html += `<div class="stat-row"><span class="stat-label">Target Pace</span><span class="stat-value">${day.target_pace}</span></div>`;
+    if (day.notes)        html += `<div style="font-size:13px;color:#7A7A7A;margin-top:12px;line-height:1.5;white-space:pre-wrap">${day.notes}</div>`;
+    if (!html)            html  = `<div class="placeholder-text" style="padding:12px 0">Rest day.</div>`;
+
+    const dayActs = _weekActivities[day.plan_date] || [];
+    if (dayActs.length) {
+        html += `<hr class="activity-divider"><div class="activity-section-label">Logged Activity</div>`;
+        dayActs.forEach((act, idx) => {
+            if (idx > 0) html += `<div style="border-top:1px solid #F0EDE8;margin:10px 0"></div>`;
+            html += `<div style="cursor:pointer" onclick="openActivityModal(_weekActivities['${day.plan_date}'][${idx}])">
+                <div class="stat-row"><span class="stat-label">Type</span><span class="stat-value">${_fmtActivityType(act.activity_type)}</span></div>
+                ${act.miles ? `<div class="stat-row"><span class="stat-label">Miles</span><span class="stat-value">${act.miles.toFixed(1)} mi</span></div>` : ''}
+                ${act.average_pace ? `<div class="stat-row"><span class="stat-label">Avg Pace</span><span class="stat-value">${act.average_pace}</span></div>` : ''}
+                ${act.avg_hr ? `<div class="stat-row"><span class="stat-label">Avg HR</span><span class="stat-value">${Math.round(act.avg_hr)} bpm</span></div>` : ''}
+                ${act.calories_burned ? `<div class="stat-row"><span class="stat-label">Calories</span><span class="stat-value">${Math.round(act.calories_burned)}</span></div>` : ''}
+                <div style="font-size:10px;color:#bbb;margin-top:4px">tap for splits</div>
+                </div>`;
+        });
+    }
+
+    body.innerHTML = html;
+    document.getElementById('day-modal-edit').style.display = 'none';
+    document.getElementById('day-modal-body').style.display = 'block';
+    document.getElementById('day-modal-edit-btn').style.display = 'inline';
+    modal.classList.add('open');
+
+    if (day.workout_type === 'INTERVAL') {
+        body.innerHTML += `<div id="intervals-loading" style="font-size:12px;color:#aaa;margin-top:16px">Loading intervals...</div>`;
+        try {
+            const res       = await apiFetch(`${API}/plan/intervals/${day.id}`);
+            const intervals = await res.json();
+            document.getElementById('intervals-loading')?.remove();
+            if (intervals && intervals.length) {
+                const rows = intervals.map(iv => `
+                    <tr>
+                        <td>${iv.interval_num}</td>
+                        <td><span style="font-size:10px;font-weight:600;background:#f5f0eb;color:#555;padding:2px 6px;border-radius:8px">${iv.interval_type}</span></td>
+                        <td>${iv.distance || iv.duration || '—'}</td>
+                        <td>${iv.target_pace || '—'}</td>
+                        <td>${iv.rest_duration || '—'}</td>
+                    </tr>`).join('');
+                body.innerHTML += `
+                    <table class="interval-table">
+                        <thead><tr><th>#</th><th>Type</th><th>Dist / Duration</th><th>Pace</th><th>Recovery</th></tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>`;
+            }
+        } catch(e) {
+            document.getElementById('intervals-loading')?.remove();
+            body.innerHTML += `<div style="font-size:12px;color:#aaa;margin-top:12px">Could not load intervals.</div>`;
+        }
+    }
+}
+
+function closeDayModal() {
+    document.getElementById('day-modal').classList.remove('open');
+    _dayModalFromMonth = false;
+    _currentDayId = null;
+}
+
+function enterDayEditMode() {
+    const day = _planDays[_currentDayId];
+    if (!day) return;
+    document.getElementById('edit-workout-type').value = day.workout_type || 'REST';
+    document.getElementById('edit-target-miles').value = day.target_miles ?? '';
+    document.getElementById('edit-target-pace').value  = day.target_pace  || '';
+    document.getElementById('edit-notes').value        = day.notes        || '';
+    document.getElementById('day-edit-error').style.display = 'none';
+    document.getElementById('day-modal-body').style.display = 'none';
+    document.getElementById('day-modal-edit').style.display = 'block';
+    document.getElementById('day-modal-edit-btn').style.display = 'none';
+}
+
+function exitDayEditMode() {
+    document.getElementById('day-modal-edit').style.display = 'none';
+    document.getElementById('day-modal-body').style.display = 'block';
+    document.getElementById('day-modal-edit-btn').style.display = 'inline';
+}
+
+async function saveDayEdit() {
+    if (!_currentDayId) return;
+    const body = {
+        workout_type: document.getElementById('edit-workout-type').value || null,
+        target_miles: parseFloat(document.getElementById('edit-target-miles').value) || null,
+        target_pace:  document.getElementById('edit-target-pace').value.trim() || null,
+        notes:        document.getElementById('edit-notes').value.trim() || null,
+    };
+    try {
+        const res = await apiFetch(`${API}/plan/day/${_currentDayId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+        });
+        if (!res.ok) throw new Error('Save failed');
+        // Update local cache and re-render
+        Object.assign(_planDays[_currentDayId], body);
+        closeDayModal();
+        loadPlan();
+    } catch(e) {
+        const err = document.getElementById('day-edit-error');
+        err.textContent = 'Failed to save. Please try again.';
+        err.style.display = 'block';
+    }
+}
+
+async function clearDayEdit() {
+    if (!_currentDayId) return;
+    if (!confirm('Reset this day to Rest?')) return;
+    try {
+        const res = await apiFetch(`${API}/plan/day/${_currentDayId}`, { method: 'DELETE' });
+        if (!res.ok) throw new Error();
+        Object.assign(_planDays[_currentDayId], { workout_type: 'REST', target_miles: null, target_pace: null, notes: null });
+        closeDayModal();
+        loadPlan();
+    } catch(e) {
+        const err = document.getElementById('day-edit-error');
+        err.textContent = 'Failed to clear day. Please try again.';
+        err.style.display = 'block';
+    }
+}
+
+function backToMonth() {
+    document.getElementById('day-modal').classList.remove('open');
+    _dayModalFromMonth = false;
+    document.getElementById('month-modal').style.display = 'flex';
+}
+
+document.getElementById('day-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('day-modal')) closeDayModal();
+});
+document.getElementById('activity-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('activity-modal')) closeActivityModal();
+});
+
+document.getElementById('plan-modal').addEventListener('click', e => {
+    if (e.target === document.getElementById('plan-modal')) closePlanModal();
+});
+
+// ── Location input ────────────────────────────────────────────────────────────
+document.getElementById('location-input').addEventListener('change', e => {
+    const val = e.target.value.trim();
+    if (val) { userLocation = val; loadWeather(); }
+});
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+renderEmptyState();
+loadHealthChart();
+loadMetricBadges();
+loadActivity();
+loadWeather();
+loadMileageChart();
+loadPlan();
+
+// Retry any loads that failed silently on first attempt (e.g. concurrent startup requests)
+setTimeout(() => {
+    if (!_healthChartLoaded) loadHealthChart();
+    if (!_metricBadgesLoaded) loadMetricBadges();
+    if (!_activityLoaded) loadActivity();
+    if (!_mileageChartLoaded) loadMileageChart();
+}, 3000);
+</script>
+<div style="text-align:center;padding:16px 0 24px;"><button onclick="logout()" style="background:none;border:none;color:#aaa;font-size:12px;cursor:pointer;text-decoration:underline;">Sign out</button></div>
+</body>
+</html>
