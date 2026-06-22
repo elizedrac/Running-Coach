@@ -12,6 +12,7 @@ from garminconnect import Garmin
 from db.activity_history import insert_activities
 from db.garmin import get_garmin_credentials, save_garmin_token
 from db.health_history import insert_health_history
+from db.user_info import set_last_synced
 
 # Load environment variables from .env file
 load_dotenv()
@@ -37,6 +38,8 @@ def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
     else:
         if "--debug" in sys.argv:
             print("No Garmin health stats to insert.")
+
+    set_last_synced(user_id)
 
     return {
         "status": "success",

@@ -17,7 +17,6 @@ def planner(user_query: str, min_date: str = "2020-01-01", local_today: str = No
     try:
         plan = PlannerOutput.model_validate_json(response)
         return plan
-    except Exception:
-        if "--debug" in sys.argv:
-            print("Raw response was:", response)
-        raise
+    except Exception as e:
+        print(f"[planner] failed to parse planner output: {e}\nRaw response was: {response}", file=sys.stderr)
+        return PlannerOutput(reasoning=f"planner output failed validation: {e}", path="no_tools", tools=[])

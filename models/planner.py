@@ -1,6 +1,6 @@
 # Pydantic ToolPlan model for validating LLM JSON outputs as well as storing data classes.
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Literal, Optional
 
 from pydantic import BaseModel
 
@@ -28,6 +28,29 @@ class CourseDetailsPlan(BaseModel):
     details: str
 
 
+class RaceRegistrationInfo(BaseModel):
+    registration_timeline: Optional[str] = None
+    qualifying_times: Optional[str] = None
+    registration_methods: Optional[str] = None
+    registration_costs: Optional[str] = None
+    corral_details: Optional[str] = None
+    additional_details: Optional[str] = None
+
+
+class RaceDayInfo(BaseModel):
+    start_time: Optional[str] = None
+    start_location: Optional[str] = None
+    corral_details: Optional[str] = None
+    additional_details: Optional[str] = None
+
+
+class RaceInfoPlan(BaseModel):
+    info_type: Literal["registration", "race_day"]
+    info: RaceRegistrationInfo | RaceDayInfo
+    race: str
+    location: str
+
+
 class EndBehaviorClassification(BaseModel):
     end_conversation: bool
 
@@ -50,6 +73,12 @@ class RaceRequest(BaseModel):
     goal_time: str = None
     race_distance_miles: float = None
     race_date: str = None
+
+
+class UserInfoRequest(BaseModel):
+    name: str = None
+    theme: str = None
+    location: str = None
 
 
 class PreferencesRequest(BaseModel):

@@ -7,16 +7,20 @@
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@700;800;900&family=Hanken+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Hanken Grotesk',sans-serif;background:#f2f0ea;min-height:100vh;display:flex;align-items:center;justify-content:center}
-.card{background:#ffffff;border-radius:16px;padding:40px;width:100%;max-width:360px;border:1px solid #ebe6dc;box-shadow:0 4px 24px rgba(0,0,0,0.06)}
-.logo{font-family:'Archivo',sans-serif;font-weight:800;font-size:22px;color:#23283a;margin-bottom:6px;letter-spacing:-0.3px}
-.subtitle{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:#a6abb8;letter-spacing:.1em;margin-bottom:32px}
-label{display:block;font-size:12px;font-weight:500;color:#8c93a1;margin-bottom:5px}
-input{width:100%;padding:10px 14px;border:1px solid #ebe6dc;border-radius:8px;font-size:14px;color:#23283a;background:#faf8f3;margin-bottom:16px;outline:none;transition:border-color .15s;font-family:'Hanken Grotesk',sans-serif}
-input:focus{border-color:#5f9c98;background:#fff}
-button{width:100%;padding:11px;background:#5f9c98;color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s;font-family:'Hanken Grotesk',sans-serif}
-button:hover{background:#437a77}
-button:disabled{background:#a6abb8;cursor:not-allowed}
+:root{--bg:#f2f0ea;--card:#ffffff;--border:#ebe6dc;--ink:#23283a;--muted:#8c93a1;--faint:#a6abb8;--field-bg:#faf8f3;--accent:#5f9c98;--accent-dark:#437a77}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#060c18;--card:#0c1528;--border:#1b2f50;--ink:#d4e4f7;--muted:#3f6080;--faint:#243d58;--field-bg:#0f1e38;--accent:#4d9ef7;--accent-dark:#2563eb}
+}
+body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{background:var(--card);border-radius:16px;padding:40px;width:100%;max-width:360px;border:1px solid var(--border);box-shadow:0 4px 24px rgba(0,0,0,0.06)}
+.logo{font-family:'Archivo',sans-serif;font-weight:800;font-size:22px;color:var(--ink);margin-bottom:6px;letter-spacing:-0.3px}
+.subtitle{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:700;color:var(--faint);letter-spacing:.1em;margin-bottom:32px}
+label{display:block;font-size:12px;font-weight:500;color:var(--muted);margin-bottom:5px}
+input{width:100%;padding:10px 14px;border:1px solid var(--border);border-radius:8px;font-size:14px;color:var(--ink);background:var(--field-bg);margin-bottom:16px;outline:none;transition:border-color .15s;font-family:'Hanken Grotesk',sans-serif}
+input:focus{border-color:var(--accent);background:var(--card)}
+button{width:100%;padding:11px;background:var(--accent);color:white;border:none;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;transition:background .15s;font-family:'Hanken Grotesk',sans-serif}
+button:hover{background:var(--accent-dark)}
+button:disabled{background:var(--faint);cursor:not-allowed}
 .error{font-size:12px;color:#8b4a42;margin-top:12px;display:none}
 </style>
 </head>
@@ -34,7 +38,7 @@ button:disabled{background:#a6abb8;cursor:not-allowed}
   </form>
 </div>
 <script>
-  if (localStorage.getItem('rc_token')) window.location.href = '/';
+  if (sessionStorage.getItem('rc_token')) window.location.href = '/';
   async function handleLogin(e) {
     e.preventDefault();
     const btn = document.getElementById('submit-btn'), err = document.getElementById('error-msg');
@@ -43,7 +47,7 @@ button:disabled{background:#a6abb8;cursor:not-allowed}
       const res = await fetch('/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value }) });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      localStorage.setItem('rc_token', data.access_token);
+      sessionStorage.setItem('rc_token', data.access_token);
       window.location.href = '/';
     } catch { err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Sign in'; }
   }

@@ -4,7 +4,7 @@ from pathlib import Path
 from db.plan import get_current_plan
 from models.planner import PlannerOutput
 from services.llm import stream_llm
-from services.prompts import BASE_COACH, HEALTH_METRICS_KNOWLEDGE, TOOL_SNIPPETS
+from services.prompts import BASE_COACH, HEALTH_METRICS_KNOWLEDGE, TOOL_SNIPPETS, build_query_data_extra
 
 RACE_PREP_KNOWLEDGE = (Path(__file__).parent.parent / "knowledge" / "race_prep.md").read_text()
 
@@ -29,6 +29,10 @@ def final_output(
         for tool in tools:
             snippet = TOOL_SNIPPETS.get(tool.name, "").replace("{min_date}", min_date)
             result = tool_results.get(tool.name, "")
+            if tool.name == "query_data":
+                extra = build_query_data_extra(result)
+                if extra:
+                    snippet += "\n\n" + extra
             if snippet or result:
                 user_prompt += f"\n\n[{tool.name}]"
                 if snippet:

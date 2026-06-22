@@ -69,14 +69,15 @@ runcoach/
 ├── DESIGN.md
 │
 ├── static/
-│   ├── index.html                 # Single-file frontend (served by FastAPI via StaticFiles); checks localStorage for JWT on load, redirects to login if missing
-│   └── login.html                 # Login page — POST /auth/login, stores JWT in localStorage, redirects to /
+│   ├── index.html                 # Single-file frontend (served by FastAPI via StaticFiles); checks sessionStorage for JWT on load, redirects to login if missing
+│   └── login.html                 # Login page — POST /auth/login, stores JWT in sessionStorage, redirects to /
 │
 ├── routes/
 │   ├── ask.py                     # POST /ask — SSE streaming endpoint; owns per-session History dict
 │   ├── activities.py              # GET /health/recent, /health/v02, /health/body-battery, /activities/recent, /weather; POST /garmin-sync
 │   ├── plan.py                    # Plan CRUD: GET /plan/days, GET /plan/intervals/{day_id}, POST /plan/create, POST /plan/sync, DELETE /plan/delete, PATCH /plan/day/{day_id}, DELETE /plan/day/{day_id}
-│   └── auth.py                    # POST /auth/login — Supabase Auth sign-in, returns JWT access token
+│   ├── auth.py                    # POST /auth/login — Supabase Auth sign-in, returns JWT access token
+│   └── user.py                    # GET /user/info, POST /user/info/name, /user/info/theme, /user/info/location — profile read/write, scoped via get_current_user
 │
 ├── services/
 │   ├── coach.py                   # Orchestrator — generator that yields SSE events (status, chunk, done)
@@ -90,7 +91,8 @@ runcoach/
 │   ├── garmin.py                  # Garmin data sync (token-cached auth, upsert to Supabase)
 │   ├── plan.py                    # Training plan creation (agentic Opus loop + guardrails), update (intent-based ±7d window), sync
 │   ├── guardrails.py              # challenger() — validates plan against hard rules before save; input_check() — blocks short/long queries
-│   ├── web_search.py              # Anthropic web search wrapper + persistence
+│   ├── web_search.py              # Anthropic web search wrapper — no persistence itself; caching is owned by race_info.py
+│   ├── race_info.py               # get_race_info() — time-sensitive race logistics (registration/race_day); fuzzy cache lookup (word overlap → Voyage embedding cosine sim) via db/search_cache.py before falling back to web_search + LLM
 │   ├── weather.py                 # WeatherAPI wrapper (current day + 12-hour forecast)
 │   ├── cache.py                   # TTLCache singleton + range-aware cache logic (get_cached, set_cached)
 │   ├── auth.py                    # get_current_user() FastAPI dependency — validates Bearer JWT via Supabase, returns user_id
@@ -113,10 +115,12 @@ runcoach/
 │   ├── garmin.py                  # Garmin credential CRUD: get/save/delete credentials + save_garmin_token
 │   ├── race.py                    # Read/write for the user's target race
 │   ├── preferences.py             # Read/write for training_preferences; set_notes() saves athlete notes field
-│   └── plan.py                    # Plan read/write queries (current_plan, plan_days, plan_intervals, plan_history)
+│   ├── plan.py                    # Plan read/write queries (current_plan, plan_days, plan_intervals, plan_history)
+│   ├── user_info.py               # Read/write for user_info (name, theme, location, last_synced)
+│   └── search_cache.py            # get_candidates()/set_cached() for race_info — partitioned by (topic, race, location, info_type), embedding stored as jsonb
 │
 ├── models/
-│   ├── planner.py                 # Pydantic models: PlannerOutput, SQLPlan, AskRequest, DataRequest, History (dataclass), EndBehaviorClassification, UpdatePlanOutput, PatchDayRequest, CourseDetailsPlan, RaceRequest, PreferencesRequest
+│   ├── planner.py                 # Pydantic models: PlannerOutput, SQLPlan, AskRequest, DataRequest, History (dataclass), EndBehaviorClassification, UpdatePlanOutput, PatchDayRequest, CourseDetailsPlan, RaceRequest, PreferencesRequest, RaceInfoPlan, RaceRegistrationInfo, RaceDayInfo, SyncPlanRequest, PlanDay, PlanInterval, PlanChange, LoginRequest, GarminCredentials, UserInfoRequest
 │   └── finish_time_predictor.json # Serialised XGBoost model (V2)
 │
 ├── knowledge/
@@ -128,7 +132,8 @@ runcoach/
 │
 ├── tests/
 │   ├── test_deterministic.py      # All deterministic logic (plan constraints etc)
-│   └── test_integration.py        # End-to-end consistency + temperature tuning
+│   ├── test_integration.py        # End-to-end consistency + temperature tuning
+│   └── test_race_info.py          # get_candidates/set_cached, word-overlap + embedding similarity, get_race_info cache hit/miss paths
 │
 └── .github/
     └── workflows/
@@ -173,7 +178,7 @@ create table garmin_credentials (
     id          uuid default gen_random_uuid() primary key,
     user_id     uuid references auth.users(id) on delete cascade unique,
     email       text,
-    password    text,
+    password    text,                                          -- plaintext; known gap, candidate for Supabase Vault
     token_json  text,                                           -- cached session tokens to avoid repeated logins
     updated_at  timestamptz default now()
 );
@@ -310,12 +315,31 @@ create table model_predictions (
 ```sql
 create table search_cache (
     id              uuid default gen_random_uuid() primary key,
-    query_hash      text unique,                                    -- MD5 of normalised query
+    user_id         uuid references auth.users(id) on delete cascade,    -- nullable; not currently used by any query
     query           text,
     result          text,
-    topic           text,                                           -- race_info | weather | race_results | elevation
+    topic           text,                                           -- race_info
+    race            text,
+    location        text,
+    info_type       text,                                           -- registration | race_day
+    embedding       jsonb,                                          -- Voyage embedding, for fuzzy cache matching
     source          text,                                           -- web_search | open_meteo | athlinks
     expires_at      timestamptz,
+    created_at      timestamptz default now()
+);
+-- indexes: (topic, race, location, info_type, expires_at)
+```
+
+### user_info (one per user)
+```sql
+create table user_info (
+    id              uuid default gen_random_uuid() primary key,
+    user_id         uuid references auth.users(id) on delete cascade unique,
+    first_name      text,
+    last_name       text,
+    theme           text,
+    location        text,
+    last_synced     timestamptz,                                    -- stamped by services/garmin.py on successful sync
     created_at      timestamptz default now()
 );
 ```
@@ -547,12 +571,12 @@ Question arrives
 - XGBoost model (see ML Model section)
 - Not current priority — V2 feature
 
-### 16. Search Race Info (planned)
-- Web search for time-sensitive race data: qualifying standards, registration dates/status, entry fees, lottery odds, race date
+### 16. Search Race Info ✓
+- Web search for time-sensitive race data: registration dates/status, entry fees, lottery odds, race-day start time/location
 - Do NOT rely on model knowledge for this — standards and dates change yearly
 - Always caveats results and directs user to verify on official race website
-- Args: `{race, location, query}` — query is the specific aspect (e.g. "qualifying standards 2026")
-- **Caching**: NOT stored in the permanent RAG store (`course_chunks.json`) since data goes stale year-to-year. Cross-session: cache in `search_cache` (Supabase) with 7-day TTL.
+- Args: `{race, location, info_type, query}` — info_type is `registration` | `race_day`; query is the specific aspect (e.g. "qualifying standards 2026")
+- **Caching**: cache in `search_cache` (Supabase), partitioned by (topic, race, location, info_type), 365-day TTL for race_info. Fuzzy match on cache read via word overlap, falling back to Voyage embedding similarity.
 
 ### 17. Get Race Results (planned)
 - Anthropic web search to find Athlinks event ID
@@ -710,17 +734,17 @@ DB query results (health, activities) are cached in-memory per session with rang
 
 ### L2 Cache — Supabase search_cache
 
-For web search results, course details, race info. Not yet implemented.
+For race info (implemented). Course details cached separately in `course_chunks.json`. Weather is not cached anywhere — live API call on every request.
 
 ### Expiry by Topic (L2)
 
-| Topic | L2 Expiry |
-|---|---|
-| race_info | 60 days |
-| race_results | 365 days |
-| weather | 1 day |
-| elevation | 90 days |
-| course_details | 60 days |
+| Topic | L2 Expiry | Status |
+|---|---|---|
+| race_info | 365 days | implemented |
+| race_results | 365 days | planned |
+| weather | — | not cached, by design — low volume, live API call every request |
+| elevation | 90 days | planned |
+| course_details | 60 days | planned — separate cache exists today (`course_chunks.json`), not in search_cache |
 
 ---
 
@@ -983,7 +1007,6 @@ on:
 | Multi-user support | Auth already in place, extend schema for multiple users |
 | Activity split data | `get_activity_splits(garmin_activity_id)` per activity during sync — lap-level data (split time, distance, pace, HR). New `activity_splits` table. Enables interval verification against plan, more accurate body battery, split analysis in chat. |
 | Heart rate zones (LTHR) | After race results are stored, use avg HR from race efforts as lactate threshold HR (Friel method). Build Friel zones from LTHR — more accurate than % max HR. |
-| Search cache persistence | Wire `web_search.py` to check/write `search_cache` Supabase table with topic-appropriate TTLs (7 days for race info). Currently uncached. |
 
 ---
 

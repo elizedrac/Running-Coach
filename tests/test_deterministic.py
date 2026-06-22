@@ -39,6 +39,7 @@ from services.pacing import (
     get_pacing_zones,
     pacing_calculator,
 )
+from services.prompts import build_query_data_extra
 from services.trend_analysis import (
     _avg,
     _direction,
@@ -73,8 +74,10 @@ FAKE_ACTIVITIES = [
     {"calendar_date": "2026-05-20T00:00:00+00:00", "miles": 4.0, "activity_type": "running"},
 ]
 
+
 def setup_function():
     session_cache.clear()
+
 
 def test_cache_miss_then_hit():
     assert get_cached("user1", "2026-05-01", "2026-05-31", "activity_data") is None
@@ -83,6 +86,7 @@ def test_cache_miss_then_hit():
     assert result is not None
     assert len(result) == 3
 
+
 def test_cache_subset_range():
     set_cached("user1", "2026-05-01", "2026-05-31", "activity_data", FAKE_ACTIVITIES)
     result = get_cached("user1", "2026-05-05", "2026-05-15", "activity_data")
@@ -90,15 +94,18 @@ def test_cache_subset_range():
     assert len(result) == 1
     assert result[0]["miles"] == 6.0
 
+
 def test_cache_non_overlapping_miss():
     set_cached("user1", "2026-05-01", "2026-05-10", "activity_data", FAKE_ACTIVITIES[:2])
     result = get_cached("user1", "2026-05-15", "2026-05-20", "activity_data")
     assert result is None
 
+
 def test_cache_separate_query_types():
     set_cached("user1", "2026-05-01", "2026-05-31", "activity_data", FAKE_ACTIVITIES)
     result = get_cached("user1", "2026-05-01", "2026-05-31", "health_data")
     assert result is None
+
 
 # ── get_weather tests ─────────────────────────────────────────────────────────
 
@@ -128,12 +135,14 @@ _MOCK_WEATHER_RESP.json.return_value = _FAKE_WEATHER_API_RESPONSE
 
 WEATHER_KEYS = {"temperature", "feels_like", "wind_speed", "wind_direction", "humidity", "chance_of_rain"}
 
+
 @patch("services.weather.requests.get", return_value=_MOCK_WEATHER_RESP)
 def test_get_weather_valid_date_string(mock_get):
     result = get_weather("test_user", date="today")
     assert isinstance(result, list)
     assert len(result) <= 12
     assert all(WEATHER_KEYS <= set(h) for h in result)
+
 
 @patch("services.weather.requests.get", return_value=_MOCK_WEATHER_RESP)
 def test_get_weather_valid_date_iso(mock_get):
@@ -142,6 +151,7 @@ def test_get_weather_valid_date_iso(mock_get):
     assert len(result) <= 12
     assert all(WEATHER_KEYS <= set(h) for h in result)
 
+
 @patch("services.weather.requests.get", return_value=_MOCK_WEATHER_RESP)
 def test_get_weather_no_date(mock_get):
     result = get_weather("test_user")
@@ -149,59 +159,73 @@ def test_get_weather_no_date(mock_get):
     assert len(result) <= 12
     assert all(WEATHER_KEYS <= set(h) for h in result)
 
+
 def test_get_weather_invalid_date():
     result = get_weather("test_user", date="2023-01-01")
     assert isinstance(result, str)
     assert "not supported in this version" in result
 
+
 def test_pace_to_seconds_valid():
     assert _pace_to_seconds("7:54/mi") == 7 * 60 + 54
     assert _pace_to_seconds("8:00/mi") == 480
+
 
 def test_pace_to_seconds_invalid():
     assert _pace_to_seconds(None) is None
     assert _pace_to_seconds("") is None
     assert _pace_to_seconds("garbage") is None
 
+
 def test_time_to_hours_valid():
     assert _time_to_hours("01:00:00") == 1.0
     assert _time_to_hours("00:30:00") == 0.5
     assert _time_to_hours("02:15:30") == 2 + 15 / 60 + 30 / 3600
+
 
 def test_time_to_hours_invalid():
     assert _time_to_hours(None) == 0
     assert _time_to_hours("") == 0
     assert _time_to_hours("bad") == 0
 
+
 def test_avg_skips_nones():
     rows = [{"x": 10}, {"x": None}, {"x": 20}, {}, {"x": 30}]
     assert _avg(rows, "x") == 20.0
+
 
 def test_avg_empty_returns_zero():
     assert _avg([], "x") == 0.0
     assert _avg([{"x": None}], "x") == 0.0
 
+
 def test_sum_skips_nones():
     rows = [{"x": 5}, {"x": None}, {"x": 3}]
     assert _sum(rows, "x") == 8
+
 
 def test_direction_stable_within_5pct():
     assert _direction(100, 102, True) == "stable"
     assert _direction(100, 98, False) == "stable"
 
+
 def test_direction_improving():
     assert _direction(110, 100, True) == "improving"  # higher better, went up
     assert _direction(90, 100, False) == "improving"  # lower better, went down
+
 
 def test_direction_declining():
     assert _direction(90, 100, True) == "declining"
     assert _direction(110, 100, False) == "declining"
 
+
 def test_direction_none_when_neutral_or_zero_prev():
     assert _direction(100, 0, True) is None
     assert _direction(100, 100, None) is None
 
+
 # ── _windows tests ────────────────────────────────────────────────────────────
+
 
 def test_windows_valid_range():
     prev_start, prev_end = _windows("2026-05-01", "2026-05-07")
@@ -209,10 +233,12 @@ def test_windows_valid_range():
     assert prev_start == "2026-04-01"
     assert prev_end == "2026-04-07"
 
+
 def test_windows_too_large_returns_none():
     prev_start, prev_end = _windows("2026-01-01", "2026-03-15")  # 73 days
     assert prev_start is None
     assert prev_end is None
+
 
 def test_windows_drops_prev_when_shift_would_overlap_current():
     # Current 2020-01-05 to 2020-01-10 (5-day window).
@@ -222,19 +248,23 @@ def test_windows_drops_prev_when_shift_would_overlap_current():
     assert prev_start is None
     assert prev_end is None
 
+
 def test_windows_keeps_prev_when_no_clamp_needed():
     # Current Mar 1-7. Default prev Jan 30-Feb 5 (all valid, no clamp).
     prev_start, prev_end = _windows("2026-03-01", "2026-03-07")
     assert prev_start == "2026-01-30"
     assert prev_end == "2026-02-05"
 
+
 # ── _windows with explicit prev args ─────────────────────────────────────────
+
 
 def test_windows_explicit_prev_used_when_valid():
     # Explicit prev (within MIN_DATE) → returned as-is, no 30-day shift
     prev_start, prev_end = _windows("2026-05-07", "2026-05-13", prev_start="2026-04-30", prev_end="2026-05-06")
     assert prev_start == "2026-04-30"
     assert prev_end == "2026-05-06"
+
 
 def test_windows_explicit_prev_falls_back_when_before_min_date():
     # Explicit prev starts before MIN_DATE (2020-01-01) → fall back to default 30-day shift
@@ -243,7 +273,9 @@ def test_windows_explicit_prev_falls_back_when_before_min_date():
     assert prev_start == "2020-01-02"
     assert prev_end == "2020-01-08"
 
+
 # ── trend function with explicit prev args ───────────────────────────────────
+
 
 @patch("services.trend_analysis.get_activities")
 def test_miles_trend_with_explicit_prev(mock_get):
@@ -257,6 +289,7 @@ def test_miles_trend_with_explicit_prev(mock_get):
     assert second_call_args[1] == "2026-04-30"
     assert second_call_args[2] == "2026-05-06"
 
+
 @patch("services.trend_analysis.get_activities")
 def test_miles_trend_explicit_prev_below_min_falls_back(mock_get):
     mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
@@ -266,6 +299,7 @@ def test_miles_trend_explicit_prev_below_min_falls_back(mock_get):
     second_call_args = mock_get.call_args_list[1].args
     assert second_call_args[1] == "2020-01-02"
     assert second_call_args[2] == "2020-01-08"
+
 
 # ── trend function tests (mocked DB) ─────────────────────────────────────────
 
@@ -333,6 +367,7 @@ PREV_HEALTH = [
     },
 ]
 
+
 @patch("services.trend_analysis.get_activities")
 def test_miles_trend(mock_get):
     mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
@@ -340,6 +375,7 @@ def test_miles_trend(mock_get):
     assert result["current"] == 12.0
     assert result["previous"] == 3.0
     assert result["trend"] == "improving"
+
 
 @patch("services.trend_analysis.get_activities")
 def test_pace_trend_lower_is_better(mock_get):
@@ -350,6 +386,7 @@ def test_pace_trend_lower_is_better(mock_get):
     assert result["previous"] == 510.0
     assert result["trend"] == "improving"
 
+
 @patch("services.trend_analysis.get_activities")
 def test_hr_trend_neutral(mock_get):
     mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
@@ -357,12 +394,14 @@ def test_hr_trend_neutral(mock_get):
     assert result["current"] == 155.0
     assert result["trend"] is None  # neutral, no direction
 
+
 @patch("services.trend_analysis.get_activities")
 def test_total_calories_trend(mock_get):
     mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
     result = total_calories_trend("user1", "2026-05-01", "2026-05-07")
     assert result["current"] == 1000.0
     assert result["previous"] == 250.0
+
 
 @patch("services.trend_analysis.get_activities")
 def test_activity_count_trend(mock_get):
@@ -372,12 +411,14 @@ def test_activity_count_trend(mock_get):
     assert result["previous"] == 1
     assert result["trend"] == "improving"
 
+
 @patch("services.trend_analysis.get_activities")
 def test_total_time_trend(mock_get):
     mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
     result = total_time_trend("user1", "2026-05-01", "2026-05-07")
     # 40 + 52.5 = 92.5 min → 1.541... hours
     assert round(result["current"], 2) == round(40 / 60 + 52.5 / 60, 2)
+
 
 @patch("services.trend_analysis.get_health_history")
 def test_hrv_trend(mock_get):
@@ -387,6 +428,7 @@ def test_hrv_trend(mock_get):
     assert result["previous"] == 50.0
     assert result["trend"] == "improving"
 
+
 @patch("services.trend_analysis.get_health_history")
 def test_rhr_trend_lower_is_better(mock_get):
     mock_get.side_effect = [CURR_HEALTH, PREV_HEALTH]
@@ -395,12 +437,14 @@ def test_rhr_trend_lower_is_better(mock_get):
     assert result["previous"] == 55.0
     assert result["trend"] == "improving"  # lower = better, went down
 
+
 @patch("services.trend_analysis.get_health_history")
 def test_total_sleep_in_hours(mock_get):
     mock_get.side_effect = [CURR_HEALTH, PREV_HEALTH]
     result = total_sleep("user1", "2026-05-01", "2026-05-07")
     assert result["current"] == 7.75  # avg of 8.0 and 7.5
     assert result["previous"] == 6.0
+
 
 @patch("services.trend_analysis.get_health_history")
 def test_stress_trend_lower_is_better(mock_get):
@@ -410,13 +454,16 @@ def test_stress_trend_lower_is_better(mock_get):
     assert result["previous"] == 30.0
     assert result["trend"] == "improving"
 
+
 # ── MIN_DATE clamping tests for get_activities ───────────────────────────────
+
 
 def test_get_activities_end_before_min_returns_empty():
     from db.activity_history import get_activities
 
     result = get_activities("user1", "2025-12-01", "2025-12-31")
     assert result == []
+
 
 @patch("db.activity_history.get_supabase_client")
 def test_get_activities_shifts_window_on_partial_overlap(mock_client):
@@ -434,7 +481,9 @@ def test_get_activities_shifts_window_on_partial_overlap(mock_client):
     gte_call.assert_called_with("calendar_date", "2020-01-01")
     lte_call.assert_called_with("calendar_date", "2020-02-01")
 
+
 # ── trend flow when prev returns empty ───────────────────────────────────────
+
 
 @patch("services.trend_analysis.get_activities")
 def test_trend_skips_comparison_when_prev_empty(mock_get):
@@ -445,7 +494,9 @@ def test_trend_skips_comparison_when_prev_empty(mock_get):
     assert "previous" not in result
     assert "trend" not in result
 
+
 # ── sql_selector enforcement ─────────────────────────────────────────────────
+
 
 @patch("services.sql_selector.get_activities")
 @patch("services.sql_selector.select_queries")
@@ -463,6 +514,7 @@ def test_sql_selector_keeps_get_activities_when_paired_with_trend(mock_select, m
     assert "miles_trend" in result
     assert "activity_data" in result
 
+
 @patch("services.sql_selector.get_activities")
 @patch("services.sql_selector.select_queries")
 def test_sql_selector_drops_health_data_when_paired_with_trend(mock_select, mock_get_activities):
@@ -479,6 +531,7 @@ def test_sql_selector_drops_health_data_when_paired_with_trend(mock_select, mock
     assert "miles_trend" in result
     assert "health_data" not in result
 
+
 @patch("services.sql_selector.get_activities")
 @patch("services.sql_selector.select_queries")
 def test_sql_selector_keeps_raw_fetcher_alone(mock_select, mock_get_activities):
@@ -491,40 +544,49 @@ def test_sql_selector_keeps_raw_fetcher_alone(mock_select, mock_get_activities):
     mock_get_activities.assert_called_once()
     assert "activity_data" in result
 
+
 def test_time_to_mins_mm_ss():
     assert _time_to_mins("8:00") == 8.0
     assert _time_to_mins("7:30") == 7.5
+
 
 def test_time_to_mins_hh_mm_ss():
     assert _time_to_mins("3:30:00") == 210.0
     assert _time_to_mins("1:00:30") == 60.5
 
+
 def test_time_to_mins_seconds_only():
     assert _time_to_mins("30") == 0.5
     assert _time_to_mins("60") == 1.0
+
 
 def test_time_to_mins_invalid():
     assert _time_to_mins("") is None
     assert _time_to_mins("abc") is None
     assert _time_to_mins(None) is None
 
+
 def test_min_to_pace():
     assert _min_to_pace(8.0) == "8:00"
     assert _min_to_pace(7.5) == "7:30"
     assert _min_to_pace(None) is None
 
+
 def test_get_pace_marathon():
     pace = _get_pace("3:30:00", 26.2)
     assert round(pace, 2) == round(210 / 26.2, 2)
+
 
 def test_get_pace_invalid():
     assert _get_pace("bad", 26.2) is None
     assert _get_pace("3:30:00", 0) is None
     assert _get_pace("3:30:00", -5) is None
 
+
 def test_equivalent_marathon_pace_from_5k():
     pace = equivalent_marathon_pace("20:00", 3.107)
     assert 7.0 < pace < 7.5
+
 
 def test_pacing_zones_marathon():
     zones = get_pacing_zones("3:30:00", 26.2188)
@@ -534,12 +596,15 @@ def test_pacing_zones_marathon():
     assert zones["interval_pace"] == "7:01"
     assert zones["repetition_pace"] == "6:31"
 
+
 def test_pacing_zones_5k_uses_equivalency():
     zones = get_pacing_zones("20:00", 3.107)
     assert zones["easy_pace"].startswith("8:")
 
+
 def test_pacing_zones_invalid_input():
     assert get_pacing_zones("bad", 26.2) == {}
+
 
 def test_pacing_calculator_full():
     result = pacing_calculator("user1", "3:30:00", 26.2188)
@@ -554,21 +619,26 @@ def test_pacing_calculator_full():
     ):
         assert key in result
 
+
 # ── VO2-derived easy pace ────────────────────────────────────────────────────
+
 
 def test_pace_from_vo2_trained_runner():
     # VO2 max 55, 70% effort → easy pace should be reasonable for a trained runner
     pace = _pace_from_vo2(55, fraction=0.70)
     assert 8.5 < pace < 10.0  # roughly 8:30-10:00 min/mi range
 
+
 def test_pace_from_vo2_elite():
     pace = _pace_from_vo2(70, fraction=0.70)
     elite_recreational = _pace_from_vo2(55, fraction=0.70)
     assert pace < elite_recreational  # higher VO2 = faster easy pace
 
+
 def test_pace_from_vo2_invalid():
     # very low VO2 should not produce a valid pace
     assert _pace_from_vo2(4, fraction=0.70) is None  # target VO2 would be 2.8 < 3.5
+
 
 @patch("services.pacing.get_health_history")
 def test_pacing_calculator_includes_vo2_easy_pace(mock_health):
@@ -578,23 +648,68 @@ def test_pacing_calculator_includes_vo2_easy_pace(mock_health):
     # parseable as a pace string
     assert ":" in result["current_easy_pace"]
 
+
 @patch("services.pacing.get_health_history")
 def test_pacing_calculator_no_vo2_returns_none(mock_health):
     mock_health.return_value = []
     result = pacing_calculator("user1", "3:30:00", 26.2188)
     assert result["current_easy_pace"] is None
 
+
+# ── build_query_data_extra conditional snippet tests ─────────────────────────
+
+
+def test_query_data_extra_empty_when_no_signals():
+    result = {"activity_data": {"data": [{"activity_type": "running", "miles": 4.0}]}}
+    assert build_query_data_extra(result) == ""
+
+
+def test_query_data_extra_partial_week_note_on_real_comparison():
+    result = {"miles_trend": {"data": {"metric": "total_miles", "current": 10.5, "previous": 12.0, "trend": "declining"}}}
+    assert "PARTIAL WEEK" in build_query_data_extra(result)
+
+
+def test_query_data_extra_no_partial_week_note_on_missing_comparison():
+    # only a 'current' field, no 'previous' — not a real comparison, no partial-week caveat needed
+    result = {"miles_trend": {"data": {"metric": "total_miles", "current": 10.5}}}
+    assert "PARTIAL WEEK" not in build_query_data_extra(result)
+
+
+def test_query_data_extra_treadmill_note_on_treadmill_activity():
+    result = {"activity_data": {"data": [{"activity_type": "treadmill_running", "miles": 4.0}]}}
+    assert "TREADMILL PACE" in build_query_data_extra(result)
+
+
+def test_query_data_extra_body_battery_note():
+    result = {"compute_body_battery": {"data": {"body_battery": 80, "sleep_hours": 7.0}}}
+    assert "COMPUTE_BODY_BATTERY" in build_query_data_extra(result)
+
+
+def test_query_data_extra_combines_multiple_notes():
+    result = {
+        "miles_trend": {"data": {"current": 10.5, "previous": 12.0, "trend": "declining"}},
+        "activity_data": {"data": [{"activity_type": "treadmill_running"}]},
+    }
+    extra = build_query_data_extra(result)
+    assert "PARTIAL WEEK" in extra
+    assert "TREADMILL PACE" in extra
+
+
 # ── course_details RAG tests ─────────────────────────────────────────────────
+
 
 def test_compute_similarity_identical_vectors():
     vec = [1.0, 0.0, 0.0]
     assert _compute_similarity(vec, vec) == 1.0
 
+
 def test_compute_similarity_orthogonal_vectors():
     assert _compute_similarity([1.0, 0.0, 0.0], [0.0, 1.0, 0.0]) == 0.0
 
+
 def test_compute_similarity_opposite_vectors():
     assert _compute_similarity([1.0, 0.0], [-1.0, 0.0]) == -1.0
+
 
 @patch("services.course_details._load_chunks")
 @patch("services.course_details.voyage_client")
@@ -611,6 +726,7 @@ def test_find_relevant_chunks_above_threshold(mock_vo, mock_load):
     ]
     result = find_relevant_chunks("Boston", "marathon", "Boston elevation")
     assert result["details"] == "Heartbreak Hill is at mile 21"
+
 
 @patch("services.course_details._load_chunks")
 @patch("services.course_details.voyage_client")
@@ -629,11 +745,13 @@ def test_find_relevant_chunks_below_threshold(mock_vo, mock_load):
     result = find_relevant_chunks("Boston", "marathon", "Boston elevation")
     assert result is None
 
+
 @patch("services.course_details._load_chunks")
 def test_find_relevant_chunks_empty_store(mock_load):
     mock_load.return_value = []
     result = find_relevant_chunks("Boston", "marathon", "anything")
     assert result is None
+
 
 @patch("services.course_details._load_chunks")
 @patch("services.course_details.voyage_client")
@@ -658,6 +776,7 @@ def test_find_relevant_chunks_filters_by_location(mock_vo, mock_load):
     result = find_relevant_chunks("Boston", "marathon", "elevation")
     assert result["details"] == "Boston Marathon hills"
 
+
 @patch("services.course_details._load_chunks")
 @patch("services.course_details.voyage_client")
 def test_find_relevant_chunks_filters_marathon_vs_half(mock_vo, mock_load):
@@ -681,6 +800,7 @@ def test_find_relevant_chunks_filters_marathon_vs_half(mock_vo, mock_load):
     result = find_relevant_chunks("New York City", "half marathon", "elevation")
     assert result["details"] == "NYC half"
 
+
 @patch("services.course_details._load_chunks")
 @patch("services.course_details.voyage_client")
 def test_find_relevant_chunks_case_insensitive(mock_vo, mock_load):
@@ -697,6 +817,7 @@ def test_find_relevant_chunks_case_insensitive(mock_vo, mock_load):
     result = find_relevant_chunks("NEW YORK CITY", "MARATHON", "elevation")
     assert result["details"] == "found"
 
+
 @patch("services.course_details._load_chunks")
 @patch("services.course_details.voyage_client")
 def test_find_relevant_chunks_no_matching_location_returns_none(mock_vo, mock_load):
@@ -707,7 +828,9 @@ def test_find_relevant_chunks_no_matching_location_returns_none(mock_vo, mock_lo
     result = find_relevant_chunks("Chicago", "marathon", "elevation")
     assert result is None
 
+
 # ── History dataclass tests ──────────────────────────────────────────────────
+
 
 def test_history_defaults():
     h = History()
@@ -715,11 +838,13 @@ def test_history_defaults():
     assert h.recent == []
     assert h.turn_count == 0
 
+
 def test_history_recent_independent_per_instance():
     h1 = History()
     h2 = History()
     h1.recent.append({"role": "user", "content": "hello"})
     assert h2.recent == []
+
 
 def test_history_fields_mutable():
     h = History()
@@ -730,7 +855,9 @@ def test_history_fields_mutable():
     assert h.turn_count == 3
     assert len(h.recent) == 1
 
+
 # ── compress_history tests ───────────────────────────────────────────────────
+
 
 @patch("services.memory.call_llm")
 def test_compress_history_returns_summary(mock_llm):
@@ -739,6 +866,7 @@ def test_compress_history_returns_summary(mock_llm):
     assert result == "User is training for Boston. Goal: sub-3:30."
     mock_llm.assert_called_once()
 
+
 @patch("services.memory.call_llm")
 def test_compress_history_fallback_on_empty(mock_llm):
     mock_llm.return_value = ""
@@ -746,11 +874,13 @@ def test_compress_history_fallback_on_empty(mock_llm):
     result = compress_history(history_str)
     assert result == history_str
 
+
 @patch("services.memory.call_llm")
 def test_compress_history_uses_haiku(mock_llm):
     mock_llm.return_value = "some summary"
     compress_history("some history")
     assert mock_llm.call_args.kwargs.get("model") == "claude-haiku-4-5-20251001"
+
 
 @patch("services.memory.call_llm")
 def test_compress_history_caps_tokens(mock_llm):
@@ -758,7 +888,9 @@ def test_compress_history_caps_tokens(mock_llm):
     compress_history("history")
     assert mock_llm.call_args.kwargs.get("max_tokens") == 400
 
+
 # ── history cycling in orchestrate ───────────────────────────────────────────
+
 
 def _run_orchestrate(query, hist):
     """Consume the orchestrate generator and return the final hist."""
@@ -766,6 +898,7 @@ def _run_orchestrate(query, hist):
         if event_type == "done":
             return data
     return hist
+
 
 def test_history_appends_after_turn():
     hist = History()
@@ -780,6 +913,7 @@ def test_history_appends_after_turn():
     assert hist.recent[0] == {"role": "user", "content": "what is an easy run?"}
     assert hist.recent[1] == {"role": "assistant", "content": "Easy runs build your aerobic base."}
     assert hist.turn_count == 1
+
 
 @patch("services.memory.call_llm")
 def test_compression_fires_at_turn_5(mock_llm):
@@ -799,6 +933,7 @@ def test_compression_fires_at_turn_5(mock_llm):
     assert hist.recent[0]["role"] == "user"
     assert hist.recent[1]["role"] == "assistant"
 
+
 @patch("services.memory.call_llm")
 def test_compression_does_not_fire_before_turn_5(mock_llm):
     mock_llm.return_value = "compressed summary"
@@ -814,7 +949,9 @@ def test_compression_does_not_fire_before_turn_5(mock_llm):
     assert not mock_llm.called
     assert hist.summary == ""
 
+
 # ── compute_body_battery tests ───────────────────────────────────────────────
+
 
 @patch("services.trend_analysis.get_activities")
 @patch("services.trend_analysis._weighted_avg")
@@ -828,6 +965,7 @@ def test_body_battery_good_recovery(mock_health, mock_wavg, mock_activities):
     assert result["body_battery"] == 95
     assert result["num_activities"] == 0
 
+
 @patch("services.trend_analysis.get_activities")
 @patch("services.trend_analysis._weighted_avg")
 @patch("services.trend_analysis.get_health_history")
@@ -839,6 +977,7 @@ def test_body_battery_poor_recovery(mock_health, mock_wavg, mock_activities):
     # sleep <6 → -25, stress >75 → -20, hrv <50 → -15 → 40
     assert result["body_battery"] == 40
 
+
 @patch("services.trend_analysis.get_activities")
 @patch("services.trend_analysis._weighted_avg")
 @patch("services.trend_analysis.get_health_history")
@@ -848,6 +987,7 @@ def test_body_battery_missing_data_no_penalty(mock_health, mock_wavg, mock_activ
     mock_activities.return_value = []
     result = compute_body_battery("user1")
     assert result["body_battery"] == 100
+
 
 @patch("services.trend_analysis.get_activities")
 @patch("services.trend_analysis._weighted_avg")
@@ -867,6 +1007,7 @@ def test_body_battery_activity_deduction(mock_health, mock_wavg, mock_activities
     assert result["body_battery"] == 65
     assert result["num_activities"] == 1
 
+
 @patch("services.trend_analysis.get_activities")
 @patch("services.trend_analysis._weighted_avg")
 @patch("services.trend_analysis.get_health_history")
@@ -877,23 +1018,29 @@ def test_body_battery_returns_expected_keys(mock_health, mock_wavg, mock_activit
     result = compute_body_battery("user1")
     assert {"body_battery", "sleep_hours", "stress", "hrv", "num_activities", "last_activity"} <= set(result)
 
+
 # ── input_check guardrail tests ──────────────────────────────────────────────
+
 
 def test_input_check_empty_query():
     blocked, _ = input_check("")
     assert blocked
 
+
 def test_input_check_whitespace_only():
     blocked, _ = input_check("   ")
     assert blocked
+
 
 def test_input_check_too_short():
     blocked, _ = input_check("a")
     assert blocked
 
+
 def test_input_check_valid_query():
     blocked, _ = input_check("what was my pace last week?")
     assert not blocked
+
 
 def test_input_check_too_long():
     long_query = " ".join(["word"] * 151)
@@ -901,20 +1048,25 @@ def test_input_check_too_long():
     assert blocked
     assert "long" in msg.lower()
 
+
 def test_input_check_short_returns_message():
     blocked, msg = input_check("hi")
     assert not blocked  # 2 chars is fine — len("hi".strip()) == 2, not < 2
 
+
 def test_input_check_exactly_two_chars():
     blocked, _ = input_check("ok")
     assert not blocked  # boundary: len == 2 is allowed
+
 
 def test_input_check_150_words_allowed():
     query = " ".join(["word"] * 150)
     blocked, _ = input_check(query)
     assert not blocked  # exactly 150 is fine
 
+
 # ── _weighted_avg tests ──────────────────────────────────────────────────────
+
 
 def test_weighted_avg_skips_zero_values():
     today = datetime.today().date()
@@ -928,15 +1080,18 @@ def test_weighted_avg_skips_zero_values():
     assert result > 80
     assert result < 90
 
+
 def test_weighted_avg_all_zeros_returns_zero():
     rows = [{"hrv": 0}, {"hrv": 0}]
     assert _weighted_avg(rows, "hrv") == 0.0
+
 
 def test_weighted_avg_single_value_returns_full_weight():
     today = datetime.today().date()
     rows = [{"hrv": 75, "calendar_date": today.isoformat()}]
     result = _weighted_avg(rows, "hrv")
     assert result == 75.0  # today → weight 1.0, no dilution
+
 
 def test_weighted_avg_recency_bias():
     today = datetime.today().date()
@@ -949,6 +1104,7 @@ def test_weighted_avg_recency_bias():
     # simple avg = 66.7, recency weighting pushes it higher
     assert result > 66.7
 
+
 def test_weighted_avg_gap_day_uses_actual_diff():
     # yesterday missing — today and 2-days-ago should still use their correct weights
     today = datetime.today().date()
@@ -960,7 +1116,9 @@ def test_weighted_avg_gap_day_uses_actual_diff():
     # 60*0.5 + 80*1.0 / (0.5+1.0) = 73.33
     assert abs(result - (60 * 0.5 + 80 * 1.0) / (0.5 + 1.0)) < 0.01
 
+
 # ── compute_load tests ───────────────────────────────────────────────────────
+
 
 @patch("services.trend_analysis.get_activities")
 def test_compute_load_no_activities(mock_get):
@@ -970,11 +1128,13 @@ def test_compute_load_no_activities(mock_get):
     assert result["chronic_load"] == 0
     assert result["acwr"] is None
 
+
 @patch("services.trend_analysis.get_activities")
 def test_compute_load_returns_expected_keys(mock_get):
     mock_get.return_value = []
     result = compute_load("user1")
     assert {"acute_load", "chronic_load", "acwr"} <= set(result)
+
 
 @patch("services.trend_analysis.get_activities")
 def test_compute_load_with_recent_activity(mock_get):
@@ -990,6 +1150,7 @@ def test_compute_load_with_recent_activity(mock_get):
     assert result["chronic_load"] > 0
     assert result["acwr"] is not None
 
+
 @patch("services.trend_analysis.get_activities")
 def test_compute_load_high_acwr_when_spike(mock_get):
     today = datetime.today().date()
@@ -1002,7 +1163,9 @@ def test_compute_load_high_acwr_when_spike(mock_get):
     assert result["acwr"] is not None
     assert result["acwr"] > 1.3  # above injury-risk threshold
 
+
 # ── update_preferences tests ─────────────────────────────────────────────────
+
 
 @patch("db.preferences.get_supabase_client")
 def test_update_preferences_days_per_week(mock_client):
@@ -1014,12 +1177,14 @@ def test_update_preferences_days_per_week(mock_client):
         {"user_id": "user1", "days_per_week": 5}, on_conflict="user_id"
     )
 
+
 @patch("db.preferences.get_supabase_client")
 def test_update_preferences_preferred_days(mock_client):
     chain = mock_client.return_value
     chain.table.return_value.upsert.return_value.execute.return_value = MagicMock()
     result = update_preferences("user1", "preferred_days", ["MON", "WED", "FRI"])
     assert result == {"status": "success"}
+
 
 @patch("db.preferences.get_supabase_client")
 def test_update_preferences_time_based(mock_client):
@@ -1028,11 +1193,13 @@ def test_update_preferences_time_based(mock_client):
     result = update_preferences("user1", "time_based", True)
     assert result == {"status": "success"}
 
+
 @patch("db.preferences.get_supabase_client")
 def test_update_preferences_db_error_returns_fail(mock_client):
     mock_client.return_value.table.side_effect = Exception("db down")
     result = update_preferences("user1", "days_per_week", 5)
     assert result == {"status": "fail"}
+
 
 @patch("db.preferences.get_supabase_client")
 def test_get_preferences_returns_first_row(mock_client):
@@ -1044,12 +1211,14 @@ def test_get_preferences_returns_first_row(mock_client):
     assert result["days_per_week"] == 4
     assert result["preferred_days"] == ["MON", "WED"]
 
+
 @patch("db.preferences.get_supabase_client")
 def test_get_preferences_empty_returns_empty_dict(mock_client):
     chain = mock_client.return_value
     chain.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
     result = get_preferences("user1")
     assert result == {}
+
 
 # ── db/plan tests ────────────────────────────────────────────────────────────
 
@@ -1065,6 +1234,7 @@ FAKE_DAYS = [
     },
 ]
 
+
 @patch("db.plan.get_supabase_client")
 def test_get_current_plan_returns_row(mock_client):
     mock_client.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value.data = [
@@ -1073,21 +1243,26 @@ def test_get_current_plan_returns_row(mock_client):
     result = get_current_plan("user1")
     assert result["id"] == "plan-uuid"
 
+
 @patch("db.plan.get_supabase_client")
 def test_get_current_plan_empty_returns_empty_dict(mock_client):
     mock_client.return_value.table.return_value.select.return_value.eq.return_value.execute.return_value.data = []
     result = get_current_plan("user1")
     assert result == {}
 
+
 @patch("db.plan.get_current_plan", return_value={"id": "plan-uuid"})
 def test_get_plan_id_returns_id(mock_plan):
     assert get_plan_id("user1") == "plan-uuid"
+
 
 @patch("db.plan.get_current_plan", return_value={})
 def test_get_plan_id_no_plan_returns_none(mock_plan):
     assert get_plan_id("user1") is None
 
+
 # ── get_plan_days branching ───────────────────────────────────────────────────
+
 
 @patch("db.plan.get_supabase_client")
 def test_get_plan_days_by_week_number(mock_client):
@@ -1096,6 +1271,7 @@ def test_get_plan_days_by_week_number(mock_client):
     result = get_plan_days("plan-uuid", week_number=1)
     assert len(result) == 2
     assert result[0]["week_number"] == 1
+
 
 @patch("db.plan.get_supabase_client")
 def test_get_plan_days_by_date_range(mock_client):
@@ -1107,20 +1283,25 @@ def test_get_plan_days_by_date_range(mock_client):
     assert len(result) == 1
     assert result[0]["plan_date"] == "2026-06-01"
 
+
 @patch("db.plan.get_supabase_client")
 def test_get_plan_days_no_filter_returns_empty(mock_client):
     result = get_plan_days("plan-uuid")
     assert result == []
 
+
 @patch("db.plan.get_plan_days", return_value=[{"id": "day-uuid-1"}])
 def test_get_day_id_returns_id(mock_days):
     assert get_day_id("plan-uuid", "2026-06-01") == "day-uuid-1"
+
 
 @patch("db.plan.get_plan_days", return_value=[])
 def test_get_day_id_no_match_returns_none(mock_days):
     assert get_day_id("plan-uuid", "2026-06-01") is None
 
+
 # ── save_plan strips intervals and zips correctly ─────────────────────────────
+
 
 @patch("db.plan.save_plan_intervals")
 @patch("db.plan.save_plan_day")
@@ -1147,6 +1328,7 @@ def test_save_plan_strips_intervals_from_day_rows(mock_race, mock_client, mock_s
     inserted_days = mock_save_day.call_args[0][1]
     assert all("intervals" not in d for d in inserted_days)
 
+
 @patch("db.plan.save_plan_intervals")
 @patch("db.plan.save_plan_day")
 @patch("db.plan.get_supabase_client")
@@ -1170,6 +1352,7 @@ def test_save_plan_intervals_saved_with_correct_day_id(mock_race, mock_client, m
 
     mock_save_intervals.assert_called_once_with("day-uuid-2", [{"interval_num": 1, "interval_type": "WORK"}])
 
+
 @patch("db.plan.save_plan_intervals")
 @patch("db.plan.save_plan_day")
 @patch("db.plan.get_supabase_client")
@@ -1183,11 +1366,13 @@ def test_save_plan_no_intervals_skips_interval_save(mock_race, mock_client, mock
     save_plan("user1", days)
     mock_save_intervals.assert_not_called()
 
+
 @patch("db.plan.get_supabase_client")
 def test_delete_plan_success(mock_client):
     mock_client.return_value.table.return_value.delete.return_value.eq.return_value.execute.return_value = MagicMock()
     result = delete_plan("user1")
     assert result == {"status": "success"}
+
 
 @patch("db.plan.get_supabase_client")
 def test_delete_plan_error_returns_fail(mock_client):
@@ -1195,36 +1380,44 @@ def test_delete_plan_error_returns_fail(mock_client):
     result = delete_plan("user1")
     assert result == {"status": "fail"}
 
+
 # ── end behavior tests ───────────────────────────────────────────────────────
+
 
 def test_is_end_exact_phrase():
     assert is_end_message("that's all") is True
     assert is_end_message("no thanks") is True
     assert is_end_message("all good") is True
 
+
 def test_is_end_single_word():
     assert is_end_message("thanks") is True
     assert is_end_message("bye") is True
     assert is_end_message("nope") is True
 
+
 def test_is_end_with_punctuation():
     assert is_end_message("thanks!") is True
     assert is_end_message("bye.") is True
 
+
 def test_is_end_case_insensitive():
     assert is_end_message("THANKS") is True
     assert is_end_message("Bye") is True
+
 
 def test_is_end_normal_messages():
     assert is_end_message("how was my run yesterday") is False
     assert is_end_message("what paces for a 3:30 marathon") is False
     assert is_end_message("show me my mileage this week") is False
 
+
 @patch("services.end.call_llm")
 def test_detect_end_skips_llm_when_not_end(mock_llm):
     result = detect_end("how was my run yesterday", [])
     assert result is False
     mock_llm.assert_not_called()
+
 
 @patch("services.end.call_llm")
 def test_detect_end_calls_llm_when_end_word_detected(mock_llm):
@@ -1233,7 +1426,9 @@ def test_detect_end_calls_llm_when_end_word_detected(mock_llm):
     assert result is True
     mock_llm.assert_called_once()
 
+
 # ── patch_plan and clear_day tests ───────────────────────────────────────────
+
 
 @patch("db.plan.get_supabase_client")
 def test_patch_plan_filters_none_values(mock_client):
@@ -1249,6 +1444,7 @@ def test_patch_plan_filters_none_values(mock_client):
     assert "target_pace" not in update_call
     assert result == {"status": "success"}
 
+
 @patch("db.plan.get_supabase_client")
 def test_patch_plan_all_none_returns_no_changes(mock_client):
     result = patch_plan(
@@ -1256,6 +1452,7 @@ def test_patch_plan_all_none_returns_no_changes(mock_client):
     )
     assert result == {"status": "no changes"}
     mock_client.return_value.table.assert_not_called()
+
 
 @patch("db.plan.replace_plan_intervals")
 @patch("db.plan.get_supabase_client")
@@ -1266,6 +1463,7 @@ def test_patch_plan_calls_replace_intervals_when_provided(mock_client, mock_repl
     patch_plan("day-uuid", {"workout_type": "INTERVAL", "intervals": intervals})
     mock_replace.assert_called_once_with("day-uuid", intervals)
 
+
 @patch("db.plan.replace_plan_intervals")
 @patch("db.plan.get_supabase_client")
 def test_patch_plan_skips_replace_when_intervals_none(mock_client, mock_replace):
@@ -1273,6 +1471,7 @@ def test_patch_plan_skips_replace_when_intervals_none(mock_client, mock_replace)
     chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
     patch_plan("day-uuid", {"workout_type": "EASY", "intervals": None})
     mock_replace.assert_not_called()
+
 
 @patch("db.plan.get_supabase_client")
 def test_clear_day_sets_rest_and_nulls(mock_client):
@@ -1286,7 +1485,9 @@ def test_clear_day_sets_rest_and_nulls(mock_client):
     assert update_call["notes"] is None
     assert result == {"status": "success"}
 
+
 # ── update_plan_day "Was:" undo history tests ─────────────────────────────────
+
 
 @patch("db.plan.get_plan_intervals", return_value=[])
 @patch("db.plan.get_supabase_client")
@@ -1300,6 +1501,7 @@ def test_update_plan_day_prepends_was_on_type_change(mock_day_id, mock_get_days,
     update_call = chain.table.return_value.update.call_args[0][0]
     assert update_call["notes"].startswith("Was: TEMPO")
     assert "easy day" in update_call["notes"]
+
 
 @patch("db.plan.get_plan_intervals", return_value=[])
 @patch("db.plan.get_supabase_client")
@@ -1315,6 +1517,7 @@ def test_update_plan_day_does_not_overwrite_existing_was(mock_day_id, mock_get_d
     update_call = chain.table.return_value.update.call_args[0][0]
     assert update_call["notes"].count("Was:") == 1
 
+
 @patch("db.plan.get_plan_intervals", return_value=[])
 @patch("db.plan.get_supabase_client")
 @patch("db.plan.get_plan_days")
@@ -1326,6 +1529,7 @@ def test_update_plan_day_no_was_when_same_type(mock_day_id, mock_get_days, mock_
     update_plan_day("plan-uuid", [{"plan_date": "2026-06-01", "workout_type": "EASY", "notes": "adjusted miles"}])
     update_call = chain.table.return_value.update.call_args[0][0]
     assert not update_call.get("notes", "").startswith("Was:")
+
 
 @patch("db.plan.get_plan_intervals", return_value=[])
 @patch("db.plan.get_supabase_client")
@@ -1351,13 +1555,16 @@ def test_update_plan_day_nulls_pace_and_miles_for_rest(mock_day_id, mock_get_day
     assert update_call["target_miles"] is None
     assert update_call["target_pace"] is None
 
+
 # ── auth dependency tests ─────────────────────────────────────────────────────
+
 
 @patch("services.auth.get_supabase_client")
 def test_auth_valid_token_returns_user_id(mock_client):
     mock_client.return_value.auth.get_user.return_value = MagicMock(user=MagicMock(id="user-uuid"))
     result = asyncio.run(get_current_user("Bearer valid-token"))
     assert result == "user-uuid"
+
 
 def test_auth_missing_header_raises_401():
     try:
@@ -1366,12 +1573,14 @@ def test_auth_missing_header_raises_401():
     except HTTPException as e:
         assert e.status_code == 401
 
+
 def test_auth_no_bearer_prefix_raises_401():
     try:
         asyncio.run(get_current_user("invalid-token"))
         assert False, "should have raised"
     except HTTPException as e:
         assert e.status_code == 401
+
 
 @patch("services.auth.get_supabase_client")
 def test_auth_invalid_token_raises_401(mock_client):
@@ -1382,7 +1591,9 @@ def test_auth_invalid_token_raises_401(mock_client):
     except HTTPException as e:
         assert e.status_code == 401
 
+
 # ── update_plan_day CROSS/STRENGTH nulls miles/pace ───────────────────────────
+
 
 @patch("db.plan.get_plan_intervals", return_value=[])
 @patch("db.plan.get_supabase_client")
@@ -1408,6 +1619,7 @@ def test_update_plan_day_nulls_pace_and_miles_for_cross(mock_day_id, mock_get_da
     assert update_call["target_miles"] is None
     assert update_call["target_pace"] is None
 
+
 @patch("db.plan.get_plan_intervals", return_value=[])
 @patch("db.plan.get_supabase_client")
 @patch("db.plan.get_plan_days")
@@ -1432,6 +1644,7 @@ def test_update_plan_day_nulls_pace_and_miles_for_strength(mock_day_id, mock_get
     assert update_call["target_miles"] is None
     assert update_call["target_pace"] is None
 
+
 @patch("db.plan.get_plan_intervals", return_value=[])
 @patch("db.plan.get_supabase_client")
 @patch("db.plan.get_plan_days")
@@ -1455,7 +1668,9 @@ def test_update_plan_day_cross_preserves_notes(mock_day_id, mock_get_days, mock_
     update_call = chain.table.return_value.update.call_args[0][0]
     assert "Was: STRENGTH" in update_call["notes"]
 
+
 # ── set_notes tests ───────────────────────────────────────────────────────────
+
 
 @patch("db.preferences.get_supabase_client")
 def test_set_notes_saves_value(mock_client):
@@ -1467,6 +1682,7 @@ def test_set_notes_saves_value(mock_client):
         {"user_id": "user1", "notes": "left knee tends to flare up"}, on_conflict="user_id"
     )
 
+
 @patch("db.preferences.get_supabase_client")
 def test_set_notes_none_clears_value(mock_client):
     chain = mock_client.return_value
@@ -1475,13 +1691,16 @@ def test_set_notes_none_clears_value(mock_client):
     assert result == {"status": "success"}
     chain.table.return_value.upsert.assert_called_once_with({"user_id": "user1", "notes": None}, on_conflict="user_id")
 
+
 @patch("db.preferences.get_supabase_client")
 def test_set_notes_db_error_returns_fail(mock_client):
     mock_client.return_value.table.side_effect = Exception("db down")
     result = set_notes("user1", "some notes")
     assert result == {"status": "fail"}
 
+
 # ── delete_garmin_credentials tests ──────────────────────────────────────────
+
 
 @patch("db.garmin.get_supabase_client")
 def test_delete_garmin_credentials_calls_delete(mock_client):

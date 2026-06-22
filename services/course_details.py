@@ -145,7 +145,6 @@ def get_course_details(user_id: str, location: str, race: str, query: str):
         response = CourseDetailsPlan.model_validate_json(response)
         _add_course_chunk(response.location, response.race, response.query, response.details)
         return {"query": response.query, "details": response.details}
-
     except Exception as e:
         print("Error parsing course details output:", e)
         if "--debug" in sys.argv:

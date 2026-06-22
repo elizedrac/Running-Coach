@@ -19,6 +19,7 @@ from services.memory import compress_history
 from services.pacing import _time_to_mins, pacing_calculator
 from services.plan import update_plan
 from services.planner import planner
+from services.race_info import get_race_info
 from services.sql_selector import execute_query
 from services.weather import get_weather
 
@@ -47,6 +48,7 @@ TOOL_REGISTRY = {
     "trend_analysis": _query_data,
     "pacing_calculator": pacing_calculator,
     "get_course_details": get_course_details,
+    "get_race_info": get_race_info,
     "update_preferences": update_preferences,
     "get_plan": get_plan,
     "update_plan": update_plan,
