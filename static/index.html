@@ -503,9 +503,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
         <div class="page-title" id="page-title">Dashboard</div>
         <div class="page-sub" id="page-sub">FRI · JUN 19 · 2026</div>
       </div>
-      <div class="topbar-right" id="topbar-actions">
-        <button class="btn">Edit Training Preferences</button>
-      </div>
+      <div class="topbar-right" id="topbar-actions"></div>
     </header>
 
     <div class="panels">
@@ -717,7 +715,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
       <div class="modal-field"><label>Target Pace</label><input type="text" id="edit-target-pace" placeholder="e.g. 8:30/mi"/></div>
       <div class="modal-field"><label>Notes</label><textarea id="edit-notes" rows="3" placeholder="Workout notes..."></textarea></div>
       <div class="modal-actions"><button class="modal-btn-secondary" onclick="exitDayEditMode()">Cancel</button><button class="modal-btn-primary" onclick="saveDayEdit()">Save</button></div>
-      <div style="text-align:center;margin-top:10px"><button onclick="clearDayEdit()" style="background:none;border:none;cursor:pointer;font-size:12px;color:#c0392b">Clear day</button></div>
+      <div style="text-align:center;margin-top:10px"><button onclick="confirmClearDay()" style="background:none;border:none;cursor:pointer;font-size:12px;color:#c0392b">Clear day</button></div>
       <div id="day-edit-error" style="display:none;font-size:12px;color:#c0392b;margin-top:8px;text-align:center"></div>
     </div>
   </div>
@@ -739,6 +737,18 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
     <div style="display:flex;gap:10px;justify-content:center">
       <button onclick="closeDeleteModal()" class="modal-btn-secondary" style="flex:1;padding:10px">Cancel</button>
       <button onclick="deletePlan()" style="flex:1;padding:10px;border:none;border-radius:8px;background:#c0392b;color:white;cursor:pointer;font-size:14px;font-weight:600">Delete</button>
+    </div>
+  </div>
+</div>
+
+<!-- Clear Day Modal -->
+<div id="clear-day-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:400;align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:16px;padding:28px 24px;max-width:320px;width:90%;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,.18)">
+    <div style="font-size:17px;font-weight:600;color:var(--ink);margin-bottom:8px">Reset this day to Rest?</div>
+    <div style="font-size:14px;color:var(--muted);margin-bottom:24px">This will clear the workout, miles, pace, and notes for this day.</div>
+    <div style="display:flex;gap:10px;justify-content:center">
+      <button onclick="closeClearDayModal()" class="modal-btn-secondary" style="flex:1;padding:10px">Cancel</button>
+      <button onclick="clearDayEdit()" style="flex:1;padding:10px;border:none;border-radius:8px;background:#c0392b;color:white;cursor:pointer;font-size:14px;font-weight:600">Clear day</button>
     </div>
   </div>
 </div>
@@ -1252,8 +1262,11 @@ async function saveDayEdit(){
   catch(e){const err=document.getElementById('day-edit-error');err.textContent='Failed to save. Please try again.';err.style.display='block';}
 }
 
+function confirmClearDay(){if(!_currentDayId)return;document.getElementById('clear-day-modal').style.display='flex';}
+function closeClearDayModal(){document.getElementById('clear-day-modal').style.display='none';}
+
 async function clearDayEdit(){
-  if(!_currentDayId||!confirm('Reset this day to Rest?'))return;
+  closeClearDayModal();
   try{const res=await apiFetch(`${API}/plan/day/${_currentDayId}`,{method:'DELETE'});if(!res.ok)throw new Error();Object.assign(_planDays[_currentDayId],{workout_type:'REST',target_miles:null,target_pace:null,notes:null});closeDayModal();loadPlan();}
   catch(e){const err=document.getElementById('day-edit-error');err.textContent='Failed. Please try again.';err.style.display='block';}
 }

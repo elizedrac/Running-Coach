@@ -15,7 +15,7 @@ from services.course_details import get_course_details
 from services.guardrails import challenger
 from services.llm import call_llm, client
 from services.pacing import pacing_calculator
-from services.prompts import CREATE_PLAN_SYSTEM, PLAN_CREATOR_TOOLS, UPDATE_PLAN_SYSTEM, build_create_plan_prompt
+from services.prompts import CREATE_PLAN_SYSTEM, PLAN_CREATOR_TOOLS, build_create_plan_prompt, build_update_plan_system
 from services.sql_selector import execute_query
 from services.trend_analysis import compute_load
 
@@ -102,11 +102,20 @@ def create_plan(user_id: str) -> dict:
     return {"status": "fail"}
 
 
-def update_plan(user_id, intent, include_activities: bool = False, local_today: str = None) -> dict:
+def update_plan(
+    user_id,
+    intent,
+    include_activities: bool = False,
+    local_today: str = None,
+    mode: str = "chat",
+    allowed_end: str = None,
+) -> dict:
     plan_id = get_plan_id(user_id)
     today = date.fromisoformat(local_today) if local_today else date.today()
     start_date = today - timedelta(days=7)
     end_date = today + timedelta(days=8)
+    allowed_start = start_date.isoformat() if mode == "chat" else today.isoformat()
+    allowed_end = allowed_end or end_date.isoformat()
     plan = get_plan_days(plan_id, start_date=start_date.isoformat(), end_date=end_date.isoformat())
     print(
         f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}, include_activities={include_activities}"
@@ -138,7 +147,8 @@ def update_plan(user_id, intent, include_activities: bool = False, local_today: 
             pass
 
     prompt = f"Today is {today.isoformat()}.\nUser intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (±7 days): {plan}{pacing_block}{activities_block}"
-    response = call_llm(system_prompt=UPDATE_PLAN_SYSTEM, user_prompt=prompt, max_tokens=4096)
+    system_prompt = build_update_plan_system(today.isoformat(), mode=mode)
+    response = call_llm(system_prompt=system_prompt, user_prompt=prompt, max_tokens=4096)
     print(f"[update_plan] raw LLM response ({len(response)} chars): {response[:500]}")
 
     response = response.strip()
@@ -150,7 +160,12 @@ def update_plan(user_id, intent, include_activities: bool = False, local_today: 
     response = response[start:end]
     try:
         parsed = UpdatePlanOutput.model_validate_json(response)
-        changes = [c.model_dump() for c in parsed.changes]
+        all_changes = [c.model_dump() for c in parsed.changes]
+        changes, out_of_range = [], []
+        for c in all_changes:
+            (changes if allowed_start <= c["plan_date"] <= allowed_end else out_of_range).append(c)
+        if out_of_range:
+            print(f"[update_plan] dropping {len(out_of_range)} change(s) outside {allowed_start}..{allowed_end}: {out_of_range}")
         print(f"[update_plan] changes={changes}")
         if not changes:
             print("[update_plan] WARNING: LLM returned empty changes list")
@@ -195,14 +210,17 @@ if __name__ == "__main__":
             f"Weekly refresh ({today.isoformat()}): review last week's completed workouts ({last_monday.isoformat()} to {last_sunday.isoformat()}) "
             f"and adjust this week's plan ({this_monday.isoformat()} to {next_sunday.isoformat()}) accordingly. "
             + notes_block
-            + "MANDATORY: Reschedule workouts to match preferred training days and days-per-week from preferences — any day not listed as a preferred training day must be REST or STRENGTH. Move workouts to preferred days even if it means restructuring the whole week. "
-            "Compare completed activities against what was planned last week: ease hard days if load was high, reduce mileage if significantly under-ran, adjust paces if last week skewed harder or easier than planned. "
+            + "Compare completed activities against what was planned last week: ease hard days if load was high, reduce mileage if significantly under-ran, adjust paces if last week skewed harder or easier than planned. "
             + acwr_block
-            + f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date}). "
-            "Spacing rules must be respected: no hard days (INTERVAL, TEMPO, LONG) on consecutive days, LONG run must be the last running day of the week and must have a REST or STRENGTH day after it. "
-            f"Only modify days from {this_monday.isoformat()} to {next_sunday.isoformat()}. Do not touch any earlier days."
+            + f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date})."
         )
 
         print(f"[cron] refreshing plan for user {user_id}")
-        result = update_plan(user_id, intent, include_activities=True)
+        result = update_plan(
+            user_id,
+            intent,
+            mode="weekly_refresh",
+            include_activities=True,
+            allowed_end=next_sunday.isoformat(),
+        )
         print(f"[cron] result: {result}")
