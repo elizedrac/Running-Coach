@@ -112,6 +112,10 @@ def update_plan(user_id, intent, include_activities: bool = False, local_today: 
         f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}, include_activities={include_activities}"
     )
 
+    if not plan_id:
+        print("[update_plan] no active plan for user — skipping LLM call")
+        return {"status": "skipped", "reason": "no active plan"}
+
     prefs = get_preferences(user_id)
     race = get_race(user_id)
     pacing_data = None
@@ -160,10 +164,9 @@ def update_plan(user_id, intent, include_activities: bool = False, local_today: 
 if __name__ == "__main__":
     load_dotenv()
 
-    user_id = os.getenv("USER_ID")
-
-    if not user_id:
-        raise ValueError()
+    user_ids = [u.strip() for u in os.getenv("USER_IDS", "").split(",") if u.strip()]
+    if not user_ids:
+        raise ValueError("USER_IDS env var not set")
 
     today = date.today()
     weekday = today.weekday()  # 0=Mon
@@ -172,32 +175,34 @@ if __name__ == "__main__":
     last_sunday = this_monday - timedelta(days=1)
     next_sunday = this_monday + timedelta(days=6)
 
-    load_data = compute_load(user_id)
-    acwr = load_data.get("acwr")
-    race = get_race(user_id)
-    race_date = race.get("race_date", "unknown")
+    for user_id in user_ids:
+        load_data = compute_load(user_id)
+        acwr = load_data.get("acwr")
+        race = get_race(user_id)
+        race_date = race.get("race_date", "unknown")
 
-    acwr_block = (
-        f"Current ACWR={round(acwr, 2)}. Only reduce load if ACWR > 1.3; maintain progression if ACWR is 0.8-1.3. "
-        if acwr is not None
-        else "ACWR unavailable — proceed with standard week-over-week progression rules. "
-    )
+        acwr_block = (
+            f"Current ACWR={round(acwr, 2)}. Only reduce load if ACWR > 1.3; maintain progression if ACWR is 0.8-1.3. "
+            if acwr is not None
+            else "ACWR unavailable — proceed with standard week-over-week progression rules. "
+        )
 
-    prefs = get_preferences(user_id)
-    notes = prefs.get("notes") if prefs else None
-    notes_block = f"ATHLETE NOTES (mandatory — take precedence over all other rules): {notes} " if notes else ""
+        prefs = get_preferences(user_id)
+        notes = prefs.get("notes") if prefs else None
+        notes_block = f"ATHLETE NOTES (mandatory — take precedence over all other rules): {notes} " if notes else ""
 
-    intent = (
-        f"Weekly refresh ({today.isoformat()}): review last week's completed workouts ({last_monday.isoformat()} to {last_sunday.isoformat()}) "
-        f"and adjust this week's plan ({this_monday.isoformat()} to {next_sunday.isoformat()}) accordingly. "
-        + notes_block
-        + "MANDATORY: Reschedule workouts to match preferred training days and days-per-week from preferences — any day not listed as a preferred training day must be REST or STRENGTH. Move workouts to preferred days even if it means restructuring the whole week. "
-        "Compare completed activities against what was planned last week: ease hard days if load was high, reduce mileage if significantly under-ran, adjust paces if last week skewed harder or easier than planned. "
-        + acwr_block
-        + f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date}). "
-        "Spacing rules must be respected: no hard days (INTERVAL, TEMPO, LONG) on consecutive days, LONG run must be the last running day of the week and must have a REST or STRENGTH day after it. "
-        f"Only modify days from {this_monday.isoformat()} to {next_sunday.isoformat()}. Do not touch any earlier days."
-    )
+        intent = (
+            f"Weekly refresh ({today.isoformat()}): review last week's completed workouts ({last_monday.isoformat()} to {last_sunday.isoformat()}) "
+            f"and adjust this week's plan ({this_monday.isoformat()} to {next_sunday.isoformat()}) accordingly. "
+            + notes_block
+            + "MANDATORY: Reschedule workouts to match preferred training days and days-per-week from preferences — any day not listed as a preferred training day must be REST or STRENGTH. Move workouts to preferred days even if it means restructuring the whole week. "
+            "Compare completed activities against what was planned last week: ease hard days if load was high, reduce mileage if significantly under-ran, adjust paces if last week skewed harder or easier than planned. "
+            + acwr_block
+            + f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date}). "
+            "Spacing rules must be respected: no hard days (INTERVAL, TEMPO, LONG) on consecutive days, LONG run must be the last running day of the week and must have a REST or STRENGTH day after it. "
+            f"Only modify days from {this_monday.isoformat()} to {next_sunday.isoformat()}. Do not touch any earlier days."
+        )
 
-    result = update_plan(user_id, intent, include_activities=True)
-    print(result)
+        print(f"[cron] refreshing plan for user {user_id}")
+        result = update_plan(user_id, intent, include_activities=True)
+        print(f"[cron] result: {result}")

@@ -946,11 +946,12 @@ on:
   workflow_dispatch:
 ```
 
-- Runs `python services/plan.py` (the `__main__` block)
-- Computes ACWR from `compute_load()`, fetches race date, builds a load-aware intent string covering last week's activities vs plan and this week's adjustments
+- Runs `python services/plan.py` (the `__main__` block), looping over all `USER_IDS`
+- Computes ACWR from `compute_load()`, fetches race date, builds a load-aware intent string covering last week's activities vs plan and this week's adjustments, per user
 - Intent enforces: ACWR-gated load reduction, ≤10% weekly mileage variance, ≤20% week-over-week increase, long runs flat or increasing, preferred training days respected
+- Skips a user with no active plan (`update_plan` returns early) rather than burning an LLM call against an empty plan
 - Requires `PYTHONPATH: ${{ github.workspace }}` so relative imports resolve correctly
-- Secrets: `SUPABASE_URL`, `SUPABASE_KEY`, `USER_ID`, `ANTHROPIC_API_KEY`
+- Secrets: `SUPABASE_URL`, `SUPABASE_KEY`, `USER_IDS`, `ANTHROPIC_API_KEY`
 
 ---
 
