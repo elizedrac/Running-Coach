@@ -228,7 +228,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 [data-theme="dark"] .plan-week-nav .week-label{color:var(--ink)}
 [data-theme="dark"] .btn-accent{background:rgba(77,158,247,.2);border-color:#4d9ef7;color:#4d9ef7}
 [data-theme="dark"] .btn-accent:hover{background:rgba(77,158,247,.3)}
-[data-theme="dark"] .chip-done{background:transparent;color:rgba(77,158,247,.5);border-color:rgba(77,158,247,.2)}
+[data-theme="dark"] .chip-done{background:rgba(77,158,247,.15)!important;color:#4d9ef7!important;border-color:rgba(77,158,247,.4)!important}
 [data-theme="dark"] .chip-today{background:rgba(77,158,247,.15)!important;color:#4d9ef7!important;border-color:rgba(77,158,247,.4)!important}
 [data-theme="dark"] .chip-upcoming{background:transparent;color:var(--faint);border-color:var(--border)}
 /* Coach */
@@ -419,11 +419,11 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
   #signout-popup button{background:none!important;border:none!important;padding:2px 4px!important;font-size:10px!important;color:var(--faint)!important;text-decoration:underline;width:auto!important}
 
   .mobile-topbar-icons{display:flex!important}
-  .topbar{padding:14px 16px}
+  .topbar{padding:14px 60px 14px 16px}
   .page-title{font-size:19px}
   .panel{padding:14px 14px 30px}
 
-  .sync-popover{left:50%!important;right:auto!important;top:64px!important;bottom:auto!important;transform:translateX(-50%)}
+  .sync-popover{left:50%!important;right:auto!important;top:64px!important;bottom:auto!important;transform:translateX(-50%);width:268px;max-width:calc(100vw - 32px);box-sizing:border-box}
 
   .btn{padding:6px 10px!important;font-size:11px!important}
   .topbar-right{flex-wrap:wrap;justify-content:flex-end;gap:6px!important}
