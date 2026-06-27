@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <title>RunCoach</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
@@ -25,7 +25,7 @@
   --accent-glow: rgba(95,156,152,0.26);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--body);height:100vh;overflow:hidden}
+body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--body);height:100vh;overflow:hidden;touch-action:manipulation}
 
 /* Shell */
 .shell{display:flex;height:100vh;overflow:hidden}
@@ -398,6 +398,8 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 
 .icon-btn{width:34px;height:34px;border-radius:50%;background:transparent;border:1px solid var(--border);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--muted);transition:all .15s;flex-shrink:0;font-family:'Archivo',sans-serif;font-weight:700;font-size:12px}
 .icon-btn:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-soft)}
+.icon-btn.syncing{animation:icon-btn-blink 1.4s ease-in-out infinite}
+@keyframes icon-btn-blink{0%,100%{border-color:var(--border);background:transparent}50%{border-color:var(--accent);background:var(--accent-soft)}}
 .mobile-topbar-icons{display:none;align-items:center;gap:8px}
 
 /* ── Mobile (≤768px) ──────────────────────────────────────────── */
@@ -422,6 +424,8 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
   .topbar{padding:14px 60px 14px 16px}
   .page-title{font-size:19px}
   .panel{padding:14px 14px 30px}
+  #p-coach{padding:14px 14px 0}
+  .chat-composer-wrap{padding:10px 0 max(10px,env(safe-area-inset-bottom))}
 
   .sync-popover{left:50%!important;right:auto!important;top:64px!important;bottom:auto!important;transform:translateX(-50%);width:268px;max-width:calc(100vw - 32px);box-sizing:border-box}
 
@@ -431,7 +435,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
   .db-row-1{grid-template-columns:1fr}
   .chart-wrap,.sparkline-wrap{display:none}
   .card{padding:16px}
-  .stat-tile{padding:12px}
+  .stat-tile{padding:12px;cursor:pointer}
   .sfooter-item{padding:10px 6px}
   .stat-tiles{grid-template-columns:1fr}
   #weather-card-row{display:none}
@@ -527,17 +531,6 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
             <span class="sync-status-text">NOMINAL</span>
           </div>
         </button>
-        <div class="sync-popover" id="sync-popover">
-          <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:12px">Sync Garmin Data</div>
-          <div class="modal-field"><label>Start date</label><input type="date" id="sync-start"/></div>
-          <div class="modal-field"><label>End date</label><input type="date" id="sync-end"/></div>
-          <div style="font-size:11px;color:#c0392b;display:none;margin-top:4px" id="sync-error"></div>
-          <div style="display:flex;gap:8px;margin-top:12px">
-            <button class="modal-btn-secondary" style="flex:1;padding:8px" onclick="setDefaultDates()">Last 7 days</button>
-            <button class="modal-btn-primary" style="flex:1;padding:8px" onclick="runSync()">Sync</button>
-          </div>
-          <div style="margin-top:10px;text-align:center"><button onclick="disconnectGarmin()" style="background:none;border:none;font-size:11px;color:var(--faint);cursor:pointer;text-decoration:underline">Disconnect Garmin</button></div>
-        </div>
       </div>
       <div class="sync-time" id="sync-time-label">Never synced</div>
       <div class="user-row" onclick="toggleSignOut(event)" style="cursor:pointer" title="Click to sign out">
@@ -563,7 +556,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
       <div style="display:flex;align-items:center;gap:10px">
         <div class="topbar-right" id="topbar-actions"></div>
         <div class="mobile-topbar-icons">
-          <button class="icon-btn" onclick="toggleSyncPopover(event)" data-tooltip="Sync Garmin data">
+          <button class="icon-btn" id="mobile-sync-btn" onclick="toggleSyncPopover(event)" data-tooltip="Sync Garmin data">
             <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><circle cx="7" cy="7" r="3"/><path d="M7 1v2M7 11v2M1 7h2M11 7h2M3.1 3.1l1.4 1.4M9.5 9.5l1.4 1.4M3.1 10.9l1.4-1.4M9.5 4.5l1.4-1.4"/></svg>
           </button>
         </div>
@@ -604,17 +597,17 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
             <div class="card">
               <div class="card-label" style="margin-bottom:14px">HEALTH TRENDS</div>
               <div class="stat-tiles">
-                <div class="stat-tile">
+                <div class="stat-tile" onclick="openMetricModal('steps')">
                   <div class="stile-label">STEPS</div>
                   <div class="stile-row"><span class="stile-val" id="spark-steps-val">—</span><span class="stile-delta" id="spark-steps-trend"></span></div>
                   <div class="sparkline-wrap" style="position:relative;height:64px;overflow:visible"><canvas id="spark-steps-chart"></canvas></div>
                 </div>
-                <div class="stat-tile">
+                <div class="stat-tile" onclick="openMetricModal('sleep')">
                   <div class="stile-label">SLEEP</div>
                   <div class="stile-row"><span class="stile-val" id="spark-sleep-val">—</span><span class="stile-delta" id="spark-sleep-trend"></span></div>
                   <div class="sparkline-wrap" style="position:relative;height:64px;overflow:visible"><canvas id="spark-sleep-chart"></canvas></div>
                 </div>
-                <div class="stat-tile">
+                <div class="stat-tile" onclick="openMetricModal('rhr')">
                   <div class="stile-label">RESTING HR</div>
                   <div class="stile-row"><span class="stile-val" id="spark-rhr-val">—</span><span class="stile-delta" id="spark-rhr-trend"></span></div>
                   <div class="sparkline-wrap" style="position:relative;height:64px;overflow:visible"><canvas id="spark-rhr-chart"></canvas></div>
@@ -703,6 +696,18 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
     </div><!-- /panels -->
   </div><!-- /main -->
 </div><!-- /shell -->
+
+<div class="sync-popover" id="sync-popover">
+  <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:12px">Sync Garmin Data</div>
+  <div class="modal-field"><label>Start date</label><input type="date" id="sync-start"/></div>
+  <div class="modal-field"><label>End date</label><input type="date" id="sync-end"/></div>
+  <div style="font-size:11px;color:#c0392b;display:none;margin-top:4px" id="sync-error"></div>
+  <div style="display:flex;gap:8px;margin-top:12px">
+    <button class="modal-btn-secondary" style="flex:1;padding:8px" onclick="setDefaultDates()">Last 7 days</button>
+    <button class="modal-btn-primary" style="flex:1;padding:8px" onclick="runSync()">Sync</button>
+  </div>
+  <div style="margin-top:10px;text-align:center"><button onclick="disconnectGarmin()" style="background:none;border:none;font-size:11px;color:var(--faint);cursor:pointer;text-decoration:underline">Disconnect Garmin</button></div>
+</div>
 
 <!-- Edit Prefs Modal -->
 <div class="modal-overlay" id="edit-prefs-modal">
@@ -830,6 +835,16 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 </div>
 
 <!-- Month Modal -->
+<div id="metric-chart-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:400;align-items:center;justify-content:center;padding:20px">
+  <div style="background:var(--card);border-radius:16px;width:100%;max-width:420px;padding:20px;box-shadow:0 8px 40px rgba(0,0,0,.18)">
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+      <div style="font-family:'Archivo',sans-serif;font-weight:700;font-size:15px;color:var(--ink)" id="metric-chart-modal-label"></div>
+      <button onclick="closeMetricModal()" class="modal-close" style="font-size:22px">×</button>
+    </div>
+    <div style="position:relative;height:220px"><canvas id="metric-chart-modal-canvas"></canvas></div>
+  </div>
+</div>
+
 <div id="month-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:400;align-items:flex-start;justify-content:center;padding:24px 16px;overflow-y:auto">
   <div style="background:var(--card);border-radius:16px;width:100%;max-width:700px;padding:24px;box-shadow:0 8px 40px rgba(0,0,0,.18);margin:auto">
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
@@ -869,7 +884,8 @@ let SID = _uuid();
 let hasPlan = false;
 let userLocation = 'New York, NY';
 let abortController = null;
-let _stepsChart = null, _sleepChart = null, _rhrChart = null, _mileageChart = null;
+let _stepsChart = null, _sleepChart = null, _rhrChart = null, _mileageChart = null, _metricModalChart = null;
+let _healthChartData = null;
 let _allActivities = [], _activityWeekView = false;
 let _planWeekOffset = 0, _planDays = {}, _weekActivities = {}, _effectiveMiles = {}, _nonRunCompleted = new Set();
 let _monthOffset = 0, _dayModalFromMonth = false, _currentDayId = null, _progressInterval = null;
@@ -958,6 +974,7 @@ async function loadHealthChart(){
     document.getElementById('spark-sleep-trend').innerHTML=trendArrow(sleep);
     document.getElementById('spark-rhr-trend').innerHTML=trendArrow(rhr,true);
     const labels=rows.map(r=>{const[y,m,d]=r.calendar_date.split('T')[0].split('-');return new Date(+y,+m-1,+d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});});
+    _healthChartData={labels,steps,sleep,rhr};
     const ac=accentColor();
     const noAxes={x:{display:false},y:{display:false}};
     const baseOpts=(suffix)=>({responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,displayColors:false,backgroundColor:'white',borderColor:'#ebe6dc',borderWidth:1,titleColor:'#23283a',bodyColor:'#8c93a1',padding:8,cornerRadius:8,callbacks:{label:ctx=>ctx.raw!=null?`${ctx.raw}${suffix}`:'No data'}}},scales:noAxes});
@@ -971,6 +988,39 @@ async function loadHealthChart(){
   }catch(e){console.error('Health:',e);}
   _syncChartColors();
 }
+
+const METRIC_MODAL_CONFIG={
+  steps:{label:'Steps — Last 7 Days',type:'bar',suffix:'K'},
+  sleep:{label:'Sleep — Last 7 Days',type:'line',suffix:'h'},
+  rhr:{label:'Resting HR — Last 7 Days',type:'line',suffix:' bpm'},
+};
+function openMetricModal(metric){
+  if(window.innerWidth>768||!_healthChartData)return;
+  const cfg=METRIC_MODAL_CONFIG[metric];
+  const{labels}=_healthChartData;
+  const data=_healthChartData[metric];
+  const ac=accentColor();
+  const tick=getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
+  const grid=getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
+  const cardBg=getComputedStyle(document.documentElement).getPropertyValue('--card').trim();
+  const ink=getComputedStyle(document.documentElement).getPropertyValue('--ink').trim();
+  const dataset=metric==='steps'
+    ?{data,backgroundColor:data.map((_,i)=>i===data.length-1?ac:(_darkMode?ac+'88':ac+'66')),borderRadius:3,barPercentage:0.6}
+    :{data,borderColor:ac,backgroundColor:ac+(metric==='sleep'?'28':'1a'),fill:true,tension:0.4,borderWidth:2,spanGaps:true,pointRadius:3,pointHoverRadius:5,pointBackgroundColor:ac,pointBorderWidth:0};
+  document.getElementById('metric-chart-modal-label').textContent=cfg.label;
+  if(_metricModalChart)_metricModalChart.destroy();
+  document.getElementById('metric-chart-modal').style.display='flex';
+  _metricModalChart=new Chart(document.getElementById('metric-chart-modal-canvas'),{
+    type:cfg.type,
+    data:{labels,datasets:[dataset]},
+    options:{
+      responsive:true,maintainAspectRatio:false,animation:false,spanGaps:true,
+      plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,displayColors:false,backgroundColor:cardBg,borderColor:grid,borderWidth:1,titleColor:ink,bodyColor:tick,padding:8,cornerRadius:8,callbacks:{label:ctx=>ctx.raw!=null?`${ctx.raw}${cfg.suffix}`:'No data'}}},
+      scales:{x:{ticks:{color:tick,font:{size:10}},grid:{display:false}},y:{beginAtZero:metric==='steps',ticks:{color:tick,font:{size:10}},grid:{color:grid}}}
+    }
+  });
+}
+function closeMetricModal(){document.getElementById('metric-chart-modal').style.display='none';}
 
 async function loadMileageChart(){
   try{
@@ -1159,6 +1209,7 @@ document.getElementById('chat-input').addEventListener('keydown',e=>{if(e.key===
 // ── Garmin sync ───────────────────────────────────────────────
 async function toggleSyncPopover(e){
   e.stopPropagation();
+  const btn=e.currentTarget;
   const res=await apiFetch(`${API}/garmin/credentials/status`);
   const{connected}=await res.json();
   if(!connected){document.getElementById('garmin-setup-modal').classList.add('open');return;}
@@ -1166,7 +1217,6 @@ async function toggleSyncPopover(e){
   if(pop.classList.contains('open')){
     document.getElementById('sync-end').value=localToday();
     document.getElementById('sync-start').value=localToday();
-    const btn=document.getElementById('sync-btn');
     const r=btn.getBoundingClientRect();
     pop.style.left=(r.right+10)+'px';
     pop.style.bottom=(window.innerHeight-r.bottom)+'px';
@@ -1182,7 +1232,7 @@ async function saveGarminSetup(){
   err.style.display='none';
   const res=await apiFetch(`${API}/garmin/credentials`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({email,password})});
   if(!res.ok){err.textContent='Failed to save — try again.';err.style.display='block';return;}
-  document.getElementById('garmin-setup-modal').classList.remove('open');showToast('Garmin account connected','#437a77');
+  document.getElementById('garmin-setup-modal').classList.remove('open');showToast('Garmin account connected','var(--accent-dark)');
 }
 async function disconnectGarmin(){document.getElementById('sync-popover').classList.remove('open');await apiFetch(`${API}/garmin/credentials`,{method:'DELETE'});showToast('Garmin disconnected');document.getElementById('garmin-setup-modal').classList.add('open');}
 
@@ -1194,13 +1244,14 @@ async function runSync(){
   if(start>end){errEl.textContent='Start date must be before end date.';errEl.style.display='block';return;}
   errEl.style.display='none';document.getElementById('sync-popover').classList.remove('open');
   const btn=document.getElementById('sync-btn');btn.querySelector('.garmin-btn-left').lastChild.textContent=' Syncing...';btn.disabled=true;
+  const mobileBtn=document.getElementById('mobile-sync-btn');mobileBtn.classList.add('syncing');mobileBtn.disabled=true;
   try{
     const res=await apiFetch(`${API}/garmin-sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:start,end_date:end})});
     const data=await res.json();
     if(data.status==='error'){showToast('Sync failed — check your Garmin connection','#8b4a42');}
-    else{showToast('Garmin sync complete','#437a77');const st=new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});document.getElementById('sync-time-label').textContent='SYNCED '+st;localStorage.setItem('last_sync',st);loadActivity();loadHealthChart();loadMileageChart();}
+    else{showToast('Garmin sync complete','var(--accent-dark)');const st=new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});document.getElementById('sync-time-label').textContent='SYNCED '+st;localStorage.setItem('last_sync',st);loadActivity();loadHealthChart();loadMileageChart();}
   }catch(e){showToast('Sync failed','#8b4a42');}
-  finally{btn.querySelector('.garmin-btn-left').lastChild.textContent=' Garmin Sync';btn.disabled=false;}
+  finally{btn.querySelector('.garmin-btn-left').lastChild.textContent=' Garmin Sync';btn.disabled=false;mobileBtn.classList.remove('syncing');mobileBtn.disabled=false;}
 }
 
 // ── Training Plan ─────────────────────────────────────────────
@@ -1280,7 +1331,7 @@ function jumpToToday(){_planWeekOffset=0;document.getElementById('jump-today-btn
 
 async function runPlanSync(){
   const btn=document.getElementById('plan-sync-btn');btn.textContent='Syncing...';btn.disabled=true;
-  try{const res=await apiFetch(`${API}/plan/sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({today:localToday()})});const data=await res.json();const count=data.changes?data.changes.length:0;showToast(count>0?`Plan updated — ${count} day${count!==1?'s':''} changed`:'Plan already up to date','#437a77');loadPlan();}
+  try{const res=await apiFetch(`${API}/plan/sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({today:localToday()})});const data=await res.json();const count=data.changes?data.changes.length:0;showToast(count>0?`Plan updated — ${count} day${count!==1?'s':''} changed`:'Plan already up to date','var(--accent-dark)');loadPlan();}
   catch(e){showToast('Sync failed — try again','#8b4a42');}
   finally{btn.textContent='Sync Plan';btn.disabled=false;}
 }
@@ -1395,7 +1446,7 @@ function closeEditPrefsModal(){document.getElementById('edit-prefs-modal').class
 async function saveEditedPrefs(){
   const post=(url,body)=>apiFetch(`${API}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
   const err=document.getElementById('ep-error');const days=parseInt(document.getElementById('ep-days').value);const avg=parseFloat(document.getElementById('ep-avg-miles').value);const max=parseFloat(document.getElementById('ep-max-miles').value);const prefDays=[...document.querySelectorAll('#ep-pref-days .day-chip.selected')].map(d=>d.textContent);const notes=document.getElementById('ep-notes').value.trim();
-  try{const calls=[];if(!isNaN(days))calls.push(post('/preferences/total-days',{days_per_week:days}));if(!isNaN(avg))calls.push(post('/preferences/avg-miles',{avg_miles:avg}));if(!isNaN(max))calls.push(post('/preferences/max-miles',{max_miles:max}));if(prefDays.length)calls.push(post('/preferences/preferred-days',{preferred_days:prefDays}));calls.push(post('/preferences/notes',{notes:notes||null}));await Promise.all(calls);closeEditPrefsModal();showToast('Preferences updated','#437a77');}
+  try{const calls=[];if(!isNaN(days))calls.push(post('/preferences/total-days',{days_per_week:days}));if(!isNaN(avg))calls.push(post('/preferences/avg-miles',{avg_miles:avg}));if(!isNaN(max))calls.push(post('/preferences/max-miles',{max_miles:max}));if(prefDays.length)calls.push(post('/preferences/preferred-days',{preferred_days:prefDays}));calls.push(post('/preferences/notes',{notes:notes||null}));await Promise.all(calls);closeEditPrefsModal();showToast('Preferences updated','var(--accent-dark)');}
   catch(e){err.textContent='Something went wrong. Please try again.';err.style.display='block';}
 }
 document.getElementById('edit-prefs-modal').addEventListener('click',e=>{if(e.target===document.getElementById('edit-prefs-modal'))closeEditPrefsModal();});
@@ -1411,7 +1462,7 @@ function toggleEditCustomDistance(val){document.getElementById('er-custom-distan
 async function saveEditedRace(){
   const post=(url,body)=>apiFetch(`${API}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const err=document.getElementById('er-error');
   const distVal=document.getElementById('er-distance').value;const miles=distVal==='custom'?parseFloat(document.getElementById('er-custom-miles').value):parseFloat(distVal);const raceName=document.getElementById('er-race-name').value.trim();const goalTime=document.getElementById('er-goal-time').value.trim();const raceDate=document.getElementById('er-race-date').value;
-  try{const calls=[];if(raceName)calls.push(post('/race/description',{race_description:raceName}));if(goalTime)calls.push(post('/race/time',{goal_time:goalTime}));if(raceDate)calls.push(post('/race/date',{race_date:raceDate}));if(!isNaN(miles))calls.push(post('/race/distance',{race_distance_miles:miles}));await Promise.all(calls);closeEditRaceModal();showToast('Race updated','#437a77');}
+  try{const calls=[];if(raceName)calls.push(post('/race/description',{race_description:raceName}));if(goalTime)calls.push(post('/race/time',{goal_time:goalTime}));if(raceDate)calls.push(post('/race/date',{race_date:raceDate}));if(!isNaN(miles))calls.push(post('/race/distance',{race_distance_miles:miles}));await Promise.all(calls);closeEditRaceModal();showToast('Race updated','var(--accent-dark)');}
   catch(e){err.textContent='Something went wrong. Please try again.';err.style.display='block';}
 }
 document.getElementById('edit-race-modal').addEventListener('click',e=>{if(e.target===document.getElementById('edit-race-modal'))closeEditRaceModal();});
@@ -1429,7 +1480,7 @@ function toggleDay(el){el.classList.toggle('selected');}
 async function submitPlan(){
   const days=document.getElementById('p-days').value,err=document.getElementById('step2-error');if(!days){err.textContent='Please enter days per week.';err.style.display='block';return;}err.style.display='none';
   const distVal=document.getElementById('p-distance').value;const miles=distVal==='custom'?parseFloat(document.getElementById('p-custom-miles').value):parseFloat(distVal);const prefDays=[...document.querySelectorAll('#p-pref-days .day-chip.selected')].map(d=>d.textContent);const btn=document.querySelector('#plan-step-2 .modal-btn-primary');btn.disabled=true;btn.textContent='Saving...';
-  try{const post=(url,body)=>apiFetch(`${API}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const calls=[post('/race/date',{race_date:document.getElementById('p-race-date').value}),post('/race/distance',{race_distance_miles:miles}),post('/preferences/total-days',{days_per_week:parseInt(days)})];const rn=document.getElementById('p-race-name').value.trim(),gt=document.getElementById('p-goal-time').value.trim(),avg=parseFloat(document.getElementById('p-avg-miles').value),max=parseFloat(document.getElementById('p-max-miles').value);if(rn)calls.push(post('/race/description',{race_description:rn}));if(gt)calls.push(post('/race/time',{goal_time:gt}));if(!isNaN(avg))calls.push(post('/preferences/avg-miles',{avg_miles:avg}));if(!isNaN(max))calls.push(post('/preferences/max-miles',{max_miles:max}));if(prefDays.length)calls.push(post('/preferences/preferred-days',{preferred_days:prefDays}));await Promise.all(calls);closePlanModal();showPlanGenerating();const planRes=await apiFetch(`${API}/plan/create`,{method:'POST'});hidePlanGenerating();const planData=await planRes.json();if(!planRes.ok||planData.status!=='success')throw new Error();showToast('Training plan created!','#437a77');_planWeekOffset=0;loadPlan();switchTab('plan',document.querySelector('[onclick*="plan"]').parentElement.children[2]);}
+  try{const post=(url,body)=>apiFetch(`${API}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const calls=[post('/race/date',{race_date:document.getElementById('p-race-date').value}),post('/race/distance',{race_distance_miles:miles}),post('/preferences/total-days',{days_per_week:parseInt(days)})];const rn=document.getElementById('p-race-name').value.trim(),gt=document.getElementById('p-goal-time').value.trim(),avg=parseFloat(document.getElementById('p-avg-miles').value),max=parseFloat(document.getElementById('p-max-miles').value);if(rn)calls.push(post('/race/description',{race_description:rn}));if(gt)calls.push(post('/race/time',{goal_time:gt}));if(!isNaN(avg))calls.push(post('/preferences/avg-miles',{avg_miles:avg}));if(!isNaN(max))calls.push(post('/preferences/max-miles',{max_miles:max}));if(prefDays.length)calls.push(post('/preferences/preferred-days',{preferred_days:prefDays}));await Promise.all(calls);closePlanModal();showPlanGenerating();const planRes=await apiFetch(`${API}/plan/create`,{method:'POST'});hidePlanGenerating();const planData=await planRes.json();if(!planRes.ok||planData.status!=='success')throw new Error();showToast('Training plan created!','var(--accent-dark)');_planWeekOffset=0;loadPlan();switchTab('plan',document.querySelector('[onclick*="plan"]').parentElement.children[2]);}
   catch(e){hidePlanGenerating();showToast('Failed to create plan. Please try again.','#8b4a42');btn.disabled=false;btn.textContent='Create Plan';}
 }
 document.getElementById('plan-modal').addEventListener('click',e=>{if(e.target===document.getElementById('plan-modal'))closePlanModal();});
