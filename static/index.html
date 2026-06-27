@@ -25,7 +25,7 @@
   --accent-glow: rgba(95,156,152,0.26);
 }
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--body);height:100vh;overflow:hidden;touch-action:manipulation}
+body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--body);height:100vh;overflow:hidden;touch-action:pan-x pan-y}
 
 /* Shell */
 .shell{display:flex;height:100vh;overflow:hidden}
@@ -349,8 +349,9 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 .modal-step{font-size:12px;color:var(--muted);margin-bottom:20px}
 .modal-field{margin-bottom:14px}
 .modal-field label{display:block;font-size:12px;color:var(--muted);margin-bottom:5px;font-weight:500}
-.modal-field input,.modal-field select,.modal-field textarea{width:100%;border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:13.5px;outline:none;color:var(--ink);font-family:'Hanken Grotesk',sans-serif;background:var(--card)}
+.modal-field input,.modal-field select,.modal-field textarea{width:100%;max-width:100%;min-width:0;box-sizing:border-box;border:1px solid var(--border);border-radius:8px;padding:9px 12px;font-size:13.5px;outline:none;color:var(--ink);font-family:'Hanken Grotesk',sans-serif;background:var(--card)}
 .modal-field input:focus,.modal-field select:focus,.modal-field textarea:focus{border-color:var(--accent)}
+.modal-field input[type="date"]{-webkit-appearance:none;appearance:none}
 .modal-days{display:flex;gap:6px;flex-wrap:wrap}
 .day-chip{padding:6px 12px;border:1px solid var(--border);border-radius:20px;font-size:12px;cursor:pointer;color:var(--muted);transition:all .15s;user-select:none}
 .day-chip.selected{background:var(--accent);border-color:var(--accent);color:white}
@@ -367,7 +368,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 .stat-value{font-weight:500;color:var(--ink)}
 
 /* Sync popover */
-.sync-popover{display:none;position:fixed;background:var(--card);border-radius:12px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:268px;z-index:400;border:1px solid var(--border)}
+.sync-popover{display:none;position:fixed;background:var(--card);border-radius:12px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.15);width:268px;box-sizing:border-box;overflow:hidden;z-index:400;border:1px solid var(--border)}
 .sync-popover.open{display:block}
 
 /* Plan progress */
@@ -894,6 +895,9 @@ const RUNNING_TYPES = new Set(['EASY','AEROBIC','LONG','TEMPO','INTERVAL']);
 const DOW_ORDER = ['MON','TUE','WED','THU','FRI','SAT','SUN'];
 const DIST_TO_LABEL = {'3.107':'5K','6.214':'10K','13.1094':'Half Marathon','26.2188':'Marathon'};
 const SUGGESTED_PROMPTS = ['How did my training go this week?','What should my long run pace be?','Am I on track for my race goal?','How is my sleep affecting my performance?','Should I do a recovery run today?','What are my heart rate zones?'];
+
+// iOS Safari fires non-standard gesture events for pinch-zoom that ignore touch-action/viewport-scale.
+document.addEventListener('gesturestart',e=>e.preventDefault());
 
 // ── Auth ──────────────────────────────────────────────────────
 (function(){ if(!sessionStorage.getItem('rc_token')) window.location.href='/login.html'; })();
