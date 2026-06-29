@@ -103,5 +103,7 @@ Original user query: {query}"""
         "info": parsed.info.model_dump(),
     }
     embedding = voyage_client.embed([query], model="voyage-3-lite").embeddings[0] if voyage_client else None
-    set_cached(query, json.dumps(info_dict), parsed.race, parsed.location, parsed.info_type, embedding, raw_result=results)
+    set_cached(
+        query, json.dumps(info_dict), parsed.race, parsed.location, parsed.info_type, embedding, raw_result=results
+    )
     return info_dict

@@ -1,4 +1,11 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: runcoach-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+
   app:
     build: .
     container_name: runcoach
@@ -6,3 +13,5 @@ services:
     ports:
       - "8000:8000"
     restart: unless-stopped
+    depends_on:
+      - redis

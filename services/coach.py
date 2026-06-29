@@ -22,6 +22,7 @@ from services.planner import planner
 from services.race_info import get_race_info
 from services.sql_selector import execute_query
 from services.weather import get_weather
+from services.write_selector import execute_write
 
 RACE_DISTANCES_KNOWLEDGE = json.loads(
     Path(__file__).parent.parent.joinpath("knowledge/race_distances.json").read_text()
@@ -41,6 +42,10 @@ def _query_data(
     )
 
 
+def _update_settings(user_id: str, action_intent: str = ""):
+    return execute_write(user_id, action_intent)
+
+
 TOOL_REGISTRY = {
     "get_weather": get_weather,
     "garmin_sync": garmin_sync,
@@ -54,6 +59,7 @@ TOOL_REGISTRY = {
     "update_plan": update_plan,
     "get_race": get_race,
     "race_prep_info": lambda user_id, **kwargs: None,
+    "update_settings": _update_settings,
 }
 
 
@@ -204,6 +210,8 @@ def orchestrate(
                         tool_results[name] = result
                     if name == "update_plan" and isinstance(result, dict) and result.get("status") == "success":
                         yield ("plan_updated", None)
+                    if name == "update_settings" and isinstance(result, dict) and result.get("status") == "success":
+                        yield ("theme_updated", result.get("theme"))
                 except Exception as e:
                     print(f"[coach] {name} EXCEPTION: {e}")
                     tool_results[name] = f"Error running {name}: {e}"

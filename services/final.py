@@ -2,6 +2,7 @@
 from pathlib import Path
 
 from db.plan import get_current_plan
+from db.user_info import get_user_info
 from models.planner import PlannerOutput
 from services.llm import stream_llm
 from services.prompts import BASE_COACH, HEALTH_METRICS_KNOWLEDGE, TOOL_SNIPPETS, build_query_data_extra
@@ -52,4 +53,7 @@ def final_output(
 
         user_prompt += knowledge
 
-    yield from stream_llm(system_prompt, user_prompt, cache_system=True)
+    name = get_user_info(user_id).get("first_name") if user_id else None
+    extra_system = f"The athlete's name is {name}. Address them by name occasionally and naturally — not in every message." if name else None
+
+    yield from stream_llm(system_prompt, user_prompt, cache_system=True, extra_system=extra_system)

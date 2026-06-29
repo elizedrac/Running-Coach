@@ -1,9 +1,11 @@
 # Main /ask entry point. Thin wrapper that calls services/coach.py::orchestrate().
+import dataclasses
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from db.redis import get_redis
 from models.planner import AskRequest, History
 from services.auth import get_current_user
 from services.coach import orchestrate
@@ -11,15 +13,25 @@ from services.end import detect_end, generate_followups
 
 router = APIRouter()
 
-session_memory = {}
+SESSION_TTL = 86400
+
+
+def _load_history(session_id: str) -> History:
+    r = get_redis()
+    raw = r.get(f"session:{session_id}")
+    return History(**json.loads(raw)) if raw else History()
+
+
+def _save_history(session_id: str, hist: History) -> None:
+    r = get_redis()
+    r.setex(f"session:{session_id}", SESSION_TTL, json.dumps(dataclasses.asdict(hist)))
 
 
 @router.post("/ask")
 def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
     user_input = body.query
-
     session_id = body.session_id
-    hist = session_memory.get(session_id, History())
+    hist = _load_history(session_id)
 
     def generate():
         try:
@@ -37,8 +49,10 @@ def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
                     yield f"data: {json.dumps({'type': 'status', 'text': data})}\n\n"
                 elif event_type == "plan_updated":
                     yield f"data: {json.dumps({'type': 'plan_updated'})}\n\n"
+                elif event_type == "theme_updated":
+                    yield f"data: {json.dumps({'type': 'theme_updated', 'theme': data})}\n\n"
                 elif event_type == "done":
-                    session_memory[body.session_id] = data
+                    _save_history(session_id, data)
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
@@ -49,5 +63,6 @@ def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
 
 @router.delete("/session/{session_id}")
 def clear_session(session_id: str):
-    session_memory.pop(session_id, None)
+    r = get_redis()
+    r.delete(f"session:{session_id}")
     return {"status": "cleared"}

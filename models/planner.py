@@ -16,9 +16,15 @@ class PlannerOutput(BaseModel):
     tools: list[ToolPlan] = []
 
 
-# For SQL selector
+# For SQL selector (read-only)
 class SQLPlan(BaseModel):
     queries: list[str]
+
+
+# For write selector
+class WritePlan(BaseModel):
+    action: Optional[str] = None
+    args: dict = {}
 
 
 class CourseDetailsPlan(BaseModel):

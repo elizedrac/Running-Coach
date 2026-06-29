@@ -167,7 +167,12 @@ def sync_plan(body: SyncPlanRequest = SyncPlanRequest(), user_id: str = Depends(
         next_sunday = today_dt + timedelta(days=6 - today_dt.weekday())
         intent = f"Reconcile plan with actual Garmin activities. Today is {today}. Update completed days (start of current week through today) to reflect actual Garmin activities. For future days within this week: only adjust if a completed day's load warrants it (e.g. ease the next hard day if today's run was significantly harder or longer than planned)."
         return update_plan(
-            user_id, intent, include_activities=True, local_today=today, mode="sync", allowed_end=next_sunday.isoformat()
+            user_id,
+            intent,
+            include_activities=True,
+            local_today=today,
+            mode="sync",
+            allowed_end=next_sunday.isoformat(),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

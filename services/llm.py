@@ -49,7 +49,12 @@ def call_llm(
 
 
 def stream_llm(
-    system_prompt: str, user_prompt: str, model: str = DEFAULT_MODEL, max_tokens: int = 1024, cache_system: bool = False
+    system_prompt: str,
+    user_prompt: str,
+    model: str = DEFAULT_MODEL,
+    max_tokens: int = 1024,
+    cache_system: bool = False,
+    extra_system: str = None,
 ):
     """Yields text chunks as Claude generates them."""
     system = (
@@ -57,6 +62,10 @@ def stream_llm(
         if cache_system
         else system_prompt
     )
+    if extra_system:
+        if isinstance(system, str):
+            system = [{"type": "text", "text": system}]
+        system.append({"type": "text", "text": extra_system})
     with client.messages.stream(
         model=model,
         system=system,

@@ -665,7 +665,9 @@ def test_query_data_extra_empty_when_no_signals():
 
 
 def test_query_data_extra_partial_week_note_on_real_comparison():
-    result = {"miles_trend": {"data": {"metric": "total_miles", "current": 10.5, "previous": 12.0, "trend": "declining"}}}
+    result = {
+        "miles_trend": {"data": {"metric": "total_miles", "current": 10.5, "previous": 12.0, "trend": "declining"}}
+    }
     assert "PARTIAL WEEK" in build_query_data_extra(result)
 
 

@@ -12,3 +12,4 @@ garminconnect>=0.3.4
 curl-cffi
 pytest
 voyageai
+redis

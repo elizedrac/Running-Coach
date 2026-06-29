@@ -1,4 +1,4 @@
-# Haiku call that picks SQL func + args from REGISTRY (SQL path only).
+# Haiku call that picks SQL func + args from REGISTRY (read-only path — see write_selector.py for writes).
 import json
 import sys
 from datetime import datetime, timedelta

@@ -17,6 +17,7 @@ dependencies = [
     "pytest",
     "voyageai",
     "ruff",
+    "redis>=8.0.1",
 ]
 
 [tool.pytest.ini_options]

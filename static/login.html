@@ -38,7 +38,7 @@ button:disabled{background:var(--faint);cursor:not-allowed}
   </form>
 </div>
 <script>
-  if (sessionStorage.getItem('rc_token')) window.location.href = '/';
+  if (localStorage.getItem('rc_token')) window.location.href = '/';
   async function handleLogin(e) {
     e.preventDefault();
     const btn = document.getElementById('submit-btn'), err = document.getElementById('error-msg');
@@ -47,7 +47,7 @@ button:disabled{background:var(--faint);cursor:not-allowed}
       const res = await fetch('/auth/login', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ email: document.getElementById('email').value, password: document.getElementById('password').value }) });
       if (!res.ok) throw new Error();
       const data = await res.json();
-      sessionStorage.setItem('rc_token', data.access_token);
+      localStorage.setItem('rc_token', data.access_token);
       window.location.href = '/';
     } catch { err.style.display = 'block'; btn.disabled = false; btn.textContent = 'Sign in'; }
   }

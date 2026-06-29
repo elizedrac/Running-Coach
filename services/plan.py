@@ -165,7 +165,9 @@ def update_plan(
         for c in all_changes:
             (changes if allowed_start <= c["plan_date"] <= allowed_end else out_of_range).append(c)
         if out_of_range:
-            print(f"[update_plan] dropping {len(out_of_range)} change(s) outside {allowed_start}..{allowed_end}: {out_of_range}")
+            print(
+                f"[update_plan] dropping {len(out_of_range)} change(s) outside {allowed_start}..{allowed_end}: {out_of_range}"
+            )
         print(f"[update_plan] changes={changes}")
         if not changes:
             print("[update_plan] WARNING: LLM returned empty changes list")

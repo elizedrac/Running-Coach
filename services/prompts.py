@@ -23,6 +23,7 @@ TOOL_METADATA = {
     "get_race_info": "Get time-sensitive race logistics via web search — registration dates/process, entry fees, lottery odds, qualifying standards, corral assignment, or race-day start time/location. NOT for course terrain (use get_course_details), general race-day prep advice (use race_prep_info), or the user's own race goal (use get_race).",
     "update_preferences": "Update a specific training preference when the user explicitly asks to change it — days per week, preferred days, mileage targets, or time vs mileage based training.",
     "update_plan": "Modify the plan for days within ±7 days of today. Use when the user explicitly asks to change/add something, is sick/hurt/feeling off, affirms a previously-recommended change, or wants to reconcile the plan with actual activities (e.g. 'update plan based on my run'). Do NOT use for wholesale restructuring (needs delete+recreate) or changes beyond ±7 days (direct the user to edit the day or regenerate). CRITICAL: advice-seeking phrasing ('should I...', 'can I...', 'what if...') is NOT a change request — only act if the user explicitly says to make the change.",
+    "update_settings": "Change an app setting the user wants changed — currently just the color theme/appearance. Use for explicit theme-change requests (e.g. 'switch to dark mode') AND vague dissatisfaction with the current theme (e.g. 'I don't like my theme', 'can you change the colors') even without a specific target named — the system will ask which one. Do NOT use for training preferences (use update_preferences) or pure informational questions about what themes exist (just answer those directly).",
 }
 
 
@@ -76,6 +77,7 @@ Args contracts (only include args listed here):
 - get_plan: {{"start_date": "YYYY-MM-DD", "end_date": "YYYY-MM-DD"}}  # default current week: {this_week_monday.isoformat()} to {(this_week_monday + timedelta(days=6)).isoformat()}; for a single day set start_date = end_date.
 - update_preferences: {{"field": "days_per_week|preferred_days|avg_miles|max_miles|time_based", "value": <int for days_per_week, list of day names for preferred_days, float for miles, bool for time_based>}}
 - update_plan: {{"intent": "what changes + the specific resolved ISO date (YYYY-MM-DD) — if the user says 'that one'/'it'/'revert'/'I meant X', resolve the date from the most recent plan change in context, never leave it ambiguous", "include_activities": false}} — set include_activities=true only to reconcile against actual Garmin activities (e.g. "update plan based on my run"); on a correction ("I meant [day]"), call immediately with the corrected date, no confirmation needed.
+- update_settings: {{"action_intent": "what setting the user wants changed, in plain language, e.g. 'switch to dark mode'"}}
 
 Return ONLY valid JSON — no extra text, no markdown fences:
 {{
@@ -124,6 +126,21 @@ Return ONLY valid JSON — no extra text, no markdown fences:
   "queries": ["query_function_name", "another_query_function_name"]
 }"""
 
+WRITE_SELECTOR_SYSTEM = """You are a write-action selector for a running coach app.
+Given a user's intent and a registry of available write actions, select which action to run and extract its args.
+
+Rules (HARD constraints — violating these breaks the system):
+1. Only pick an action if the user is EXPLICITLY asking to change something, not just discussing or asking what options exist.
+2. Pick at most ONE action — this registry has no concept of combining writes in one turn.
+3. set_theme — pick this whenever the user's intent is about changing the app's color theme/appearance, even if they haven't named a specific theme yet (e.g. "I don't like my theme", "can you change the colors"). If they DID name a specific theme, set the "theme" arg to exactly one of: dark, sage, rose, slate, amber (map "dusty rose" → rose, "light"/"default" → sage). If they didn't name one, still pick action "set_theme" but omit the "theme" arg — the system will ask which one they want.
+4. Only return action: null if the user's intent is not about the theme/appearance at all.
+
+Return ONLY valid JSON — no extra text, no markdown fences:
+{
+  "action": "action_name" | null,
+  "args": {"key": "value"}
+}"""
+
 TOOL_SNIPPETS = {
     "garmin_sync": "If the data says the user needs to enter a date range: do NOT say sync failed or that something went wrong. Simply ask the user which dates they'd like to sync (e.g. 'which dates would you like me to pull?') and mention they can also use the Garmin Sync button in the bottom-left sidebar. "
     "If the data has status='success': confirm their data is updated and they can ask about recent runs or health metrics. "
@@ -151,6 +168,7 @@ TOOL_SNIPPETS = {
     "get_weather": "The weather API is only capable of fetching current day weather + 12 hour forecasts. Reference this data naturally when answering the user or advising them if they should run and when the best time is and give reasoning grounded in data (be sure to consider the 'feels like' as well). Suggest treadmill if conditions are poor (ie. too hot/humid (above 75°F), too cold (below 32°F)), or rainy). If they do prefer to go outside, suggest the best time window and what to wear based on the forecast. If they ask for weather data either from the past or more than 12 hours in the future, gracefully explain the limitations of the API and provide advice based on the current conditions.",
     "get_race_results": "If results were found, celebrate the finish. Compare to goal time. If not found, state gracefully that no data was available.",
     "update_preferences": "Confirm the preference was updated naturally — e.g. 'Done, I've updated your training to 5 days a week.' If the update failed, let the user know and suggest using the Edit Training Preferences button in the Training Plan tab.",
+    "update_settings": "If status is 'success': confirm the new theme by name (e.g. 'Switched you to Dusty Rose') — it's already applied, no refresh needed. If status is 'clarify': the user wants to change their theme but hasn't said which one — list the options (Dark, Sage, Dusty Rose, Slate, Amber) and ask which they'd like. This is a normal clarifying question, not a failure — do NOT apologize or imply something went wrong. If status is 'error': apologize briefly, you weren't able to make the change, and mention the manual path: the theme toggle button (small icon, bottom-right on desktop / top-right on mobile) opens a dropdown with the same options.",
     "get_course_details": "Returns {{'query': <semantic label of what was extracted>, 'details': <3-5 sentence course summary>}}. Use `details` to answer the user, covering elevation, terrain, key sections, logistics. Connect to pacing strategy when relevant (e.g. 'go out conservative if there are early climbs'). Flag major climbs / technical sections. Lead with the direct answer if the user asked something specific. IMPORTANT: if `query` doesn't closely match what the user actually asked, caveat the response (e.g. 'I found general course info but not specifics on your question').",
     "get_race_info": "Returns {{'info_type': 'registration'|'race_day', 'race': ..., 'location': ..., 'info': {{...}}}} — info fields are null where the search didn't find an answer. Answer using only the populated fields; if the specific thing the user asked about is null, say you couldn't find it rather than guessing. If Data starts with 'Error running' instead of the expected object, the lookup itself failed — tell the user you weren't able to fetch that info right now and to check the official race website directly. Do NOT answer from your own prior knowledge in that case, even if you think you know the answer — it may be outdated. ALWAYS tell the user to verify on the official race website before relying on this for registration deadlines, fees, or qualifying times — this data changes yearly and may be outdated.",
     "query_data": "Query results are provided — raw health/activity rows, trend comparisons (current vs previous window), training load (ACWR), or recovery readiness (body battery). Always ground your response in specific data points.\n\n"
@@ -236,6 +254,7 @@ SPACING RULES:
 - STRENGTH: never the day before or after a hard effort (INTERVAL or TEMPO). STRENGTH does NOT count toward days_per_week — it is always additive. If the user runs 4 days per week, the plan has 4 running days PLUS 1 STRENGTH day.
 - Place REST before or after hard efforts where possible."""
 
+
 def build_update_plan_system(today: str, mode: str = "chat") -> str:
     """mode: 'chat' (explicit user request, full flexibility, can touch a named past day),
     'sync' (Sync Plan button — light-touch, today-only reconciliation, no past edits),
@@ -256,7 +275,8 @@ def build_update_plan_system(today: str, mode: str = "chat") -> str:
             "past day if it directly justifies a forward adjustment."
         )
 
-    situational_rules = """
+    situational_rules = (
+        """
 ILLNESS:
 - Mild (tired, hungover, low energy, slight flu, runny nose, minor cold — still functional): convert the next 1-2 hard days (INTERVAL, TEMPO, LONG) to EASY. Keep easy days as is.
 - Moderate (actually sick — fever, body aches, full flu): convert the rest of the current week to REST. Next week start with EASY before returning to structure.
@@ -274,11 +294,14 @@ SKIPPING A RUN:
 - If it was a key workout (LONG, INTERVAL, TEMPO), note it was skipped and keep the surrounding days as planned.
 
 REVERTING A DAY: If the user asks to revert, undo, or restore a day, check the day's notes for a "Was: ..." entry (e.g. "Was: TEMPO 6mi @ 7:07/mi"). Use that to reconstruct the original workout_type, target_miles, and target_pace. Clear the "Was: ..." line from the notes after restoring.
-""" if mode == "chat" else ""
+"""
+        if mode == "chat"
+        else ""
+    )
 
     mode_directive = {
         "chat": "",
-        "sync": '\nLIGHT TOUCH: only adjust forward days if today\'s completed load clearly warrants it (e.g. ease the next hard day if today was significantly harder or longer than planned). Do not perform a full restructure of the week — make the smallest change that fits.\n',
+        "sync": "\nLIGHT TOUCH: only adjust forward days if today's completed load clearly warrants it (e.g. ease the next hard day if today was significantly harder or longer than planned). Do not perform a full restructure of the week — make the smallest change that fits.\n",
         "weekly_refresh": "\nWEEKLY ADJUSTMENT: lightly adjust the upcoming week based on how last week actually went (load, completion, ACWR) — ease, maintain, or progress as warranted. Respect preferred training days and days_per_week from preferences where reasonable, but do not force a full restructure of the week just to fit preferred days — only move things around if last week's results or preferences genuinely call for it.\n",
     }[mode]
 
@@ -320,6 +343,7 @@ Return ONLY:
 {{"changes": [{{"plan_date": "YYYY-MM-DD", "workout_type": "...", "target_miles": <float or null>, "target_pace": "<pace string or null>", "notes": "...", "intervals": [...] or null}}]}}
 
 Return {{"changes": []}} if no changes are needed."""
+
 
 PLAN_CHECKER_SYSTEM = """You are a training plan validator for a running coach app. Review the provided plan and return ONLY valid JSON — no extra text, no markdown.
 

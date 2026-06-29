@@ -77,7 +77,9 @@ def test_cosine_orthogonal_vectors():
 
 @patch("services.race_info.get_candidates")
 def test_find_cached_word_overlap_hit_skips_embedding(mock_candidates):
-    mock_candidates.return_value = [{"query": "qualifying standards 2026", "result": "cached-result", "embedding": None}]
+    mock_candidates.return_value = [
+        {"query": "qualifying standards 2026", "result": "cached-result", "embedding": None}
+    ]
     result = _find_cached("marathon", "Chicago", "registration", "qualifying standards for 2026")
     assert result == "cached-result"
 
@@ -124,7 +126,12 @@ def test_find_cached_no_voyage_client_returns_none_on_overlap_miss(mock_candidat
 @patch("services.race_info._find_cached")
 def test_get_race_info_cache_hit_skips_web_search(mock_find_cached, mock_web_search):
     cached_payload = json.dumps(
-        {"info_type": "registration", "race": "marathon", "location": "Chicago", "info": {"registration_timeline": "Opens Jan 2026"}}
+        {
+            "info_type": "registration",
+            "race": "marathon",
+            "location": "Chicago",
+            "info": {"registration_timeline": "Opens Jan 2026"},
+        }
     )
     mock_find_cached.return_value = cached_payload
     result = get_race_info("user1", "marathon", "Chicago", "registration", "registration dates")
