@@ -54,6 +54,10 @@ def final_output(
         user_prompt += knowledge
 
     name = get_user_info(user_id).get("first_name") if user_id else None
-    extra_system = f"The athlete's name is {name}. Address them by name occasionally and naturally — not in every message." if name else None
+    extra_system = (
+        f"The athlete's name is {name}. Only use their name to greet them at the start of a conversation, or if significant time has passed since the last message. Do not use it in routine responses mid-conversation."
+        if name
+        else None
+    )
 
     yield from stream_llm(system_prompt, user_prompt, cache_system=True, extra_system=extra_system)

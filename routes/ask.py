@@ -10,6 +10,7 @@ from models.planner import AskRequest, History
 from services.auth import get_current_user
 from services.coach import orchestrate
 from services.end import detect_end, generate_followups
+from services.rate_limit import check_rate_limit
 
 router = APIRouter()
 
@@ -29,6 +30,7 @@ def _save_history(session_id: str, hist: History) -> None:
 
 @router.post("/ask")
 def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
+    check_rate_limit(user_id, limit=20, window=60)
     user_input = body.query
     session_id = body.session_id
     hist = _load_history(session_id)

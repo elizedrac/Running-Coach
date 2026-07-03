@@ -24,7 +24,7 @@ from db.plan import (
 from db.preferences import get_preferences, set_notes, update_preferences
 from models.planner import History
 from services.auth import get_current_user
-from services.cache import get_cached, session_cache, set_cached
+from services.cache import clear_user_cache, get_cached, set_cached
 from services.coach import orchestrate
 from services.course_details import _compute_similarity, find_relevant_chunks
 from services.end import detect_end, is_end_message
@@ -76,7 +76,7 @@ FAKE_ACTIVITIES = [
 
 
 def setup_function():
-    session_cache.clear()
+    clear_user_cache("user1")
 
 
 def test_cache_miss_then_hit():

@@ -16,6 +16,7 @@ from db.race import get_race, set_goal_time, set_race_date, set_race_distance, s
 from models.planner import PatchDayRequest, PreferencesRequest, RaceRequest, SyncPlanRequest
 from services.auth import get_current_user
 from services.plan import create_plan, update_plan
+from services.rate_limit import check_rate_limit
 
 router = APIRouter()
 
@@ -121,6 +122,7 @@ def notes(body: PreferencesRequest, user_id: str = Depends(get_current_user)):
 # plan routers
 @router.post("/plan/create")
 def new_plan(user_id: str = Depends(get_current_user)):
+    check_rate_limit(user_id, limit=5, window=3600)
     try:
         return create_plan(user_id)
     except Exception as e:
@@ -161,6 +163,7 @@ def remove_plan(user_id: str = Depends(get_current_user)):
 
 @router.post("/plan/sync")
 def sync_plan(body: SyncPlanRequest = SyncPlanRequest(), user_id: str = Depends(get_current_user)):
+    check_rate_limit(user_id, limit=10, window=3600)
     try:
         today = body.today or date.today().isoformat()
         today_dt = date.fromisoformat(today)
