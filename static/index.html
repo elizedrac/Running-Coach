@@ -883,7 +883,8 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 <script>
 const API = '';
 const _uuid = () => crypto.randomUUID?.() ?? ([1e7]+-1e3+-4e3+-8e3+-1e11).replace(/[018]/g,c=>(c^crypto.getRandomValues(new Uint8Array(1))[0]&15>>c/4).toString(16));
-let SID = _uuid();
+let SID = localStorage.getItem('rc_sid') || _uuid();
+localStorage.setItem('rc_sid', SID);
 let hasPlan = false;
 let userLocation = 'New York, NY';
 let abortController = null;
@@ -1182,7 +1183,8 @@ function cancelRequest(){if(abortController){abortController.abort();abortContro
 async function clearChat(){
   if(abortController){abortController.abort();abortController=null;}setAnalyzing(false);
   await apiFetch(`${API}/session/${SID}`,{method:'DELETE'});
-  SID=_uuid();document.getElementById('chat-messages').innerHTML='';renderEmptyState();
+  SID=_uuid();localStorage.setItem('rc_sid',SID);
+  document.getElementById('chat-messages').innerHTML='';renderEmptyState();
 }
 
 async function sendMessage(){
@@ -1355,12 +1357,12 @@ async function loadPlan(){
       const WNAMES={REST:'Rest day',STRENGTH:'Strength',CROSS:'Cross Training',EASY:'Easy Run',AEROBIC:'Aerobic Run',LONG:'Long Run',TEMPO:'Tempo Run',INTERVAL:'Intervals'};
       const wName=WNAMES[type]||(type.charAt(0)+type.slice(1).toLowerCase());
       const firstNote=day.notes?day.notes.split('\n').find(l=>l.trim()&&!l.startsWith('Was:'))||'':'';
-      const detail=firstNote||day.target_pace||'';
-      const detailFull=dayActs.length?'See log':detail;
+      const detail=day.target_pace||firstNote||'';
+      const detailFull=detail;
       const [dm,dd]=date.split(' ');
       const todayClass=isToday?' today':'';
       let distVal='—';
-      if(type==='CROSS'){const rm=dayActs.filter(a=>(a.activity_type||'').toLowerCase().includes('run')).reduce((s,a)=>s+(a.miles||0),0);if(rm>0)distVal=rm.toFixed(1)+' mi';}
+      if(type==='CROSS'){const tm=dayActs.reduce((s,a)=>s+(a.miles||0),0);if(tm>0)distVal=tm.toFixed(1)+' mi';}
       else if(day.target_miles)distVal=day.target_miles.toFixed(1)+' mi';
       return`<div class="plan-row${todayClass}" onclick="openDayModal('${day.id}')">
         <div class="plan-day"><div class="dn">${dow.slice(0,3)}</div><div class="dd">${dm} ${dd}</div></div>

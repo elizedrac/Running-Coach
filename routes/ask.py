@@ -17,15 +17,22 @@ router = APIRouter()
 SESSION_TTL = 86400
 
 
-def _load_history(session_id: str) -> History:
+# History keys combine the JWT-validated user_id with the client's session_id:
+# the user part makes cross-user reads impossible regardless of what session_id
+# a client sends; the session part allows separate threads per browser/device.
+def _history_key(user_id: str, session_id: str) -> str:
+    return f"session:{user_id}:{session_id}"
+
+
+def _load_history(user_id: str, session_id: str) -> History:
     r = get_redis()
-    raw = r.get(f"session:{session_id}")
+    raw = r.get(_history_key(user_id, session_id))
     return History(**json.loads(raw)) if raw else History()
 
 
-def _save_history(session_id: str, hist: History) -> None:
+def _save_history(user_id: str, session_id: str, hist: History) -> None:
     r = get_redis()
-    r.setex(f"session:{session_id}", SESSION_TTL, json.dumps(dataclasses.asdict(hist)))
+    r.setex(_history_key(user_id, session_id), SESSION_TTL, json.dumps(dataclasses.asdict(hist)))
 
 
 @router.post("/ask")
@@ -33,7 +40,7 @@ def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
     check_rate_limit(user_id, limit=20, window=60)
     user_input = body.query
     session_id = body.session_id
-    hist = _load_history(session_id)
+    hist = _load_history(user_id, session_id)
 
     def generate():
         try:
@@ -54,7 +61,7 @@ def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
                 elif event_type == "theme_updated":
                     yield f"data: {json.dumps({'type': 'theme_updated', 'theme': data})}\n\n"
                 elif event_type == "done":
-                    _save_history(session_id, data)
+                    _save_history(user_id, session_id, data)
                     yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
         except Exception as e:
@@ -64,7 +71,7 @@ def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
 
 
 @router.delete("/session/{session_id}")
-def clear_session(session_id: str):
+def clear_session(session_id: str, user_id: str = Depends(get_current_user)):
     r = get_redis()
-    r.delete(f"session:{session_id}")
+    r.delete(_history_key(user_id, session_id))
     return {"status": "cleared"}

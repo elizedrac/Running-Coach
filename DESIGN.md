@@ -40,7 +40,7 @@ A personal AI running coach that ingests Garmin health and activity data, stores
 | Database | Supabase (PostgreSQL) | All persistent storage |
 | LLM | Anthropic Claude | Sonnet for main calls, Haiku for lightweight |
 | ML | XGBoost | Race time prediction |
-| In-memory cache | cachetools TTLCache | Per-session, no persistence |
+| Cache / sessions / rate limits | Redis (redis:7-alpine container) | Query cache, chat history, rate limiting, sync job status/locks |
 | Auth | Supabase Auth | Email/password login; JWT validated server-side via `get_user()` |
 | Hosting (app) | AWS EC2 | Docker + nginx reverse proxy |
 | Hosting (DB) | Supabase cloud | Already cloud-hosted, no migration needed |
@@ -60,7 +60,8 @@ runcoach/
 │
 ├── cli.py                         # CLI entry point (V1) — thin wrapper, calls services/coach.py::ask()
 ├── main.py                        # FastAPI app entry point (Phase 4) — registers routes/
-├── conftest.py                    # pytest fixtures (Supabase client mock)
+├── conftest.py                    # pytest fixtures (Supabase client mock, fakeredis autouse fixture)
+├── docker-compose.yml             # app + redis containers
 ├── pyproject.toml                 # project deps + ruff + pytest config
 ├── uv.lock                        # locked dependency versions
 ├── Makefile                       # dev workflow shortcuts (sync, test, lint, fix, run, build, up, down, logs)
@@ -73,8 +74,8 @@ runcoach/
 │   └── login.html                 # Login page — POST /auth/login, stores JWT in sessionStorage, redirects to /
 │
 ├── routes/
-│   ├── ask.py                     # POST /ask — SSE streaming endpoint; owns per-session History dict
-│   ├── activities.py              # GET /health/recent, /health/v02, /health/body-battery, /activities/recent, /weather; POST /garmin-sync
+│   ├── ask.py                     # POST /ask — SSE streaming endpoint; chat history in Redis keyed session:{user_id}:{session_id} (24h TTL); DELETE /session/{session_id}
+│   ├── activities.py              # GET /health/recent, /health/v02, /health/body-battery, /activities/recent, /weather; POST /garmin-sync (starts background job) + GET /garmin-sync/status + POST /garmin-sync/cancel
 │   ├── plan.py                    # Plan CRUD: GET /plan/days, GET /plan/intervals/{day_id}, POST /plan/create, POST /plan/sync, DELETE /plan/delete, PATCH /plan/day/{day_id}, DELETE /plan/day/{day_id}
 │   ├── auth.py                    # POST /auth/login — Supabase Auth sign-in, returns JWT access token
 │   └── user.py                    # GET /user/info, POST /user/info/name, /user/info/theme, /user/info/location — profile read/write, scoped via get_current_user
@@ -94,7 +95,8 @@ runcoach/
 │   ├── web_search.py              # Anthropic web search wrapper — no persistence itself; caching is owned by race_info.py
 │   ├── race_info.py               # get_race_info() — time-sensitive race logistics (registration/race_day); fuzzy cache lookup (word overlap → Voyage embedding cosine sim) via db/search_cache.py before falling back to web_search + LLM
 │   ├── weather.py                 # WeatherAPI wrapper (current day + 12-hour forecast)
-│   ├── cache.py                   # TTLCache singleton + range-aware cache logic (get_cached, set_cached)
+│   ├── cache.py                   # Redis-backed range-aware cache (get_cached, set_cached, clear_user_cache), 1h TTL
+│   ├── rate_limit.py              # check_rate_limit() — per-user fixed-window Redis counters; USER_IDS env exempt
 │   ├── auth.py                    # get_current_user() FastAPI dependency — validates Bearer JWT via Supabase, returns user_id
 │   ├── pacing.py                  # pacing_calculator() — Riegel equivalent marathon pace → Daniels-style zones + GPS-adjusted pace + VO2-derived easy pace
 │   ├── course_details.py          # get_course_details() — RAG over course_chunks.json (word overlap + Voyage embedding similarity) + web search fallback
@@ -109,6 +111,7 @@ runcoach/
 │
 ├── db/
 │   ├── client.py                  # create_client() — imported everywhere
+│   ├── redis.py                   # get_redis() — connection pool singleton (REDIS_URL; hostname `redis` inside Docker, so host-run tests use fakeredis)
 │   ├── queries.py                 # REGISTRY of callable SQL functions (name → callable + description + args); Haiku selects from this list
 │   ├── activity_history.py        # insert_activities, get_activities (self-caching via services/cache.py)
 │   ├── health_history.py          # insert_health_history, get_health_history (self-caching via services/cache.py)
@@ -473,6 +476,10 @@ Question arrives
 - Always first if multiple tool calls
 - Uses cached data if Garmin unavailable — notes staleness to user
 - GitHub Actions runs daily sync as fallback (see GitHub Actions section)
+- **Web path runs as a background job** (`run_sync_job` in `services/garmin.py`): `POST /garmin-sync` acquires a per-user Redis lock (40 min TTL; 409 if held), schedules the job via FastAPI `BackgroundTasks`, and returns immediately — long backfills would otherwise die on nginx/browser timeouts (~10s per day of data)
+- Job writes progress to Redis (`{status, days_done, days_total}`, 24h TTL); frontend polls `GET /garmin-sync/status` every 3s and resumes polling after page reload
+- `POST /garmin-sync/cancel` sets a Redis flag checked between days; cancelled syncs keep all days already fetched (upserts). Cache cleared per user via `clear_user_cache` after success/cancel
+- Cron path (`python services/garmin.py`) calls `garmin_sync()` directly — blocking, no Redis involvement
 
 ### 2. Plan Creation ✓
 - Triggered via `POST /plan/create`; user clicks "Create Plan" button in UI
@@ -721,16 +728,17 @@ An orchestrator only makes sense when there are multiple **separate deployed ser
 
 ## Caching Strategy
 
-### L1 Cache — Range-Aware TTLCache
+### L1 Cache — Range-Aware Redis Cache
 
-DB query results (health, activities) are cached in-memory per session with range awareness:
+DB query results (health, activities) are cached in Redis with range awareness:
 
-- Cache keyed by `user_id:query_type` (e.g. `user123:activity_data`)
-- Each entry stores `{start, end, data}` — multiple non-overlapping ranges per user
+- Cache keyed by `cache:{user_id}:{query_type}` (e.g. `cache:user123:activity_data`)
+- Each key holds a JSON list of entries `{start, end, data}` — multiple non-overlapping ranges per user
 - On lookup: find any entry where `entry.start ≤ requested_start` and `entry.end ≥ requested_end`, filter rows to requested range
 - On miss: fetch from DB, append new entry — never overwrites existing entries
 - Self-caching: `get_health_history` and `get_activities` handle cache check/set internally — callers are cache-unaware
-- TTL: 1 hour (`ttl=3600`)
+- TTL: 1 hour; `clear_user_cache(user_id)` deletes only that user's keys (used after Garmin sync)
+- Tests run against `fakeredis` (autouse fixture in `conftest.py`) — no live Redis needed
 
 ### L2 Cache — Supabase search_cache
 
@@ -823,6 +831,11 @@ models/
 - Query too long (> 150 words) → "That message is a bit long"
 - If blocked: yields message as a `("chunk", msg)` SSE event and returns early — no planner call, no LLM cost
 
+### Rate Limiting ✓
+- `services/rate_limit.py::check_rate_limit(user_id, limit, window)` — fixed-window Redis counter per user, raises 429 when exceeded
+- Applied to LLM-cost endpoints: `/ask` 20/min, `/plan/create` 5/hr, `/plan/sync` 10/hr
+- User IDs in the `USER_IDS` env var (comma-separated) are exempt
+
 ### Deterministic Checks ✓
 - SQL outputs must start with SELECT — raise ValueError otherwise
 - Plan constraints: no back-to-back hard days, max long run ≤ race distance
@@ -847,7 +860,7 @@ models/
 ## Memory & Compression ✓
 
 - `History` dataclass (`models/planner.py`): `summary: str`, `recent: list[dict]`, `turn_count: int`
-- **Session ownership**: history is passed to `orchestrate()` as a parameter and returned after each turn. `routes/ask.py` owns a `session_memory: dict[str, History]` keyed by `session_id` (UUID generated by frontend). Resets on page reload.
+- **Session ownership**: history is passed to `orchestrate()` as a parameter and returned after each turn. `routes/ask.py` stores it in Redis keyed `session:{user_id}:{session_id}` (24h TTL) — `user_id` always from the validated JWT, so cross-user reads are impossible; `session_id` is a frontend UUID persisted in localStorage (`rc_sid`), so the conversation survives page reloads. "Clear chat" deletes the key (authenticated) and rotates the UUID. Note: the coach's memory survives reloads but the rendered chat bubbles do not (messages aren't persisted client-side).
 - **Planner context**: last 2 turns from `recent` + `summary` injected into planner user prompt
 - **Final LLM context**: last 2 turns + `summary` injected into final user prompt alongside today's date
 - **Compression**: fires every 5 turns. Haiku call via `services/memory.py::compress_history()` (max 400 tokens, `cache_system=True`). After compression: `summary` updated, `recent` trimmed to last 1 turn as overlap.
@@ -1011,4 +1024,4 @@ on:
 
 ---
 
-*Last updated: June 2026 — reflects uv/ruff/Makefile setup, race_prep_info tool, get_race tool, set_notes, garmin_credentials table, per-user MIN_DATE*
+*Last updated: July 2026 — reflects Redis migration (cache, session history, rate limiting), background Garmin sync with progress/cancel, user-scoped chat sessions*

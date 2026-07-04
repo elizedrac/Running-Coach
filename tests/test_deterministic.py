@@ -4,6 +4,7 @@ from datetime import date as dt_date
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, patch
 
+import pytest
 from fastapi import HTTPException
 
 from db.garmin import delete_garmin_credentials
@@ -23,6 +24,8 @@ from db.plan import (
 )
 from db.preferences import get_preferences, set_notes, update_preferences
 from models.planner import History
+from routes.ask import _history_key, _load_history, _save_history
+from services import garmin as garmin_service
 from services.auth import get_current_user
 from services.cache import clear_user_cache, get_cached, set_cached
 from services.coach import orchestrate
@@ -40,6 +43,7 @@ from services.pacing import (
     pacing_calculator,
 )
 from services.prompts import build_query_data_extra
+from services.rate_limit import check_rate_limit
 from services.trend_analysis import (
     _avg,
     _direction,
@@ -1711,3 +1715,106 @@ def test_delete_garmin_credentials_calls_delete(mock_client):
     delete_garmin_credentials("user1")
     chain.table.return_value.delete.assert_called_once()
     chain.table.return_value.delete.return_value.eq.assert_called_once_with("user_id", "user1")
+
+
+# ── session history tests (redis-backed, user-scoped keys) ───────────────────
+
+
+def test_history_roundtrip():
+    hist = History(summary="training for a marathon", recent=[{"user": "hi", "assistant": "hello"}], turn_count=3)
+    _save_history("userA", "sess1", hist)
+    assert _load_history("userA", "sess1") == hist
+
+
+def test_history_missing_returns_fresh():
+    hist = _load_history("nobody", "no-session")
+    assert hist == History()
+
+
+def test_history_scoped_per_user():
+    _save_history("userA", "shared-sid", History(summary="userA private convo", turn_count=2))
+    # Same session_id under a different user must not leak userA's history
+    assert _load_history("userB", "shared-sid") == History()
+
+
+def test_history_key_includes_user_and_session():
+    assert _history_key("u1", "s1") == "session:u1:s1"
+
+
+# ── rate limit tests ──────────────────────────────────────────────────────────
+
+
+def test_rate_limit_allows_under_limit():
+    for _ in range(5):
+        check_rate_limit("rl-under", limit=5, window=60)
+
+
+def test_rate_limit_blocks_over_limit():
+    for _ in range(3):
+        check_rate_limit("rl-over", limit=3, window=60)
+    with pytest.raises(HTTPException) as exc:
+        check_rate_limit("rl-over", limit=3, window=60)
+    assert exc.value.status_code == 429
+
+
+def test_rate_limit_separate_users():
+    for _ in range(3):
+        check_rate_limit("rl-a", limit=3, window=60)
+    check_rate_limit("rl-b", limit=3, window=60)  # different user unaffected
+
+
+# ── garmin background sync job tests ─────────────────────────────────────────
+
+
+def test_sync_lock_exclusive():
+    assert garmin_service.acquire_sync_lock("lock-user")
+    assert not garmin_service.acquire_sync_lock("lock-user")
+    garmin_service._release_sync_lock("lock-user")
+    assert garmin_service.acquire_sync_lock("lock-user")
+
+
+def test_cancel_flag_roundtrip():
+    assert not garmin_service._cancel_requested("cx-user")
+    garmin_service.request_sync_cancel("cx-user")
+    assert garmin_service._cancel_requested("cx-user")
+
+
+def test_sync_status_default_idle():
+    assert garmin_service.get_sync_status("fresh-user") == {"status": "idle"}
+
+
+def test_run_sync_job_success_releases_lock(monkeypatch):
+    result = {"status": "success", "date_range": "2026-01-01 to 2026-01-02", "activities_synced": 1, "days_synced": 2}
+    monkeypatch.setattr(garmin_service, "garmin_sync", lambda *a, **k: result)
+    monkeypatch.setattr(garmin_service, "clear_user_cache", lambda uid: None)
+    assert garmin_service.acquire_sync_lock("job-user")
+    garmin_service.run_sync_job("job-user", "2026-01-01", "2026-01-02")
+    assert garmin_service.get_sync_status("job-user") == result
+    assert garmin_service.acquire_sync_lock("job-user")  # lock was released
+
+
+def test_run_sync_job_error_releases_lock(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("garmin exploded")
+
+    monkeypatch.setattr(garmin_service, "garmin_sync", boom)
+    assert garmin_service.acquire_sync_lock("err-user")
+    garmin_service.run_sync_job("err-user", "2026-01-01", "2026-01-02")
+    status = garmin_service.get_sync_status("err-user")
+    assert status["status"] == "error"
+    assert "garmin exploded" in status["error"]
+    assert garmin_service.acquire_sync_lock("err-user")  # lock released despite crash
+
+
+def test_run_sync_job_clears_stale_cancel_flag(monkeypatch):
+    seen = {}
+
+    def fake_sync(user_id, start, end, on_day=None, should_cancel=None):
+        seen["cancel_at_start"] = should_cancel()
+        return {"status": "success", "activities_synced": 0, "days_synced": 0}
+
+    monkeypatch.setattr(garmin_service, "garmin_sync", fake_sync)
+    monkeypatch.setattr(garmin_service, "clear_user_cache", lambda uid: None)
+    garmin_service.request_sync_cancel("stale-user")  # stale flag from a previous run
+    garmin_service.run_sync_job("stale-user", "2026-01-01", "2026-01-01")
+    assert seen["cancel_at_start"] is False
