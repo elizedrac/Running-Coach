@@ -49,13 +49,25 @@ Create a `.env` file in the project root:
 ```
 ANTHROPIC_API_KEY=
 SUPABASE_URL=
-SUPABASE_KEY=
+SUPABASE_KEY=          # service_role key (server-side)
+SUPABASE_ANON_KEY=     # anon key, used only by /auth/login
 VOYAGE_API_KEY=
 WEATHER_API_KEY=
+LOCATION=              # default weather location
 FRONTEND_URL=
-USER_ID=          # local dev / CLI only
-USER_IDS=         # comma-separated list for cron jobs
+REDIS_URL=             # redis://redis:6379 in Docker; redis://localhost:6379 for host runs
+USER_IDS=              # comma-separated; cron jobs + rate-limit exempt users
+GARMIN_EMAIL=          # cron sync fallback credentials
+GARMIN_PASSWORD=
 ```
+
+## Redis
+
+The app needs Redis (query cache, chat history, rate limits, sync job status). `docker compose up` starts it automatically. For running the app directly on the host (uvicorn/CLI), start just Redis and point `REDIS_URL` at localhost:
+```bash
+docker compose up -d redis    # exposed on localhost:6379
+```
+Tests do NOT need Redis — they run against fakeredis.
 
 ## Docker
 
