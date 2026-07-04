@@ -1,5 +1,6 @@
 # Garmin data extraction and parsing
 # Run directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
+import json
 import os
 import sys
 import tempfile
@@ -12,7 +13,9 @@ from garminconnect import Garmin
 from db.activity_history import insert_activities
 from db.garmin import get_garmin_credentials, save_garmin_token
 from db.health_history import insert_health_history
+from db.redis import get_redis
 from db.user_info import set_last_synced
+from services.cache import clear_user_cache
 
 # Load environment variables from .env file
 load_dotenv()
@@ -20,10 +23,13 @@ load_dotenv()
 DAY_PAUSE = 2  # Seconds to sleep between Garmin API calls to avoidw rate limits
 CALL_PAUSE = 1  # Seconds to sleep between individual API calls within a day
 
+SYNC_STATUS_TTL = 86400  # Status blob stays readable for a day after the sync finishes
+SYNC_LOCK_TTL = 2400  # 40 min; must outlive the longest sync so the lock can't expire mid-run
 
-def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
+
+def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str, on_day=None, should_cancel=None) -> dict:
     try:
-        activities, stats = fetch_garmin_data(user_id, day_iso_start, day_iso_end)
+        activities, stats, was_cancelled = fetch_garmin_data(user_id, day_iso_start, day_iso_end, on_day, should_cancel)
     except Exception as e:
         return {"status": "error", "error": str(e), "date_range": f"{day_iso_start} to {day_iso_end}"}
 
@@ -42,11 +48,69 @@ def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str) -> dict:
     set_last_synced(user_id)
 
     return {
-        "status": "success",
+        "status": "cancelled" if was_cancelled else "success",
         "date_range": f"{day_iso_start} to {day_iso_end}",
         "activities_synced": len(activities),
         "days_synced": len(stats),
     }
+
+
+# ── Background sync job (web path) ──────────────────────────────────────────
+# The route acquires the lock, then schedules run_sync_job via BackgroundTasks.
+# Status lives in Redis so the frontend can poll it; cancel is a Redis flag
+# checked between days. The cron path calls garmin_sync() directly, no Redis.
+
+
+def acquire_sync_lock(user_id: str) -> bool:
+    # nx=True → only sets if not already set; returns None if a sync holds the lock
+    return bool(get_redis().set(f"garmin_sync_lock:{user_id}", "1", nx=True, ex=SYNC_LOCK_TTL))
+
+
+def _release_sync_lock(user_id: str) -> None:
+    get_redis().delete(f"garmin_sync_lock:{user_id}")
+
+
+def request_sync_cancel(user_id: str) -> None:
+    get_redis().setex(f"garmin_sync_cancel:{user_id}", SYNC_LOCK_TTL, "1")
+
+
+def _cancel_requested(user_id: str) -> bool:
+    return bool(get_redis().exists(f"garmin_sync_cancel:{user_id}"))
+
+
+def get_sync_status(user_id: str) -> dict:
+    raw = get_redis().get(f"garmin_sync_status:{user_id}")
+    return json.loads(raw) if raw else {"status": "idle"}
+
+
+def _set_sync_status(user_id: str, status: dict) -> None:
+    get_redis().setex(f"garmin_sync_status:{user_id}", SYNC_STATUS_TTL, json.dumps(status))
+
+
+def run_sync_job(user_id: str, day_iso_start: str, day_iso_end: str) -> None:
+    days_total = (datetime.fromisoformat(day_iso_end) - datetime.fromisoformat(day_iso_start)).days + 1
+
+    def on_day(days_done: int) -> None:
+        _set_sync_status(user_id, {"status": "running", "days_done": days_done, "days_total": days_total})
+
+    try:
+        get_redis().delete(f"garmin_sync_cancel:{user_id}")  # clear any stale flag from a previous run
+        on_day(0)
+        result = garmin_sync(
+            user_id,
+            day_iso_start,
+            day_iso_end,
+            on_day=on_day,
+            should_cancel=lambda: _cancel_requested(user_id),
+        )
+        if result.get("status") in ("success", "cancelled"):
+            clear_user_cache(user_id)  # synced rows changed → cached query results are stale
+        _set_sync_status(user_id, result)
+    except Exception as e:
+        _set_sync_status(user_id, {"status": "error", "error": str(e)})
+    finally:
+        _release_sync_lock(user_id)
+        get_redis().delete(f"garmin_sync_cancel:{user_id}")
 
 
 def _token_dir(user_id: str) -> str:
@@ -88,22 +152,32 @@ def _get_client(user_id: str) -> Garmin:
     return client
 
 
-def fetch_garmin_data(user_id: str, day_iso_start: str, day_iso_end: str) -> tuple[list[dict], dict] | None:
+def fetch_garmin_data(
+    user_id: str, day_iso_start: str, day_iso_end: str, on_day=None, should_cancel=None
+) -> tuple[list[dict], list[dict], bool]:
     all_activities = []
     all_stats = []
+    was_cancelled = False
+    days_done = 0
 
     try:
         client = _get_client(user_id)
 
         while day_iso_start <= day_iso_end:
+            if should_cancel and should_cancel():
+                was_cancelled = True
+                break
             if "--debug" in sys.argv:
                 print(f"Fetching Garmin data for {day_iso_start}...")
             all_stats.append(get_daily_stats(client, day_iso_start))
             all_activities.extend(extract_activities(client, day_iso_start))
             day_iso_start = (datetime.fromisoformat(day_iso_start) + timedelta(days=1)).date().isoformat()
+            days_done += 1
+            if on_day:
+                on_day(days_done)
             sleep(DAY_PAUSE)  # To avoid hitting Garmin's rate limits
 
-        return all_activities, all_stats
+        return all_activities, all_stats, was_cancelled
     except Exception as e:
         print(f"Error fetching Garmin data: {e}")
         raise

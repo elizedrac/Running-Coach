@@ -284,7 +284,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 .stop-btn{width:42px;height:42px;border-radius:50%;background:var(--ink);border:none;cursor:pointer;display:none;align-items:center;justify-content:center;flex-shrink:0}
 
 /* Analyzing */
-.analyzing{display:none;align-items:center;gap:8px;padding:6px 0;flex-shrink:0}
+.analyzing{display:none;align-items:center;gap:8px;padding:6px 0;flex-shrink:0;min-width:0}.dots{flex-shrink:0}
 .dots span{width:6px;height:6px;background:var(--accent);border-radius:50%;display:inline-block;animation:bounce 1.2s infinite}
 .dots span:nth-child(2){animation-delay:.2s}.dots span:nth-child(3){animation-delay:.4s}
 @keyframes bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-5px)}}
@@ -707,6 +707,8 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
     <button class="modal-btn-secondary" style="flex:1;padding:8px" onclick="setDefaultDates()">Last 7 days</button>
     <button class="modal-btn-primary" style="flex:1;padding:8px" onclick="runSync()">Sync</button>
   </div>
+  <button class="modal-btn-secondary" id="cancel-sync-btn" style="display:none;width:100%;margin-top:8px;padding:8px" onclick="cancelSync()">Cancel Sync</button>
+  <div style="font-size:10px;color:var(--faint);margin-top:8px;line-height:1.4">~10s per day of data · ranges over 6 months are best split up</div>
   <div style="margin-top:10px;text-align:center"><button onclick="disconnectGarmin()" style="background:none;border:none;font-size:11px;color:var(--faint);cursor:pointer;text-decoration:underline">Disconnect Garmin</button></div>
 </div>
 
@@ -977,7 +979,8 @@ async function loadHealthChart(){
     document.getElementById('spark-steps-trend').innerHTML=trendArrow(steps);
     document.getElementById('spark-sleep-trend').innerHTML=trendArrow(sleep);
     document.getElementById('spark-rhr-trend').innerHTML=trendArrow(rhr,true);
-    const labels=rows.map(r=>{const[y,m,d]=r.calendar_date.split('T')[0].split('-');return new Date(+y,+m-1,+d).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});});
+    const _isMob=window.innerWidth<=768;
+    const labels=rows.map(r=>{const[y,m,d]=r.calendar_date.split('T')[0].split('-');return new Date(+y,+m-1,+d).toLocaleDateString('en-US',_isMob?{weekday:'short'}:{weekday:'short',month:'short',day:'numeric'});});
     _healthChartData={labels,steps,sleep,rhr};
     const ac=accentColor();
     const noAxes={x:{display:false},y:{display:false}};
@@ -1033,7 +1036,7 @@ async function loadMileageChart(){
     const acts=await res.json();_mileageChartLoaded=true;
     const weekMap={};
     (acts||[]).forEach(a=>{if(!a.miles)return;const d=new Date(a.calendar_date.split('T')[0]+'T12:00:00');const day=d.getDay();d.setDate(d.getDate()+(day===0?-6:1-day));const key=isoFromDate(d);weekMap[key]=(weekMap[key]||0)+a.miles;});
-    const weeks=[];for(let i=7;i>=0;i--){const mon=getWeekMonday(-i);const key=isoFromDate(mon);weeks.push({label:mon.toLocaleDateString('en-US',{month:'short',day:'numeric'}),miles:+(weekMap[key]||0).toFixed(1)});}
+    const weeks=[];for(let i=7;i>=0;i--){const mon=getWeekMonday(-i);const key=isoFromDate(mon);weeks.push({label:mon.toLocaleDateString('en-US',window.innerWidth<=768?{weekday:'short'}:{month:'short',day:'numeric'}),miles:+(weekMap[key]||0).toFixed(1)});}
     const current=weeks[weeks.length-1].miles;
     document.getElementById('mileage-this-week').textContent=current>0?`${current} mi`:'0 mi';
     const ac=accentColor();
@@ -1177,6 +1180,7 @@ function setAnalyzing(on){
 function cancelRequest(){if(abortController){abortController.abort();abortController=null;}setAnalyzing(false);document.getElementById('chat-input').focus();}
 
 async function clearChat(){
+  if(abortController){abortController.abort();abortController=null;}setAnalyzing(false);
   await apiFetch(`${API}/session/${SID}`,{method:'DELETE'});
   SID=_uuid();document.getElementById('chat-messages').innerHTML='';renderEmptyState();
 }
@@ -1189,7 +1193,7 @@ async function sendMessage(){
   try{
     const res=await apiFetch(`${API}/ask`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:text,session_id:SID,has_plan:hasPlan,location:userLocation,today:localToday()}),signal:abortController.signal});
     const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='';let renderTimer=null;
-    const scheduleRender=()=>{if(renderTimer)return;renderTimer=setTimeout(()=>{renderTimer=null;if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([^~]+)~~/g,'$1'));},150);};
+    const scheduleRender=()=>{if(renderTimer)return;renderTimer=setTimeout(()=>{renderTimer=null;if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([\s\S]+?)~~/g,'$1'));},150);};
     while(true){
       const{done,value}=await reader.read();if(done)break;
       buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();
@@ -1198,7 +1202,7 @@ async function sendMessage(){
         let event;try{event=JSON.parse(line.slice(6));}catch{continue;}
         if(event.type==='status'){document.getElementById('analyzing-text').textContent=event.text;}
         else if(event.type==='chunk'){if(!hasChunks){hasChunks=true;setAnalyzing(false);bubble=createCoachMessage();}fullText+=event.text;scheduleRender();document.getElementById('chat-messages').scrollTop=999999;}
-        else if(event.type==='done'){if(renderTimer){clearTimeout(renderTimer);renderTimer=null;}if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([^~]+)~~/g,'$1'));}
+        else if(event.type==='done'){if(renderTimer){clearTimeout(renderTimer);renderTimer=null;}if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([\s\S]+?)~~/g,'$1'));}
         else if(event.type==='ended'){setAnalyzing(false);addMessage('coach','Great chatting! Here are some things to explore:');if(event.follow_ups&&event.follow_ups.length)showFollowUpChips(event.follow_ups);}
         else if(event.type==='plan_updated'){loadPlan();}
         else if(event.type==='theme_updated'){if(event.theme)applyTheme(event.theme);}
@@ -1206,7 +1210,7 @@ async function sendMessage(){
       }
     }
   }catch(e){setAnalyzing(false);if(e.name!=='AbortError')addMessage('coach','Sorry, I had trouble connecting.');}
-  finally{if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([^~]+)~~/g,'$1'));setAnalyzing(false);abortController=null;input.focus();}
+  finally{if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([\s\S]+?)~~/g,'$1'));setAnalyzing(false);abortController=null;input.focus();}
 }
 
 document.getElementById('chat-input').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
@@ -1246,6 +1250,38 @@ async function saveGarminSetup(){
 }
 async function disconnectGarmin(){document.getElementById('sync-popover').classList.remove('open');await apiFetch(`${API}/garmin/credentials`,{method:'DELETE'});showToast('Garmin disconnected');document.getElementById('garmin-setup-modal').classList.add('open');}
 
+let _syncPoll=null;
+function setSyncBusy(busy,label){
+  const btn=document.getElementById('sync-btn');
+  btn.querySelector('.garmin-btn-left').lastChild.textContent=busy?' '+(label||'Syncing...'):' Garmin Sync';
+  btn.disabled=busy;
+  const mobileBtn=document.getElementById('mobile-sync-btn');
+  mobileBtn.classList.toggle('syncing',busy);mobileBtn.disabled=busy;
+  document.getElementById('cancel-sync-btn').style.display=busy?'block':'none';
+}
+function _syncFinished(s){
+  clearInterval(_syncPoll);_syncPoll=null;setSyncBusy(false);
+  if(s.status==='success'||s.status==='cancelled'){
+    if(s.status==='success')showToast('Garmin sync complete','var(--accent-dark)');
+    else showToast(`Sync cancelled, ${s.days_synced||0} day(s) saved`);
+    const st=new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+    document.getElementById('sync-time-label').textContent='SYNCED '+st;localStorage.setItem('last_sync',st);
+    loadActivity();loadHealthChart();loadMileageChart();
+  }else if(s.status==='error'){showToast('Sync failed, check your Garmin connection','#8b4a42');}
+}
+function pollSyncStatus(){
+  if(_syncPoll)return;
+  setSyncBusy(true);
+  _syncPoll=setInterval(async()=>{
+    try{
+      const res=await apiFetch(`${API}/garmin-sync/status`);
+      const s=await res.json();
+      if(s.status==='running'){if(s.days_total)setSyncBusy(true,`Syncing ${s.days_done}/${s.days_total}...`);return;}
+      if(s.status==='idle'){clearInterval(_syncPoll);_syncPoll=null;setSyncBusy(false);return;}
+      _syncFinished(s);
+    }catch(e){}
+  },3000);
+}
 async function runSync(){
   const start=document.getElementById('sync-start').value,end=document.getElementById('sync-end').value,today=localToday();
   const errEl=document.getElementById('sync-error');
@@ -1253,15 +1289,18 @@ async function runSync(){
   if(end>today){errEl.textContent='End date cannot be in the future.';errEl.style.display='block';return;}
   if(start>end){errEl.textContent='Start date must be before end date.';errEl.style.display='block';return;}
   errEl.style.display='none';document.getElementById('sync-popover').classList.remove('open');
-  const btn=document.getElementById('sync-btn');btn.querySelector('.garmin-btn-left').lastChild.textContent=' Syncing...';btn.disabled=true;
-  const mobileBtn=document.getElementById('mobile-sync-btn');mobileBtn.classList.add('syncing');mobileBtn.disabled=true;
   try{
     const res=await apiFetch(`${API}/garmin-sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({start_date:start,end_date:end})});
+    if(res.status===409){showToast('A sync is already running');pollSyncStatus();return;}
     const data=await res.json();
-    if(data.status==='error'){showToast('Sync failed — check your Garmin connection','#8b4a42');}
-    else{showToast('Garmin sync complete','var(--accent-dark)');const st=new Date().toLocaleString('en-US',{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});document.getElementById('sync-time-label').textContent='SYNCED '+st;localStorage.setItem('last_sync',st);loadActivity();loadHealthChart();loadMileageChart();}
+    if(data.status!=='started'){showToast('Sync failed, check your Garmin connection','#8b4a42');return;}
+    pollSyncStatus();
   }catch(e){showToast('Sync failed','#8b4a42');}
-  finally{btn.querySelector('.garmin-btn-left').lastChild.textContent=' Garmin Sync';btn.disabled=false;mobileBtn.classList.remove('syncing');mobileBtn.disabled=false;}
+}
+async function cancelSync(){
+  document.getElementById('sync-popover').classList.remove('open');
+  document.getElementById('sync-btn').querySelector('.garmin-btn-left').lastChild.textContent=' Cancelling...';
+  try{await apiFetch(`${API}/garmin-sync/cancel`,{method:'POST'});}catch(e){}
 }
 
 // ── Training Plan ─────────────────────────────────────────────
@@ -1717,6 +1756,7 @@ function toggleSidebar(){
 
 // ── Init ──────────────────────────────────────────────────────
 renderEmptyState();loadActivity();loadHealthChart();loadMileageChart();loadMetricBadges();loadPlan();loadUserInfo();
+(async()=>{try{const s=await(await apiFetch(`${API}/garmin-sync/status`)).json();if(s.status==='running')pollSyncStatus();}catch(e){}})();
 document.getElementById('page-sub').textContent=todayLabel;
 setTimeout(()=>{if(!_healthChartLoaded)loadHealthChart();if(!_metricBadgesLoaded)loadMetricBadges();if(!_activityLoaded)loadActivity();if(!_mileageChartLoaded)loadMileageChart();},3000);
 

@@ -1,15 +1,14 @@
 # Data sync and retrieval endpoints.
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from db.activity_history import get_activities
 from db.garmin import delete_garmin_credentials, save_garmin_credentials
 from db.health_history import get_health_history
 from models.planner import DataRequest, GarminCredentials
 from services.auth import get_current_user
-from services.cache import session_cache
-from services.garmin import garmin_sync
+from services.garmin import acquire_sync_lock, get_sync_status, request_sync_cancel, run_sync_job
 from services.trend_analysis import compute_body_battery
 from services.weather import get_weather
 
@@ -43,13 +42,22 @@ def remove_garmin_credentials(user_id: str = Depends(get_current_user)):
 
 
 @router.post("/garmin-sync")
-def sync_garmin(dates: DataRequest, user_id: str = Depends(get_current_user)):
-    try:
-        result = garmin_sync(user_id, dates.start_date, dates.end_date)
-        session_cache.clear()
-        return result
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def sync_garmin(dates: DataRequest, background_tasks: BackgroundTasks, user_id: str = Depends(get_current_user)):
+    if not acquire_sync_lock(user_id):
+        raise HTTPException(status_code=409, detail="A Garmin sync is already running.")
+    background_tasks.add_task(run_sync_job, user_id, dates.start_date, dates.end_date)
+    return {"status": "started", "date_range": f"{dates.start_date} to {dates.end_date}"}
+
+
+@router.get("/garmin-sync/status")
+def garmin_sync_status(user_id: str = Depends(get_current_user)):
+    return get_sync_status(user_id)
+
+
+@router.post("/garmin-sync/cancel")
+def cancel_garmin_sync(user_id: str = Depends(get_current_user)):
+    request_sync_cancel(user_id)
+    return {"status": "cancelling"}
 
 
 @router.get("/health/v02")
