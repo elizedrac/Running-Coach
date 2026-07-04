@@ -700,15 +700,20 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 
 <div class="sync-popover" id="sync-popover">
   <div style="font-size:13px;font-weight:600;color:var(--ink);margin-bottom:12px">Sync Garmin Data</div>
-  <div class="modal-field"><label>Start date</label><input type="date" id="sync-start"/></div>
-  <div class="modal-field"><label>End date</label><input type="date" id="sync-end"/></div>
-  <div style="font-size:11px;color:#c0392b;display:none;margin-top:4px" id="sync-error"></div>
-  <div style="display:flex;gap:8px;margin-top:12px">
-    <button class="modal-btn-secondary" style="flex:1;padding:8px" onclick="setDefaultDates()">Last 7 days</button>
-    <button class="modal-btn-primary" style="flex:1;padding:8px" onclick="runSync()">Sync</button>
+  <div id="sync-form">
+    <div class="modal-field"><label>Start date</label><input type="date" id="sync-start"/></div>
+    <div class="modal-field"><label>End date</label><input type="date" id="sync-end"/></div>
+    <div style="font-size:11px;color:#c0392b;display:none;margin-top:4px" id="sync-error"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="modal-btn-secondary" style="flex:1;padding:8px" onclick="setDefaultDates()">Last 7 days</button>
+      <button class="modal-btn-primary" style="flex:1;padding:8px" onclick="runSync()">Sync</button>
+    </div>
+    <div style="font-size:10px;color:var(--faint);margin-top:8px;line-height:1.4">~10s per day of data · ranges over 6 months are best split up</div>
   </div>
-  <button class="modal-btn-secondary" id="cancel-sync-btn" style="display:none;width:100%;margin-top:8px;padding:8px" onclick="cancelSync()">Cancel Sync</button>
-  <div style="font-size:10px;color:var(--faint);margin-top:8px;line-height:1.4">~10s per day of data · ranges over 6 months are best split up</div>
+  <div id="sync-progress" style="display:none">
+    <div id="sync-progress-text" style="font-size:12px;color:var(--muted);margin-bottom:12px">Syncing...</div>
+    <button class="modal-btn-secondary" style="width:100%;padding:8px" onclick="cancelSync()">Cancel Sync</button>
+  </div>
   <div style="margin-top:10px;text-align:center"><button onclick="disconnectGarmin()" style="background:none;border:none;font-size:11px;color:var(--faint);cursor:pointer;text-decoration:underline">Disconnect Garmin</button></div>
 </div>
 
@@ -1252,17 +1257,19 @@ async function saveGarminSetup(){
 }
 async function disconnectGarmin(){document.getElementById('sync-popover').classList.remove('open');await apiFetch(`${API}/garmin/credentials`,{method:'DELETE'});showToast('Garmin disconnected');document.getElementById('garmin-setup-modal').classList.add('open');}
 
-let _syncPoll=null;
+let _syncPoll=null,_syncBusy=false,_cancelRequested=false;
 function setSyncBusy(busy,label){
+  _syncBusy=busy;
   const btn=document.getElementById('sync-btn');
   btn.querySelector('.garmin-btn-left').lastChild.textContent=busy?' '+(label||'Syncing...'):' Garmin Sync';
-  btn.disabled=busy;
-  const mobileBtn=document.getElementById('mobile-sync-btn');
-  mobileBtn.classList.toggle('syncing',busy);mobileBtn.disabled=busy;
-  document.getElementById('cancel-sync-btn').style.display=busy?'block':'none';
+  document.getElementById('mobile-sync-btn').classList.toggle('syncing',busy);
+  if(busy)document.getElementById('sync-progress-text').textContent=label||'Syncing...';
+  // While a sync runs the popover shows progress + cancel instead of the date form
+  document.getElementById('sync-form').style.display=busy?'none':'block';
+  document.getElementById('sync-progress').style.display=busy?'block':'none';
 }
 function _syncFinished(s){
-  clearInterval(_syncPoll);_syncPoll=null;setSyncBusy(false);
+  clearInterval(_syncPoll);_syncPoll=null;_cancelRequested=false;setSyncBusy(false);
   if(s.status==='success'||s.status==='cancelled'){
     if(s.status==='success')showToast('Garmin sync complete','var(--accent-dark)');
     else showToast(`Sync cancelled, ${s.days_synced||0} day(s) saved`);
@@ -1278,13 +1285,14 @@ function pollSyncStatus(){
     try{
       const res=await apiFetch(`${API}/garmin-sync/status`);
       const s=await res.json();
-      if(s.status==='running'){if(s.days_total)setSyncBusy(true,`Syncing ${s.days_done}/${s.days_total}...`);return;}
+      if(s.status==='running'){if(s.days_total&&!_cancelRequested)setSyncBusy(true,`Syncing ${s.days_done}/${s.days_total}...`);return;}
       if(s.status==='idle'){clearInterval(_syncPoll);_syncPoll=null;setSyncBusy(false);return;}
       _syncFinished(s);
     }catch(e){}
   },3000);
 }
 async function runSync(){
+  if(_syncBusy)return;
   const start=document.getElementById('sync-start').value,end=document.getElementById('sync-end').value,today=localToday();
   const errEl=document.getElementById('sync-error');
   if(!start||!end){errEl.textContent='Please enter both dates.';errEl.style.display='block';return;}
@@ -1300,8 +1308,10 @@ async function runSync(){
   }catch(e){showToast('Sync failed','#8b4a42');}
 }
 async function cancelSync(){
+  _cancelRequested=true;
   document.getElementById('sync-popover').classList.remove('open');
   document.getElementById('sync-btn').querySelector('.garmin-btn-left').lastChild.textContent=' Cancelling...';
+  document.getElementById('sync-progress-text').textContent='Cancelling...';
   try{await apiFetch(`${API}/garmin-sync/cancel`,{method:'POST'});}catch(e){}
 }
 
