@@ -70,6 +70,13 @@ def ask(body: AskRequest, user_id: str = Depends(get_current_user)):
     return StreamingResponse(generate(), media_type="text/event-stream")
 
 
+@router.get("/session/{session_id}")
+def get_session(session_id: str, user_id: str = Depends(get_current_user)):
+    # Recent verbatim turns only — older turns live compressed in History.summary
+    hist = _load_history(user_id, session_id)
+    return {"turns": hist.recent}
+
+
 @router.delete("/session/{session_id}")
 def clear_session(session_id: str, user_id: str = Depends(get_current_user)):
     r = get_redis()

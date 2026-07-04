@@ -24,7 +24,7 @@ from db.plan import (
 )
 from db.preferences import get_preferences, set_notes, update_preferences
 from models.planner import History
-from routes.ask import _history_key, _load_history, _save_history
+from routes.ask import _history_key, _load_history, _save_history, get_session
 from services import garmin as garmin_service
 from services.auth import get_current_user
 from services.cache import clear_user_cache, get_cached, set_cached
@@ -1818,3 +1818,13 @@ def test_run_sync_job_clears_stale_cancel_flag(monkeypatch):
     garmin_service.request_sync_cancel("stale-user")  # stale flag from a previous run
     garmin_service.run_sync_job("stale-user", "2026-01-01", "2026-01-01")
     assert seen["cancel_at_start"] is False
+
+
+def test_get_session_returns_recent_turns():
+    turns = [{"role": "user", "content": "how was my run"}, {"role": "assistant", "content": "great pace!"}]
+    _save_history("userA", "sess-restore", History(summary="", recent=turns, turn_count=1))
+    assert get_session("sess-restore", "userA") == {"turns": turns}
+
+
+def test_get_session_empty_for_unknown_session():
+    assert get_session("never-seen", "userA") == {"turns": []}

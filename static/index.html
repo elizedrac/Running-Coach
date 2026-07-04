@@ -1769,6 +1769,7 @@ function toggleSidebar(){
 // ── Init ──────────────────────────────────────────────────────
 renderEmptyState();loadActivity();loadHealthChart();loadMileageChart();loadMetricBadges();loadPlan();loadUserInfo();
 (async()=>{try{const s=await(await apiFetch(`${API}/garmin-sync/status`)).json();if(s.status==='running')pollSyncStatus();}catch(e){}})();
+(async()=>{try{const {turns}=await(await apiFetch(`${API}/session/${SID}`)).json();(turns||[]).forEach(t=>addMessage(t.role==='user'?'user':'coach',t.content));}catch(e){}})();
 document.getElementById('page-sub').textContent=todayLabel;
 setTimeout(()=>{if(!_healthChartLoaded)loadHealthChart();if(!_metricBadgesLoaded)loadMetricBadges();if(!_activityLoaded)loadActivity();if(!_mileageChartLoaded)loadMileageChart();},3000);
 
