@@ -1828,3 +1828,22 @@ def test_get_session_returns_recent_turns():
 
 def test_get_session_empty_for_unknown_session():
     assert get_session("never-seen", "userA") == {"turns": []}
+
+
+def test_cache_fails_open_when_redis_down(monkeypatch):
+    import redis as redis_lib
+
+    import services.cache as cache_mod
+
+    class DownRedis:
+        def __getattr__(self, name):
+            def boom(*a, **k):
+                raise redis_lib.ConnectionError("connection refused")
+
+            return boom
+
+    monkeypatch.setattr(cache_mod, "get_redis", lambda: DownRedis())
+    # all three operations degrade instead of raising
+    assert get_cached("user1", "2026-05-01", "2026-05-31", "activity_data") is None
+    set_cached("user1", "2026-05-01", "2026-05-31", "activity_data", FAKE_ACTIVITIES)
+    clear_user_cache("user1")
