@@ -2,6 +2,7 @@
 import asyncio
 from datetime import date as dt_date
 from datetime import datetime, timedelta
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -25,6 +26,7 @@ from db.plan import (
 from db.preferences import get_preferences, set_notes, update_preferences
 from models.planner import History
 from routes.ask import _history_key, _load_history, _save_history, get_session
+from services import chat_stream
 from services import garmin as garmin_service
 from services.auth import get_current_user
 from services.cache import clear_user_cache, get_cached, set_cached
@@ -1823,11 +1825,189 @@ def test_run_sync_job_clears_stale_cancel_flag(monkeypatch):
 def test_get_session_returns_recent_turns():
     turns = [{"role": "user", "content": "how was my run"}, {"role": "assistant", "content": "great pace!"}]
     _save_history("userA", "sess-restore", History(summary="", recent=turns, turn_count=1))
-    assert get_session("sess-restore", "userA") == {"turns": turns}
+    assert get_session("sess-restore", "userA") == {"turns": turns, "generating": False}
 
 
 def test_get_session_empty_for_unknown_session():
-    assert get_session("never-seen", "userA") == {"turns": []}
+    assert get_session("never-seen", "userA") == {"turns": [], "generating": False}
+
+
+# ── chat stream tests (phase 4: decoupled generation) ────────────────────────
+
+
+def test_chat_lock_exclusive():
+    assert chat_stream.acquire_chat_lock("u1", "s1")
+    assert not chat_stream.acquire_chat_lock("u1", "s1")
+    assert chat_stream.acquire_chat_lock("u1", "s2")  # other session unaffected
+    chat_stream._release_chat_lock("u1", "s1")
+    assert chat_stream.acquire_chat_lock("u1", "s1")
+
+
+def test_run_chat_job_writes_stream_and_saves_history(monkeypatch):
+    def fake_orchestrate(query, user_id, hist, **kwargs):
+        yield ("status", "thinking...")
+        yield ("chunk", "hello ")
+        yield ("chunk", "world")
+        hist.recent.append({"role": "user", "content": query})
+        hist.recent.append({"role": "assistant", "content": "hello world"})
+        yield ("done", hist)
+
+    monkeypatch.setattr(chat_stream, "orchestrate", fake_orchestrate)
+    chat_stream.acquire_chat_lock("u1", "s-job")
+    chat_stream.run_chat_job("hi coach", "u1", "s-job")
+
+    events = list(chat_stream.read_chat_stream("u1", "s-job"))
+    types = [e[1] for e in events]
+    # Leading "user" event lets a reconnecting client replay the pending question
+    assert types == ["user", "status", "chunk", "chunk", "done"]
+    assert next(e[2] for e in events if e[1] == "user") == "hi coach"
+    assert "".join(e[2] for e in events if e[1] == "chunk") == "hello world"
+    # history saved, lock released
+    assert chat_stream._load_history("u1", "s-job").recent[-1]["content"] == "hello world"
+    assert chat_stream.acquire_chat_lock("u1", "s-job")
+
+
+def test_run_chat_job_error_writes_error_event(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("llm exploded")
+
+    monkeypatch.setattr(chat_stream, "orchestrate", boom)
+    chat_stream.acquire_chat_lock("u1", "s-err")
+    chat_stream.run_chat_job("hi", "u1", "s-err")
+    events = list(chat_stream.read_chat_stream("u1", "s-err"))
+    assert events[-1][1] == "error"
+    assert "llm exploded" in events[-1][2]
+    assert chat_stream.acquire_chat_lock("u1", "s-err")  # lock released
+
+
+def test_read_chat_stream_resumes_after_id(monkeypatch):
+    def fake_orchestrate(query, user_id, hist, **kwargs):
+        yield ("chunk", "first")
+        yield ("chunk", "second")
+        yield ("done", hist)
+
+    monkeypatch.setattr(chat_stream, "orchestrate", fake_orchestrate)
+    chat_stream.run_chat_job("hi", "u1", "s-resume")
+    events = list(chat_stream.read_chat_stream("u1", "s-resume"))
+    # Resume just past the first chunk — only later events should replay
+    first_chunk_id = next(e[0] for e in events if e[1] == "chunk")
+    resumed = list(chat_stream.read_chat_stream("u1", "s-resume", after_id=first_chunk_id))
+    assert [e[2] for e in resumed if e[1] == "chunk"] == ["second"]
+
+
+def test_chat_cancel_flag_roundtrip():
+    assert not chat_stream._cancel_requested("u1", "s-c")
+    chat_stream.request_chat_cancel("u1", "s-c")
+    assert chat_stream._cancel_requested("u1", "s-c")
+
+
+def test_run_chat_job_cancel_saves_interrupted_history(monkeypatch):
+    # A cancelled turn must still persist history (marked interrupted) so a
+    # reloading client sees the partial answer rather than an empty thread.
+    def fake_orchestrate(query, user_id, hist, should_cancel=None, **kwargs):
+        # Cancel arrives mid-flight (run_chat_job clears any stale flag at start,
+        # so mimic the real POST /ask/stop firing while generation is running).
+        yield ("chunk", "partial ")
+        chat_stream.request_chat_cancel("u1", "s-cancel")
+        if should_cancel and should_cancel():
+            hist.recent.append({"role": "user", "content": query})
+            hist.recent.append({"role": "assistant", "content": "[response stopped by user before completion]"})
+            yield ("done", hist)
+            return
+        yield ("chunk", "should not reach")
+        yield ("done", hist)
+
+    monkeypatch.setattr(chat_stream, "orchestrate", fake_orchestrate)
+    chat_stream.acquire_chat_lock("u1", "s-cancel")
+    chat_stream.run_chat_job("stop please", "u1", "s-cancel")
+
+    saved = chat_stream._load_history("u1", "s-cancel")
+    assert saved.recent[-1]["content"] == "[response stopped by user before completion]"
+    # run_chat_job clears the cancel flag and releases the lock in finally
+    assert not chat_stream._cancel_requested("u1", "s-cancel")
+    assert chat_stream.acquire_chat_lock("u1", "s-cancel")
+
+
+def test_get_session_reports_generating_while_locked():
+    _save_history("userG", "s-gen", History(summary="", recent=[], turn_count=0))
+    chat_stream.acquire_chat_lock("userG", "s-gen")
+    assert get_session("s-gen", "userG")["generating"] is True
+    chat_stream._release_chat_lock("userG", "s-gen")
+    assert get_session("s-gen", "userG")["generating"] is False
+
+
+def test_run_chat_job_forwards_garmin_progress(monkeypatch):
+    # A long garmin sync must keep the stream alive by emitting per-day status
+    # events, so it never trips the orphan guard no matter how long it runs.
+    def fake_orchestrate(query, user_id, hist, on_progress=None, **kwargs):
+        yield ("status", "Please wait a few minutes, syncing Garmin data... ")
+        for done in (1, 2, 3):
+            on_progress(done, 3)
+        yield ("chunk", "synced!")
+        yield ("done", hist)
+
+    monkeypatch.setattr(chat_stream, "orchestrate", fake_orchestrate)
+    chat_stream.acquire_chat_lock("u1", "s-prog")
+    chat_stream.run_chat_job("sync my garmin", "u1", "s-prog")
+
+    events = list(chat_stream.read_chat_stream("u1", "s-prog"))
+    progress = [e[2] for e in events if e[1] == "status" and "day" in e[2]]
+    assert progress == [
+        "Syncing Garmin data... day 1 of 3",
+        "Syncing Garmin data... day 2 of 3",
+        "Syncing Garmin data... day 3 of 3",
+    ]
+    # progress arrives before the answer chunk
+    assert [e[1] for e in events].index("chunk") > [e[1] for e in events].index("status")
+
+
+def _stub_redis_reader(monkeypatch, script, clock):
+    # Replace get_redis with a stub whose xread returns scripted responses, so
+    # the reader's silence logic can be driven by a frozen clock WITHOUT tripping
+    # fakeredis's real-clock blocking (which would hang on a frozen time.time).
+    monkeypatch.setattr(chat_stream.time, "time", lambda: clock["t"])
+    calls = {"n": 0}
+
+    def fake_xread(streams, count=None, block=None):
+        calls["n"] += 1
+        return script(calls["n"])
+
+    monkeypatch.setattr(chat_stream, "get_redis", lambda: SimpleNamespace(xread=fake_xread))
+
+
+def test_read_chat_stream_orphans_after_chunk_gap(monkeypatch):
+    # A gap longer than the chunk budget with no terminal event means the stream died.
+    clock = {"t": 1000.0}
+
+    def script(n):
+        if n == 1:
+            return [("k", [("1-0", {"type": "chunk", "data": "partial"})])]
+        clock["t"] += chat_stream.SILENCE_AFTER_CHUNK + 1  # push past the chunk budget
+        return []
+
+    _stub_redis_reader(monkeypatch, script, clock)
+    events = list(chat_stream.read_chat_stream("u1", "s-chunkgap"))
+    assert events[0][1] == "chunk"
+    assert events[-1][1] == "error"
+
+
+def test_read_chat_stream_patient_after_status(monkeypatch):
+    # The same gap after a status event is tolerated (a slow tool, e.g. garmin):
+    # it must NOT orphan while under the status budget, and finishes on the done.
+    clock = {"t": 1000.0}
+
+    def script(n):
+        if n == 1:
+            return [("k", [("1-0", {"type": "status", "data": "syncing"})])]
+        if n == 2:
+            clock["t"] += chat_stream.SILENCE_AFTER_CHUNK + 5  # would orphan a chunk, not a status
+            return []
+        return [("k", [("2-0", {"type": "done", "data": ""})])]
+
+    _stub_redis_reader(monkeypatch, script, clock)
+    types_seen = [e[1] for e in chat_stream.read_chat_stream("u1", "s-statuspatient")]
+    assert "error" not in types_seen
+    assert types_seen[-1] == "done"
 
 
 def test_cache_fails_open_when_redis_down(monkeypatch):

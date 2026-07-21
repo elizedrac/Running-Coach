@@ -74,7 +74,7 @@ runcoach/
 │   └── login.html                 # Login page — POST /auth/login, stores JWT in sessionStorage, redirects to /
 │
 ├── routes/
-│   ├── ask.py                     # POST /ask — SSE streaming endpoint; chat history in Redis keyed session:{user_id}:{session_id} (24h TTL); DELETE /session/{session_id}
+│   ├── ask.py                     # POST /ask (starts background generation) + GET /ask/stream/{session_id} (SSE, resumable) + POST /ask/stop + GET/DELETE /session/{session_id}
 │   ├── activities.py              # GET /health/recent, /health/v02, /health/body-battery, /activities/recent, /weather; POST /garmin-sync (starts background job) + GET /garmin-sync/status + POST /garmin-sync/cancel
 │   ├── plan.py                    # Plan CRUD: GET /plan/days, GET /plan/intervals/{day_id}, POST /plan/create, POST /plan/sync, DELETE /plan/delete, PATCH /plan/day/{day_id}, DELETE /plan/day/{day_id}
 │   ├── auth.py                    # POST /auth/login — Supabase Auth sign-in, returns JWT access token
@@ -95,7 +95,8 @@ runcoach/
 │   ├── web_search.py              # Anthropic web search wrapper — no persistence itself; caching is owned by race_info.py
 │   ├── race_info.py               # get_race_info() — time-sensitive race logistics (registration/race_day); fuzzy cache lookup (word overlap → Voyage embedding cosine sim) via db/search_cache.py before falling back to web_search + LLM
 │   ├── weather.py                 # WeatherAPI wrapper (current day + 12-hour forecast)
-│   ├── cache.py                   # Redis-backed range-aware cache (get_cached, set_cached, clear_user_cache), 1h TTL
+│   ├── cache.py                   # Redis-backed range-aware cache (get_cached, set_cached, clear_user_cache), 1h TTL; fails open if Redis is down
+│   ├── chat_stream.py             # Decoupled chat generation: run_chat_job (background, XADDs orchestrate events to Redis Stream) + read_chat_stream (resumable reader) + per-session lock/cancel + history load/save
 │   ├── rate_limit.py              # check_rate_limit() — per-user fixed-window Redis counters; USER_IDS env exempt
 │   ├── auth.py                    # get_current_user() FastAPI dependency — validates Bearer JWT via Supabase, returns user_id
 │   ├── pacing.py                  # pacing_calculator() — Riegel equivalent marathon pace → Daniels-style zones + GPS-adjusted pace + VO2-derived easy pace
@@ -872,13 +873,18 @@ models/
 - Handled in `routes/ask.py` before calling `orchestrate`. If ending: generates follow-ups, yields `{type: "ended", follow_ups: [...]}` SSE event. History NOT updated (so follow-up questions resume from pre-goodbye context).
 - `generate_followups(query, recent)` — Haiku call, returns list of 3 strings. Frontend renders as clickable chips that pre-fill the input box.
 
-## SSE Streaming ✓
+## SSE Streaming ✓ (decoupled via Redis Streams)
+
+Generation is decoupled from the HTTP request so answers survive page reloads:
 
 - `services/llm.py::stream_llm()` — wraps `client.messages.stream()`, yields text chunks as Claude generates them
 - `services/final.py::final_output()` — generator, `yield from stream_llm(...)`
-- `services/coach.py::orchestrate()` — generator yielding tuples: `("status", text)` before blocking tool calls, `("chunk", text)` for response tokens, `("done", hist)` at end
-- `routes/ask.py` wraps `orchestrate` in a `StreamingResponse` generator that formats tuples as SSE events (`data: {...}\n\n`)
-- Frontend reads stream via `fetch` + `ReadableStream`, appends chunks in real-time to the chat bubble
+- `services/coach.py::orchestrate()` — generator yielding tuples: `("status", text)`, `("chunk", text)`, `("done", hist)`; accepts `should_cancel` callback checked between tools/chunks — cancelled turns save partial history marked interrupted
+- `services/chat_stream.py` — the middle layer: `POST /ask` acquires `chatlock:{user_id}:{session_id}` (409 if generating) and schedules `run_chat_job` via BackgroundTasks, which XADDs every orchestrate event to the Redis Stream `chatstream:{user_id}:{session_id}` (15 min TTL), saves history on done, writes terminal `done`/`error` entries, releases the lock
+- `GET /ask/stream/{session_id}?after=<id>` — SSE endpoint over `read_chat_stream()`: short-poll XREAD (300ms block), replays from `after`, ends on terminal event or 60s silence (orphan guard). Reopenable — reload reattaches and replays missed events
+- `POST /ask/stop/{session_id}` — sets `chatcancel` flag (the stop button; replaces request-abort)
+- Goodbye path (detect_end + follow-up chips) stays synchronous in `POST /ask`, returns `{"status": "ended"}` JSON — no stream involved
+- Frontend: `sendMessage()` POSTs then `consumeStream()` reads the GET endpoint; on page load `GET /session` returns `generating: true` if an answer is in flight and the client reattaches from event 0
 - **Throttled markdown rendering**: chunks are accumulated in a buffer and re-rendered via `marked.parse()` on a 150ms debounce timer (`scheduleRender()`). Prevents layout thrash from per-token DOM updates while still feeling real-time.
 
 ---

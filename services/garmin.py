@@ -71,7 +71,7 @@ def _release_sync_lock(user_id: str) -> None:
 
 
 def request_sync_cancel(user_id: str) -> None:
-    get_redis().setex(f"garmin_sync_cancel:{user_id}", SYNC_LOCK_TTL, "1")
+    get_redis().set(f"garmin_sync_cancel:{user_id}", "1", ex=SYNC_LOCK_TTL)
 
 
 def _cancel_requested(user_id: str) -> bool:
@@ -84,7 +84,7 @@ def get_sync_status(user_id: str) -> dict:
 
 
 def _set_sync_status(user_id: str, status: dict) -> None:
-    get_redis().setex(f"garmin_sync_status:{user_id}", SYNC_STATUS_TTL, json.dumps(status))
+    get_redis().set(f"garmin_sync_status:{user_id}", json.dumps(status), ex=SYNC_STATUS_TTL)
 
 
 def run_sync_job(user_id: str, day_iso_start: str, day_iso_end: str) -> None:

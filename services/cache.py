@@ -34,7 +34,7 @@ def set_cached(user_id: str, start_date: str, end_date: str, query_type: str, da
         raw = r.get(key)
         entries = json.loads(raw) if raw else []
         entries.append({"start": start_date, "end": end_date, "data": data})
-        r.setex(key, CACHE_TTL, json.dumps(entries))
+        r.set(key, json.dumps(entries), ex=CACHE_TTL)
     except redis.RedisError as e:
         print(f"[cache] redis unavailable, skipping cache write: {e}")
 

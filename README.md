@@ -63,11 +63,13 @@ GARMIN_PASSWORD=
 
 ## Redis
 
-The app needs Redis (query cache, chat history, rate limits, sync job status). `docker compose up` starts it automatically. For running the app directly on the host (uvicorn/CLI), start just Redis and point `REDIS_URL` at localhost:
+The app needs Redis (query cache, chat history, rate limits, sync job status, and the resumable chat stream). `docker compose up` starts it automatically. For running the app directly on the host (uvicorn/CLI), start just Redis and point `REDIS_URL` at localhost:
 ```bash
 docker compose up -d redis    # exposed on localhost:6379
 ```
-Tests do NOT need Redis — they run against fakeredis.
+Tests do NOT need Redis, they run against fakeredis.
+
+Chat answers are generated in a background task and streamed through a Redis Stream, not tied to the HTTP request, so a page reload reattaches to an in-flight answer instead of killing it. `POST /ask` starts the job; `GET /ask/stream/{session_id}` follows it; `POST /ask/stop/{session_id}` cancels. A garmin sync inside a chat turn emits per-day progress into the stream, which both shows "day X of Y" and keeps the connection from tripping the orphan guard during a long sync.
 
 ## Docker
 

@@ -133,11 +133,21 @@ def call_tool(name: str, args: dict, user_id: str, location: str = "New York"):
 
 
 def orchestrate(
-    user_query, user_id, hist=None, has_plan: bool = False, location: str = "New York, NY", today: str = None
+    user_query,
+    user_id,
+    hist=None,
+    has_plan: bool = False,
+    location: str = "New York, NY",
+    today: str = None,
+    should_cancel=None,
+    on_progress=None,
 ):
     debug = "--debug" in sys.argv
 
     hist = hist or History()
+
+    def cancelled():
+        return should_cancel() if should_cancel else False
 
     b, s = input_check(user_query)
     if b:
@@ -179,11 +189,24 @@ def orchestrate(
 
             yield ("status", "Please wait a few minutes, syncing Garmin data... ")
             try:
-                tool_results["garmin_sync"] = call_tool("garmin_sync", tool.args, user_id)
+                start, end = tool.args.get("day_iso_start"), tool.args.get("day_iso_end")
+                days_total = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1 if start and end else 0
+
+                def _on_day(days_done):
+                    if on_progress:
+                        on_progress(days_done, days_total)
+
+                # Direct call (not call_tool) so per-day progress and mid-sync
+                # cancel are wired through to the streamed response.
+                tool_results["garmin_sync"] = garmin_sync(
+                    user_id, **tool.args, on_day=_on_day, should_cancel=cancelled
+                )
             except Exception as e:
                 tool_results["garmin_sync"] = f"Error running garmin_sync: {e}"
 
         for tool in planner_response.tools:
+            if cancelled():
+                break
             name = tool.name.strip()
             if name not in TOOL_REGISTRY:
                 if debug:
@@ -228,12 +251,26 @@ def orchestrate(
     context = f"\n\n[Conversation context]\n{full_history}" if full_history else ""
     prompt = f"Today is {today_label}. Answer the user's most recent question: {user_query}{context}"
 
+    # Cancelled during tools: skip the final LLM call entirely
+    if cancelled():
+        hist.recent.append({"role": "user", "content": user_query})
+        hist.recent.append({"role": "assistant", "content": "[response stopped by user before completion]"})
+        hist.turn_count += 1
+        yield ("done", hist)
+        return
+
     full_response = []
+    was_cancelled = False
     for chunk in final_output(prompt, planner_response, tool_results, user_id, min_date=min_date, has_plan=has_plan):
+        if cancelled():
+            was_cancelled = True
+            break
         yield ("chunk", chunk)
         full_response.append(chunk)
 
     final_response = "".join(full_response)
+    if was_cancelled:
+        final_response += "\n[response interrupted by user]"
 
     hist.recent.append({"role": "user", "content": user_query})
     # Store head + tail so context doesn't bloat: head captures key data discussed,

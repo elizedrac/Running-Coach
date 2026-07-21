@@ -14,5 +14,5 @@ import db.redis
 def fake_redis(monkeypatch):
     # Fresh in-memory server per test: no real Redis needed, no state bleed between tests
     server = fakeredis.FakeServer()
-    pool = redis.ConnectionPool(connection_class=fakeredis.FakeConnection, server=server)
+    pool = redis.ConnectionPool(connection_class=fakeredis.FakeRedisConnection, server=server)
     monkeypatch.setattr(db.redis, "_pool", pool)

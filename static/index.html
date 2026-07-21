@@ -639,7 +639,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
                 <div class="chat-empty-brand-name">RunCoach</div>
                 <div class="chat-empty-brand-sub">Your personal running coach</div>
               </div>
-              <div style="width:100%;max-width:380px">
+              <div style="width:100%;max-width:380px;display:none" id="chat-empty-prompts">
                 <div class="chat-empty-prompts-label">Try asking</div>
                 <div id="chat-prompt-chips"></div>
               </div>
@@ -892,7 +892,7 @@ let SID = localStorage.getItem('rc_sid') || _uuid();
 localStorage.setItem('rc_sid', SID);
 let hasPlan = false;
 let userLocation = 'New York, NY';
-let abortController = null;
+let streamAbort = null;
 let _stepsChart = null, _sleepChart = null, _rhrChart = null, _mileageChart = null, _metricModalChart = null;
 let _healthChartData = null;
 let _allActivities = [], _activityWeekView = false;
@@ -946,7 +946,10 @@ function switchTab(tab, el){
     predictions:''
   };
   document.getElementById('topbar-actions').innerHTML=actions[tab];
+  localStorage.setItem('rc_tab',tab);
 }
+// Restore last tab immediately (before first paint) to avoid a dashboard flash on reload
+(()=>{const t=localStorage.getItem('rc_tab');if(t&&t!=='dashboard'){const el=document.querySelector(`.nav-item[onclick*="'${t}'"]`);if(el)switchTab(t,el);}})();
 
 // ── Helpers ───────────────────────────────────────────────────
 function localToday(){const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
@@ -1137,6 +1140,7 @@ function renderEmptyState(){
   const shuffled=[...SUGGESTED_PROMPTS].sort(()=>Math.random()-.5).slice(0,3);
   const chips=document.getElementById('chat-prompt-chips');
   if(chips){chips.innerHTML=shuffled.map(p=>`<button class="prompt-chip">${p}</button>`).join('');chips.querySelectorAll('.prompt-chip').forEach((btn,i)=>btn.addEventListener('click',()=>sendPrompt(shuffled[i])));}
+  const prompts=document.getElementById('chat-empty-prompts');if(prompts)prompts.style.display='block';
   if(empty)empty.style.display='flex';if(msgs)msgs.style.display='none';
 }
 
@@ -1183,10 +1187,10 @@ function setAnalyzing(on){
   if(on)document.getElementById('analyzing-text').textContent='Analyzing...';
 }
 
-function cancelRequest(){if(abortController){abortController.abort();abortController=null;}setAnalyzing(false);document.getElementById('chat-input').focus();}
+function cancelRequest(){apiFetch(`${API}/ask/stop/${SID}`,{method:'POST'}).catch(()=>{});if(streamAbort){streamAbort.abort();streamAbort=null;}setAnalyzing(false);document.getElementById('chat-input').focus();}
 
 async function clearChat(){
-  if(abortController){abortController.abort();abortController=null;}setAnalyzing(false);
+  if(streamAbort){apiFetch(`${API}/ask/stop/${SID}`,{method:'POST'}).catch(()=>{});streamAbort.abort();streamAbort=null;}setAnalyzing(false);
   await apiFetch(`${API}/session/${SID}`,{method:'DELETE'});
   SID=_uuid();localStorage.setItem('rc_sid',SID);
   document.getElementById('chat-messages').innerHTML='';renderEmptyState();
@@ -1195,29 +1199,64 @@ async function clearChat(){
 async function sendMessage(){
   const input=document.getElementById('chat-input');const text=input.value.trim();
   if(!text||input.disabled)return;
-  input.value='';addMessage('user',text);setAnalyzing(true);abortController=new AbortController();
-  let bubble=null,fullText='',hasChunks=false;
+  input.value='';addMessage('user',text);setAnalyzing(true);
   try{
-    const res=await apiFetch(`${API}/ask`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:text,session_id:SID,has_plan:hasPlan,location:userLocation,today:localToday()}),signal:abortController.signal});
-    const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='';let renderTimer=null;
-    const scheduleRender=()=>{if(renderTimer)return;renderTimer=setTimeout(()=>{renderTimer=null;if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([\s\S]+?)~~/g,'$1'));},150);};
-    while(true){
-      const{done,value}=await reader.read();if(done)break;
-      buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();
-      for(const line of lines){
-        if(!line.startsWith('data: '))continue;
-        let event;try{event=JSON.parse(line.slice(6));}catch{continue;}
-        if(event.type==='status'){document.getElementById('analyzing-text').textContent=event.text;}
-        else if(event.type==='chunk'){if(!hasChunks){hasChunks=true;setAnalyzing(false);bubble=createCoachMessage();}fullText+=event.text;scheduleRender();document.getElementById('chat-messages').scrollTop=999999;}
-        else if(event.type==='done'){if(renderTimer){clearTimeout(renderTimer);renderTimer=null;}if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([\s\S]+?)~~/g,'$1'));}
-        else if(event.type==='ended'){setAnalyzing(false);addMessage('coach','Great chatting! Here are some things to explore:');if(event.follow_ups&&event.follow_ups.length)showFollowUpChips(event.follow_ups);}
-        else if(event.type==='plan_updated'){loadPlan();}
-        else if(event.type==='theme_updated'){if(event.theme)applyTheme(event.theme);}
-        else if(event.type==='error'){setAnalyzing(false);addMessage('coach','Sorry, something went wrong. Please try again.');}
-      }
+    const res=await apiFetch(`${API}/ask`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:text,session_id:SID,has_plan:hasPlan,location:userLocation,today:localToday()})});
+    if(res.status===409){
+      // Another tab/device is already answering for this session. Don't send —
+      // resync to the true thread, reattach to that answer, and hand the typed
+      // text back so it can be resent once generation finishes.
+      input.value=text;showToast('Finishing your previous answer first...');
+      document.getElementById('chat-messages').innerHTML='';
+      try{const {turns}=await(await apiFetch(`${API}/session/${SID}`)).json();(turns||[]).forEach(t=>addMessage(t.role==='user'?'user':'coach',t.content));}catch(e){}
+      setAnalyzing(true);await consumeStream('0',true);return;
     }
-  }catch(e){setAnalyzing(false);if(e.name!=='AbortError')addMessage('coach','Sorry, I had trouble connecting.');}
-  finally{if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([\s\S]+?)~~/g,'$1'));setAnalyzing(false);abortController=null;input.focus();}
+    const data=await res.json();
+    if(data.status==='ended'){setAnalyzing(false);addMessage('coach','Great chatting! Here are some things to explore:');if(data.follow_ups&&data.follow_ups.length)showFollowUpChips(data.follow_ups);return;}
+    if(data.status!=='started'){setAnalyzing(false);addMessage('coach','Sorry, something went wrong. Please try again.');return;}
+    await consumeStream();
+  }catch(e){setAnalyzing(false);addMessage('coach','Sorry, I had trouble connecting.');input.focus();}
+}
+
+// Reads the answer from GET /ask/stream — separate from POST /ask so a reloaded
+// page can reattach to an in-flight answer. Tracks the last event id and, on a
+// mid-stream network drop, reconnects with ?after=<id> to resume where it left
+// off (backoff + retry cap). Terminal events and user aborts stop it cleanly.
+async function consumeStream(afterId,isReconnect){
+  streamAbort=new AbortController();
+  let bubble=null,fullText='',hasChunks=false,renderTimer=null;
+  let lastId=afterId||'0',userShown=false,retries=0;
+  const render=()=>{if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([\s\S]+?)~~/g,'$1'));};
+  const scheduleRender=()=>{if(renderTimer)return;renderTimer=setTimeout(()=>{renderTimer=null;render();},150);};
+  try{
+    while(true){
+      let sawTerminal=false,gotAny=false;
+      try{
+        const res=await apiFetch(`${API}/ask/stream/${SID}?after=${encodeURIComponent(lastId)}`,{signal:streamAbort.signal});
+        const reader=res.body.getReader();const decoder=new TextDecoder();let buffer='';
+        while(true){
+          const{done,value}=await reader.read();if(done)break;
+          buffer+=decoder.decode(value,{stream:true});const lines=buffer.split('\n');buffer=lines.pop();
+          for(const line of lines){
+            if(!line.startsWith('data: '))continue;
+            let event;try{event=JSON.parse(line.slice(6));}catch{continue;}
+            if(event.id){lastId=event.id;gotAny=true;}
+            if(event.type==='user'){if(isReconnect&&!userShown){addMessage('user',event.text);userShown=true;}}
+            else if(event.type==='status'){document.getElementById('analyzing-text').textContent=event.text;}
+            else if(event.type==='chunk'){if(!hasChunks){hasChunks=true;setAnalyzing(false);bubble=createCoachMessage();}fullText+=event.text;scheduleRender();document.getElementById('chat-messages').scrollTop=999999;}
+            else if(event.type==='done'){sawTerminal=true;if(renderTimer){clearTimeout(renderTimer);renderTimer=null;}render();}
+            else if(event.type==='plan_updated'){loadPlan();}
+            else if(event.type==='theme_updated'){if(event.theme)applyTheme(event.theme);}
+            else if(event.type==='error'){sawTerminal=true;setAnalyzing(false);addMessage('coach','Sorry, something went wrong. Please try again.');}
+          }
+        }
+      }catch(e){if(e.name==='AbortError')return;}
+      if(sawTerminal)break;                       // server finished (done/error) or gave up
+      retries=gotAny?0:retries+1;                 // progress resets the backoff
+      if(retries>5){setAnalyzing(false);addMessage('coach','Sorry, I lost the connection. Please try again.');break;}
+      await new Promise(r=>setTimeout(r,Math.min(1000*retries,5000)));
+    }
+  }finally{if(renderTimer){clearTimeout(renderTimer);renderTimer=null;}render();setAnalyzing(false);streamAbort=null;document.getElementById('chat-input').focus();}
 }
 
 document.getElementById('chat-input').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
@@ -1767,9 +1806,18 @@ function toggleSidebar(){
 })();
 
 // ── Init ──────────────────────────────────────────────────────
-renderEmptyState();loadActivity();loadHealthChart();loadMileageChart();loadMetricBadges();loadPlan();loadUserInfo();
+loadActivity();loadHealthChart();loadMileageChart();loadMetricBadges();loadPlan();loadUserInfo();
 (async()=>{try{const s=await(await apiFetch(`${API}/garmin-sync/status`)).json();if(s.status==='running')pollSyncStatus();}catch(e){}})();
-(async()=>{try{const {turns}=await(await apiFetch(`${API}/session/${SID}`)).json();(turns||[]).forEach(t=>addMessage(t.role==='user'?'user':'coach',t.content));}catch(e){}})();
+// Chat area stays blank until we know what belongs there — restored turns, an
+// in-flight answer, or (only for a truly fresh session) the suggested questions
+(async()=>{
+  try{
+    const {turns,generating}=await(await apiFetch(`${API}/session/${SID}`)).json();
+    (turns||[]).forEach(t=>addMessage(t.role==='user'?'user':'coach',t.content));
+    if(generating){hideEmptyState();setAnalyzing(true);consumeStream('0',true);}
+    else if(!turns||!turns.length)renderEmptyState();
+  }catch(e){renderEmptyState();}
+})();
 document.getElementById('page-sub').textContent=todayLabel;
 setTimeout(()=>{if(!_healthChartLoaded)loadHealthChart();if(!_metricBadgesLoaded)loadMetricBadges();if(!_activityLoaded)loadActivity();if(!_mileageChartLoaded)loadMileageChart();},3000);
 
