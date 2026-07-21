@@ -13,7 +13,7 @@ from db.race import get_race
 from models.planner import History
 from services.course_details import get_course_details
 from services.final import final_output
-from services.garmin import garmin_sync
+from services.garmin import garmin_sync, run_locked_sync
 from services.guardrails import input_check
 from services.memory import compress_history
 from services.pacing import _time_to_mins, pacing_calculator
@@ -197,8 +197,9 @@ def orchestrate(
                         on_progress(days_done, days_total)
 
                 # Direct call (not call_tool) so per-day progress and mid-sync
-                # cancel are wired through to the streamed response.
-                tool_results["garmin_sync"] = garmin_sync(
+                # cancel are wired through to the streamed response. Uses the
+                # web sync's lock/status/cancel so runs can't overlap.
+                tool_results["garmin_sync"] = run_locked_sync(
                     user_id, **tool.args, on_day=_on_day, should_cancel=cancelled
                 )
             except Exception as e:

@@ -87,30 +87,44 @@ def _set_sync_status(user_id: str, status: dict) -> None:
     get_redis().set(f"garmin_sync_status:{user_id}", json.dumps(status), ex=SYNC_STATUS_TTL)
 
 
-def run_sync_job(user_id: str, day_iso_start: str, day_iso_end: str) -> None:
+def run_sync_job(user_id: str, day_iso_start: str, day_iso_end: str, on_day=None, extra_cancel=None) -> dict:
     days_total = (datetime.fromisoformat(day_iso_end) - datetime.fromisoformat(day_iso_start)).days + 1
 
-    def on_day(days_done: int) -> None:
+    def _on_day(days_done: int) -> None:
         _set_sync_status(user_id, {"status": "running", "days_done": days_done, "days_total": days_total})
+        if on_day:
+            on_day(days_done)
 
     try:
         get_redis().delete(f"garmin_sync_cancel:{user_id}")  # clear any stale flag from a previous run
-        on_day(0)
+        _on_day(0)
         result = garmin_sync(
             user_id,
             day_iso_start,
             day_iso_end,
-            on_day=on_day,
-            should_cancel=lambda: _cancel_requested(user_id),
+            on_day=_on_day,
+            should_cancel=lambda: _cancel_requested(user_id) or bool(extra_cancel and extra_cancel()),
         )
         if result.get("status") in ("success", "cancelled"):
             clear_user_cache(user_id)  # synced rows changed → cached query results are stale
         _set_sync_status(user_id, result)
+        return result
     except Exception as e:
-        _set_sync_status(user_id, {"status": "error", "error": str(e)})
+        result = {"status": "error", "error": str(e)}
+        _set_sync_status(user_id, result)
+        return result
     finally:
         _release_sync_lock(user_id)
         get_redis().delete(f"garmin_sync_cancel:{user_id}")
+
+
+def run_locked_sync(user_id: str, day_iso_start: str, day_iso_end: str, on_day=None, should_cancel=None) -> dict:
+    # Chat/tool path: shares the web route's lock, status, and cancel flag so a
+    # chat sync and a button sync can never run concurrently and either cancel
+    # control (chat Stop or popover Cancel) stops it.
+    if not acquire_sync_lock(user_id):
+        return {"status": "error", "error": "A Garmin sync is already running; wait for it to finish."}
+    return run_sync_job(user_id, day_iso_start, day_iso_end, on_day=on_day, extra_cancel=should_cancel)
 
 
 def _token_dir(user_id: str) -> str:

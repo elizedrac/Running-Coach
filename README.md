@@ -69,7 +69,7 @@ docker compose up -d redis    # exposed on localhost:6379
 ```
 Tests do NOT need Redis, they run against fakeredis.
 
-Chat answers are generated in a background task and streamed through a Redis Stream, not tied to the HTTP request, so a page reload reattaches to an in-flight answer instead of killing it. `POST /ask` starts the job; `GET /ask/stream/{session_id}` follows it; `POST /ask/stop/{session_id}` cancels. A garmin sync inside a chat turn emits per-day progress into the stream, which both shows "day X of Y" and keeps the connection from tripping the orphan guard during a long sync.
+Chat answers are generated in a background task and streamed through a Redis Stream, not tied to the HTTP request, so a page reload reattaches to an in-flight answer instead of killing it. `POST /ask` starts the job; `GET /ask/stream/{session_id}` follows it; `POST /ask/stop/{session_id}` cancels. A garmin sync inside a chat turn emits per-day progress into the stream, which both shows "day X of Y" and keeps the connection from tripping the orphan guard during a long sync. Chat-triggered syncs share the same Redis lock, status key, and cancel flag as the sync button (`POST /garmin-sync`), so only one sync can run per user at a time and a chat sync can be cancelled from either the chat Stop button or the sync popover's Cancel.
 
 ## Docker
 

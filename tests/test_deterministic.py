@@ -1822,6 +1822,44 @@ def test_run_sync_job_clears_stale_cancel_flag(monkeypatch):
     assert seen["cancel_at_start"] is False
 
 
+def test_run_sync_job_honors_extra_cancel(monkeypatch):
+    seen = {}
+
+    def fake_sync(user_id, start, end, on_day=None, should_cancel=None):
+        seen["cancelled"] = should_cancel()
+        return {"status": "cancelled", "activities_synced": 0, "days_synced": 0}
+
+    monkeypatch.setattr(garmin_service, "garmin_sync", fake_sync)
+    monkeypatch.setattr(garmin_service, "clear_user_cache", lambda uid: None)
+    # No Redis cancel flag set — only the chat-side flag reports cancelled
+    result = garmin_service.run_sync_job("chat-cancel-user", "2026-01-01", "2026-01-01", extra_cancel=lambda: True)
+    assert seen["cancelled"] is True
+    assert result["status"] == "cancelled"
+
+
+def test_run_locked_sync_acquires_and_releases_lock(monkeypatch):
+    result = {"status": "success", "date_range": "2026-01-01 to 2026-01-02", "activities_synced": 1, "days_synced": 2}
+    monkeypatch.setattr(garmin_service, "garmin_sync", lambda *a, **k: result)
+    monkeypatch.setattr(garmin_service, "clear_user_cache", lambda uid: None)
+    assert garmin_service.run_locked_sync("chat-user", "2026-01-01", "2026-01-02") == result
+    assert garmin_service.get_sync_status("chat-user") == result  # status published for the sidebar
+    assert garmin_service.acquire_sync_lock("chat-user")  # lock was released
+    garmin_service._release_sync_lock("chat-user")
+
+
+def test_run_locked_sync_busy_when_lock_held(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("sync must not run while the lock is held")
+
+    monkeypatch.setattr(garmin_service, "garmin_sync", boom)
+    assert garmin_service.acquire_sync_lock("busy-user")  # a web sync holds the lock
+    result = garmin_service.run_locked_sync("busy-user", "2026-01-01", "2026-01-02")
+    assert result["status"] == "error"
+    assert "already running" in result["error"]
+    assert not garmin_service.acquire_sync_lock("busy-user")  # busy path didn't release the other sync's lock
+    garmin_service._release_sync_lock("busy-user")
+
+
 def test_get_session_returns_recent_turns():
     turns = [{"role": "user", "content": "how was my run"}, {"role": "assistant", "content": "great pace!"}]
     _save_history("userA", "sess-restore", History(summary="", recent=turns, turn_count=1))
