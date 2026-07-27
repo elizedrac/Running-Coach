@@ -77,6 +77,18 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 .page-title{font-family:'Archivo',sans-serif;font-weight:800;font-size:24px;color:var(--ink);letter-spacing:-0.4px}
 .page-sub{font-family:'JetBrains Mono',monospace;font-size:10px;font-weight:500;color:var(--faint);letter-spacing:.08em;margin-top:3px}
 .topbar-right{display:flex;align-items:center;gap:10px}
+.topbar-weather{display:flex;align-items:center;gap:9px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;white-space:nowrap}
+.wx-chip{display:flex;align-items:center;gap:9px;padding:6px 11px;background:var(--tile);border:1px solid var(--border);border-radius:9px;color:var(--faint);line-height:1}
+.wx-metrics{display:flex;align-items:center;gap:8px}
+.wx-divider{width:1px;height:12px;background:var(--border);flex-shrink:0}
+.tw-loc{display:flex;align-items:center;gap:4px;color:var(--faint);opacity:.65;transition:opacity .15s}
+.tw-loc:hover,.tw-loc:focus-within{opacity:1}
+.tw-loc svg{flex-shrink:0}
+.tw-loc input{border:none;background:transparent;font-family:inherit;font-size:inherit;font-weight:inherit;color:inherit;outline:none;cursor:text;text-align:left;padding:0;min-width:4ch}
+.wx-temp{font-size:13px;font-weight:700;color:var(--ink);letter-spacing:-.2px}
+.wx-feels{color:var(--muted)}
+.wx-feels.bad{color:var(--accent);font-weight:700}
+.wx-sep{color:var(--border)}
 .btn{padding:8px 16px;border-radius:8px;font-family:'Hanken Grotesk',sans-serif;font-size:13px;font-weight:600;cursor:pointer;border:1px solid var(--border);background:var(--card);color:var(--body);transition:all .15s}
 .btn:hover{border-color:var(--accent);color:var(--accent)}
 .btn-accent{background:var(--accent);color:white;border-color:var(--accent)}
@@ -105,10 +117,6 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 .chart-wrap{width:100%;height:200px}
 
 /* Health card */
-.weather-strip{display:flex;align-items:center;flex-wrap:wrap;gap:10px;padding:10px 14px;background:var(--tile);border-radius:8px;margin-bottom:18px;font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:500;color:var(--body)}
-.wx-temp{font-weight:700;color:var(--ink)}
-.wx-feels{color:var(--accent)}
-.wx-sep{color:var(--border)}
 .stat-tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:14px}
 .stat-tile{background:var(--tile);border-radius:10px;padding:16px;overflow:visible}
 .stile-label{font-family:'JetBrains Mono',monospace;font-size:9px;font-weight:700;color:var(--faint);letter-spacing:.1em;margin-bottom:6px}
@@ -207,7 +215,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 [data-theme="dark"] .sfooter-label{color:var(--accent)}
 [data-theme="dark"] .sfooter-item{border:1px solid rgba(77,158,247,.15)}
 [data-theme="dark"] .stat-tile{border:1px solid rgba(77,158,247,.1)}
-[data-theme="dark"] .weather-strip{border:1px solid rgba(77,158,247,.12);background:var(--tile)}
+[data-theme="dark"] .wx-chip{border-color:rgba(77,158,247,.14)}
 [data-theme="dark"] .stile-delta,[data-theme="dark"] .stile-delta.down{color:var(--faint)!important}
 /* Training Plan */
 [data-theme="dark"] .plan-table{border:1px solid rgba(77,158,247,.4);border-radius:12px;box-shadow:0 0 0 1px rgba(77,158,247,.18),0 8px 32px rgba(0,0,0,.5)}
@@ -437,9 +445,10 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
   .chart-wrap,.sparkline-wrap{display:none}
   .card{padding:16px}
   .stat-tile{padding:12px;cursor:pointer}
+  #mileage-card{cursor:pointer}
   .sfooter-item{padding:10px 6px}
   .stat-tiles{grid-template-columns:1fr}
-  #weather-card-row{display:none}
+  #topbar-weather{display:none!important}
 
   .theme-sw{left:auto;right:16px;bottom:auto;top:14px}
   .theme-opts{bottom:auto;top:42px;right:0;left:auto}
@@ -554,7 +563,17 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
         <div class="page-title" id="page-title">Dashboard</div>
         <div class="page-sub" id="page-sub">FRI · JUN 19 · 2026</div>
       </div>
-      <div style="display:flex;align-items:center;gap:10px">
+      <div style="display:flex;align-items:center;gap:14px">
+        <div class="topbar-weather" id="topbar-weather">
+          <span class="wx-chip">
+            <span class="wx-metrics" id="weather-mini-text">—</span>
+            <span class="wx-divider"></span>
+            <span class="tw-loc">
+              <svg width="9" height="11" viewBox="0 0 9 11" fill="none" stroke="currentColor" stroke-width="1.3"><path d="M4.5 10.2S8 6.9 8 4.4a3.5 3.5 0 10-7 0c0 2.5 3.5 5.8 3.5 5.8z"/><circle cx="4.5" cy="4.3" r="1.2"/></svg>
+              <input id="location-input" value="New York, NY" title="Click to change location"/>
+            </span>
+          </span>
+        </div>
         <div class="topbar-right" id="topbar-actions"></div>
         <div class="mobile-topbar-icons">
           <button class="icon-btn" id="mobile-sync-btn" onclick="toggleSyncPopover(event)" data-tooltip="Sync Garmin data">
@@ -571,7 +590,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
         <div class="db-content">
           <div class="db-row db-row-1">
             <div class="card" id="activity-card"><div class="card-label">RECENT ACTIVITY</div><div style="color:var(--muted);font-size:13px;margin-top:8px">Loading...</div></div>
-            <div class="card">
+            <div class="card" id="mileage-card" onclick="openMetricModal('mileage')">
               <div class="chart-header">
                 <div>
                   <div class="card-label">WEEKLY MILEAGE</div>
@@ -580,18 +599,6 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
                 </div>
               </div>
               <div class="chart-wrap"><canvas id="mileageChart"></canvas></div>
-            </div>
-          </div>
-          <div class="db-row" id="weather-card-row" style="grid-template-columns:1fr">
-            <div class="card">
-              <div class="card-label" style="margin-bottom:14px">WEATHER</div>
-              <div class="weather-strip" style="font-family:'JetBrains Mono',monospace;font-size:11px;justify-content:space-between">
-                <span id="weather-mini-text" style="flex:1">—</span>
-                <span style="display:flex;align-items:center;gap:4px;color:var(--faint)">
-                  <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 1l2 2-6 6H1V7L7 1z"/></svg>
-                  <input id="location-input" value="New York, NY" style="border:none;background:transparent;font-family:inherit;font-size:inherit;color:var(--faint);outline:none;width:110px;cursor:text;text-align:right" title="Click to change location"/>
-                </span>
-              </div>
             </div>
           </div>
           <div class="db-row" style="grid-template-columns:1fr">
@@ -895,6 +902,7 @@ let userLocation = 'New York, NY';
 let streamAbort = null;
 let _stepsChart = null, _sleepChart = null, _rhrChart = null, _mileageChart = null, _metricModalChart = null;
 let _healthChartData = null;
+let _mileageChartData = null;
 let _allActivities = [], _activityWeekView = false;
 let _planWeekOffset = 0, _planDays = {}, _weekActivities = {}, _effectiveMiles = {}, _nonRunCompleted = new Set();
 let _monthOffset = 0, _dayModalFromMonth = false, _currentDayId = null, _progressInterval = null;
@@ -946,6 +954,7 @@ function switchTab(tab, el){
     predictions:''
   };
   document.getElementById('topbar-actions').innerHTML=actions[tab];
+  document.getElementById('topbar-weather').style.display=tab==='dashboard'?'flex':'none';
   localStorage.setItem('rc_tab',tab);
 }
 // Restore last tab immediately (before first paint) to avoid a dashboard flash on reload
@@ -1009,12 +1018,14 @@ const METRIC_MODAL_CONFIG={
   steps:{label:'Steps — Last 7 Days',type:'bar',suffix:'K'},
   sleep:{label:'Sleep — Last 7 Days',type:'line',suffix:'h'},
   rhr:{label:'Resting HR — Last 7 Days',type:'line',suffix:' bpm'},
+  mileage:{label:'Weekly Mileage — Last 8 Weeks',type:'line',suffix:' mi'},
 };
 function openMetricModal(metric){
-  if(window.innerWidth>768||!_healthChartData)return;
+  const src=metric==='mileage'?_mileageChartData:_healthChartData;
+  if(window.innerWidth>768||!src)return;
   const cfg=METRIC_MODAL_CONFIG[metric];
-  const{labels}=_healthChartData;
-  const data=_healthChartData[metric];
+  const{labels}=src;
+  const data=src[metric];
   const ac=accentColor();
   const tick=getComputedStyle(document.documentElement).getPropertyValue('--muted').trim();
   const grid=getComputedStyle(document.documentElement).getPropertyValue('--border').trim();
@@ -1022,6 +1033,8 @@ function openMetricModal(metric){
   const ink=getComputedStyle(document.documentElement).getPropertyValue('--ink').trim();
   const dataset=metric==='steps'
     ?{data,backgroundColor:data.map((_,i)=>i===data.length-1?ac:(_darkMode?ac+'88':ac+'66')),borderRadius:3,barPercentage:0.6}
+    :metric==='mileage'
+    ?{data,borderColor:ac,borderWidth:2.2,fill:true,tension:0.35,pointBorderColor:ac,pointBorderWidth:2,pointBackgroundColor:data.map((_,i)=>i===data.length-1?ac:cardBg),pointRadius:data.map((_,i)=>i===data.length-1?5:3),pointHoverRadius:6,backgroundColor:(ctx)=>{const g=ctx.chart.ctx.createLinearGradient(0,0,0,ctx.chart.height);g.addColorStop(0,ac+'52');g.addColorStop(1,ac+'00');return g;}}
     :{data,borderColor:ac,backgroundColor:ac+(metric==='sleep'?'28':'1a'),fill:true,tension:0.4,borderWidth:2,spanGaps:true,pointRadius:3,pointHoverRadius:5,pointBackgroundColor:ac,pointBorderWidth:0};
   document.getElementById('metric-chart-modal-label').textContent=cfg.label;
   if(_metricModalChart)_metricModalChart.destroy();
@@ -1032,7 +1045,7 @@ function openMetricModal(metric){
     options:{
       responsive:true,maintainAspectRatio:false,animation:false,spanGaps:true,
       plugins:{legend:{display:false},tooltip:{mode:'index',intersect:false,displayColors:false,backgroundColor:cardBg,borderColor:grid,borderWidth:1,titleColor:ink,bodyColor:tick,padding:8,cornerRadius:8,callbacks:{label:ctx=>ctx.raw!=null?`${ctx.raw}${cfg.suffix}`:'No data'}}},
-      scales:{x:{ticks:{color:tick,font:{size:10}},grid:{display:false}},y:{beginAtZero:metric==='steps',ticks:{color:tick,font:{size:10}},grid:{color:grid}}}
+      scales:{x:{ticks:{color:tick,font:{size:10}},grid:{display:false}},y:{beginAtZero:metric==='steps'||metric==='mileage',ticks:{color:tick,font:{size:10}},grid:{color:grid}}}
     }
   });
 }
@@ -1045,7 +1058,8 @@ async function loadMileageChart(){
     const acts=await res.json();_mileageChartLoaded=true;
     const weekMap={};
     (acts||[]).forEach(a=>{if(!a.miles)return;const d=new Date(a.calendar_date.split('T')[0]+'T12:00:00');const day=d.getDay();d.setDate(d.getDate()+(day===0?-6:1-day));const key=isoFromDate(d);weekMap[key]=(weekMap[key]||0)+a.miles;});
-    const weeks=[];for(let i=7;i>=0;i--){const mon=getWeekMonday(-i);const key=isoFromDate(mon);weeks.push({label:mon.toLocaleDateString('en-US',window.innerWidth<=768?{weekday:'short'}:{month:'short',day:'numeric'}),miles:+(weekMap[key]||0).toFixed(1)});}
+    const weeks=[];for(let i=7;i>=0;i--){const mon=getWeekMonday(-i);const key=isoFromDate(mon);weeks.push({label:mon.toLocaleDateString('en-US',{month:'short',day:'numeric'}),miles:+(weekMap[key]||0).toFixed(1)});}
+    _mileageChartData={labels:weeks.map(w=>w.label),mileage:weeks.map(w=>w.miles)};
     const current=weeks[weeks.length-1].miles;
     document.getElementById('mileage-this-week').textContent=current>0?`${current} mi`:'0 mi';
     const ac=accentColor();
@@ -1066,7 +1080,10 @@ async function loadWeather(){
     const hours=await res.json();const h=hours&&hours.length?hours[0]:null;
     if(!h||!txt)return;
     const bad=h.feels_like>75||h.feels_like<32||h.chance_of_rain>50;
-    txt.innerHTML=`${Math.round(h.temperature)}°F &nbsp;·&nbsp; <span style="color:${bad?'var(--accent)':'inherit'}">${Math.round(h.feels_like)}°F feels like</span> &nbsp;·&nbsp; ${h.wind_speed} mph &nbsp;·&nbsp; ${h.chance_of_rain}% rain`;
+    txt.innerHTML=`<span class="wx-temp">${Math.round(h.temperature)}°</span>`
+      +`<span class="wx-feels${bad?' bad':''}">feels ${Math.round(h.feels_like)}°</span>`
+      +`<span class="wx-sep">·</span><span>${Math.round(h.wind_speed)}mph</span>`
+      +`<span class="wx-sep">·</span><span>${h.chance_of_rain}% rain</span>`;
   }catch(e){if(txt)txt.textContent='Weather unavailable';}
 }
 
@@ -1588,6 +1605,13 @@ document.getElementById('day-modal').addEventListener('click',e=>{if(e.target===
 document.getElementById('activity-modal').addEventListener('click',e=>{if(e.target===document.getElementById('activity-modal'))document.getElementById('activity-modal').classList.remove('open');});
 
 // ── Location input ────────────────────────────────────────────
+// Mono font, so 1ch == 1 character: size the field to its value, no dead space.
+function sizeLocationInput(){
+  const el=document.getElementById('location-input');
+  el.style.width=Math.max(4,el.value.length)+'ch';
+}
+document.getElementById('location-input').addEventListener('input',sizeLocationInput);
+sizeLocationInput();
 document.getElementById('location-input').addEventListener('change',e=>{
   const val=e.target.value.trim();
   if(val){
@@ -1752,6 +1776,7 @@ async function loadUserInfo(){
     userLocation='New York, NY';
     document.getElementById('location-input').value='New York, NY';
   }
+  sizeLocationInput();
   loadWeather();
 
   if(info.last_synced){
