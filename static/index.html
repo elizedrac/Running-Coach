@@ -1403,14 +1403,17 @@ async function loadPlan(){
     if(isCurrentWeek){hasPlan=true;['plan-sync-btn','month-view-btn','delete-plan-btn'].forEach(id=>document.getElementById(id).style.display='');}
     _planDays={};const dayMap={};
     days.forEach(d=>{_planDays[d.id]=d;const dow=d.day_of_week||DOW_ORDER[new Date(d.plan_date+'T00:00:00').getDay()===0?6:new Date(d.plan_date+'T00:00:00').getDay()-1];dayMap[dow]=d;});
-    const totalMiles=days.reduce((s,d)=>s+(d.target_miles||0),0);
+    // CROSS days have no target_miles (nulled on write) — count any run logged that day on top
+    const crossMiles=d=>(_weekActivities[d.plan_date]||[]).filter(a=>(a.activity_type||'').toLowerCase().includes('run')).reduce((s,a)=>s+(a.miles||0),0);
+    const planMiles=d=>d.workout_type==='CROSS'?(crossMiles(d)||d.target_miles||0):(d.target_miles||0);
+    const totalMiles=days.reduce((s,d)=>s+planMiles(d),0);
     if(totalMiles>0)document.getElementById('plan-week-label').textContent+=` · ${totalMiles.toFixed(1)} mi`;
     list.innerHTML=DOW_ORDER.map((dow,i)=>{
       const day=dayMap[dow];const isToday=isCurrentWeek&&i===todayDow;
       const[y,m,d]=day?(day.plan_date.split('-')):[null,null,null];
       const date=day?new Date(+y,+m-1,+d).toLocaleDateString('en-US',{month:'short',day:'numeric'}):'';
       if(!day)return`<div class="plan-row" style="opacity:.4"><div class="plan-day"><div class="dn">${dow.slice(0,3)}</div>—</div><div class="plan-workout"><div class="plan-workout-name" style="color:var(--faint)">No workout</div></div><div class="plan-dist"></div><div class="plan-status"></div></div>`;
-      const type=day.workout_type;const dayActs=_weekActivities[day.plan_date]||[];
+      const type=day.workout_type;
       const isRunning=RUNNING_TYPES.has(type);const effMiles=_effectiveMiles[day.plan_date]||0;
       const completed=(isRunning&&effMiles>0&&(!day.target_miles||effMiles>=day.target_miles*0.95))||((type==='STRENGTH'||type==='CROSS')&&_nonRunCompleted.has(day.plan_date));
       const isPast=day.plan_date<localToday()&&!isToday;
@@ -1428,7 +1431,7 @@ async function loadPlan(){
       const [dm,dd]=date.split(' ');
       const todayClass=isToday?' today':'';
       let distVal='—';
-      if(type==='CROSS'){const tm=dayActs.reduce((s,a)=>s+(a.miles||0),0);if(tm>0)distVal=tm.toFixed(1)+' mi';}
+      if(type==='CROSS'){const tm=planMiles(day);if(tm>0)distVal=tm.toFixed(1)+' mi';}
       else if(day.target_miles)distVal=day.target_miles.toFixed(1)+' mi';
       return`<div class="plan-row${todayClass}" onclick="openDayModal('${day.id}')">
         <div class="plan-day"><div class="dn">${dow.slice(0,3)}</div><div class="dd">${dm} ${dd}</div></div>
