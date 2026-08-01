@@ -61,6 +61,15 @@ GARMIN_EMAIL=          # cron sync fallback credentials
 GARMIN_PASSWORD=
 ```
 
+## UI Themes
+
+The web UI (`static/index.html`) ships five "Stark HUD" themes: four dark (**Arc Reactor** `arc` (default), **Jarvis** `jarvis`, **Hot Rod** `hotrod`, **Stealth** `stealth`) and one light (**Workshop** `workshop`). Switch via the theme button (bottom-right on desktop, top-right on mobile) or by asking the coach in chat ("switch to hot rod", "light mode").
+
+How it hangs together:
+- Each theme is a base palette + accent set in the `THEMES` map in `static/index.html`; all dark styling keys off `[data-theme="dark"]` and reads `--accent-rgb`, so new themes only need a palette entry.
+- The choice persists per user via `POST /user/info/theme`; unknown/legacy names (e.g. pre-rework `sage`, `dark`, `hud`) fall back to `arc`.
+- Chat switching goes through `services/write_selector.py` (`VALID_THEMES`) and the prompt lists in `services/prompts.py` — all three places must agree when adding or renaming a theme.
+
 ## Redis
 
 The app needs Redis (query cache, chat history, rate limits, sync job status, and the resumable chat stream). `docker compose up` starts it automatically. For running the app directly on the host (uvicorn/CLI), start just Redis and point `REDIS_URL` at localhost:

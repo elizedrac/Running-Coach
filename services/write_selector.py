@@ -7,12 +7,12 @@ from models.planner import WritePlan
 from services.llm import call_llm
 from services.prompts import WRITE_SELECTOR_SYSTEM
 
-VALID_THEMES = {"dark", "sage", "rose", "slate", "amber"}
+VALID_THEMES = {"arc", "jarvis", "hotrod", "stealth", "workshop"}
 
 REGISTRY = {
     "set_theme": {
         "description": "Change the app's color theme.",
-        "args": {"theme": "one of: dark, sage, rose, slate, amber"},
+        "args": {"theme": "one of: arc, jarvis, hotrod, stealth, workshop"},
     },
 }
 
