@@ -8,7 +8,7 @@ from pathlib import Path
 from db.health_history import get_user_min_date
 from db.plan import get_current_plan, get_plan_id
 from db.plan import get_plan_days as get_plan
-from db.preferences import update_preferences
+from db.preferences import get_preferences, update_preferences
 from db.race import get_race
 from models.planner import History
 from services.course_details import get_course_details
@@ -54,6 +54,7 @@ TOOL_REGISTRY = {
     "pacing_calculator": pacing_calculator,
     "get_course_details": get_course_details,
     "get_race_info": get_race_info,
+    "get_preferences": get_preferences,
     "update_preferences": update_preferences,
     "get_plan": get_plan,
     "update_plan": update_plan,
@@ -113,10 +114,18 @@ def call_tool(name: str, args: dict, user_id: str, location: str = "New York"):
                         print("Invalid number. Try again.")
         if "goal_time" not in args or not args["goal_time"]:
             race = get_race(user_id)
-            if race.get("goal_time"):
+            race_distance = race.get("race_distance_miles")
+            # Race goal time only applies at the race's own distance — never pair it with a different one
+            try:
+                distance_matches_race = (
+                    bool(race_distance) and abs(float(args.get("distance")) - race_distance) / race_distance <= 0.05
+                )
+            except (TypeError, ValueError):
+                distance_matches_race = False
+            if race.get("goal_time") and distance_matches_race:
                 args["goal_time"] = race["goal_time"]
             elif os.getenv("SERVER_MODE"):
-                return "NOT AN ERROR. Pacing calculator needs goal time as an input which the user did not provide. Ask the user to provide this info before continuing"
+                return "NOT AN ERROR. Pacing calculator needs a goal time for this distance which the user did not provide (their saved race goal is for a different distance, so it does not apply). Ask the user for their goal time for this distance before continuing"
             else:
                 while not args.get("goal_time"):
                     goal_time = input("Please enter your goal time (HH:MM:SS or MM:SS): ")
@@ -176,6 +185,8 @@ def orchestrate(
     tool_results = {}
 
     if path == "tools":
+        # Preference writes run first so update_plan (which self-fetches prefs) never sees stale values
+        planner_response.tools.sort(key=lambda t: t.name != "update_preferences")
         # garmin sync has priority
         if "garmin_sync" in [tool.name for tool in planner_response.tools]:
             tool = next(tool for tool in planner_response.tools if tool.name == "garmin_sync")

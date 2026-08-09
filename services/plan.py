@@ -168,6 +168,8 @@ def update_plan(
             print(
                 f"[update_plan] dropping {len(out_of_range)} change(s) outside {allowed_start}..{allowed_end}: {out_of_range}"
             )
+        # Collapse duplicate entries for the same day (last wins) so counts and writes are per-day
+        changes = list({c["plan_date"]: c for c in changes}.values())
         print(f"[update_plan] changes={changes}")
         if not changes:
             print("[update_plan] WARNING: LLM returned empty changes list")

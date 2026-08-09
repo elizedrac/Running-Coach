@@ -2,7 +2,7 @@
 import json
 import sys
 
-from db.user_info import set_theme
+from db.user_info import get_user_info, set_theme
 from models.planner import WritePlan
 from services.llm import call_llm
 from services.prompts import WRITE_SELECTOR_SYSTEM
@@ -46,6 +46,8 @@ def execute_write(user_id, action_intent: str) -> dict:
         theme = response.args.get("theme")
         if theme not in VALID_THEMES:
             return {"status": "clarify", "action": "set_theme", "options": sorted(VALID_THEMES)}
+        if get_user_info(user_id).get("theme") == theme:
+            return {"status": "no_change", "action": "set_theme", "theme": theme}
         return {"status": "success", "action": "set_theme", "theme": theme, "data": set_theme(user_id, theme)}
 
     return {"status": "error", "reason": "could not determine what setting to change"}
