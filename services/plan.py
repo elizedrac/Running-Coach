@@ -54,7 +54,6 @@ def create_plan(user_id: str) -> dict:
         ) as stream:
             response = stream.get_final_message()
 
-        print(f"[plan] iter {i + 1}: stop_reason={response.stop_reason}, blocks={[b.type for b in response.content]}")
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":
@@ -67,7 +66,6 @@ def create_plan(user_id: str) -> dict:
         other_blocks = [b for b in response.content if b.type == "tool_use" and b.name != "save_training_plan"]
 
         def run_tool(block):
-            print(f"[plan] tool call: {block.name}")
             fn = PLAN_TOOL_REGISTRY.get(block.name)
             result = fn(user_id, **block.input) if fn else f"Tool {block.name} not found"
             return {"type": "tool_result", "tool_use_id": block.id, "content": str(result)}
@@ -79,11 +77,9 @@ def create_plan(user_id: str) -> dict:
 
         if save_block:
             days = save_block.input["days"]
-            print(f"[plan] save_training_plan called with {len(days)} days")
             violations = [] if validated else challenger(days, user_id, race.get("race_type", ""))
             if violations:
                 validated = True
-                print(f"[plan] violations found: {violations}")
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -93,9 +89,7 @@ def create_plan(user_id: str) -> dict:
                     }
                 )
             else:
-                result = save_plan(user_id, days)
-                print(f"[plan] save_plan result: {result}")
-                return result
+                return save_plan(user_id, days)
 
         messages.append({"role": "user", "content": tool_results})
 
@@ -117,12 +111,8 @@ def update_plan(
     allowed_start = start_date.isoformat() if mode == "chat" else today.isoformat()
     allowed_end = allowed_end or end_date.isoformat()
     plan = get_plan_days(plan_id, start_date=start_date.isoformat(), end_date=end_date.isoformat())
-    print(
-        f"[update_plan] plan_id={plan_id}, days fetched={len(plan)}, intent={intent}, include_activities={include_activities}"
-    )
 
     if not plan_id:
-        print("[update_plan] no active plan for user — skipping LLM call")
         return {"status": "skipped", "reason": "no active plan"}
 
     prefs = get_preferences(user_id)
@@ -148,9 +138,7 @@ def update_plan(
 
     prompt = f"Today is {today.isoformat()}.\nUser intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (±7 days): {plan}{pacing_block}{activities_block}"
     system_prompt = build_update_plan_system(today.isoformat(), mode=mode)
-    response = call_llm(system_prompt=system_prompt, user_prompt=prompt, max_tokens=4096)
-    print(f"[update_plan] raw LLM response ({len(response)} chars): {response[:500]}")
-
+    response = call_llm(system_prompt=system_prompt, user_prompt=prompt, max_tokens=8192)
     response = response.strip()
     start = response.find("{")
     end = response.rfind("}") + 1
@@ -164,17 +152,15 @@ def update_plan(
         changes, out_of_range = [], []
         for c in all_changes:
             (changes if allowed_start <= c["plan_date"] <= allowed_end else out_of_range).append(c)
-        if out_of_range:
-            print(
-                f"[update_plan] dropping {len(out_of_range)} change(s) outside {allowed_start}..{allowed_end}: {out_of_range}"
-            )
         # Collapse duplicate entries for the same day (last wins) so counts and writes are per-day
         changes = list({c["plan_date"]: c for c in changes}.values())
-        print(f"[update_plan] changes={changes}")
-        if not changes:
-            print("[update_plan] WARNING: LLM returned empty changes list")
-        update_plan_day(plan_id, changes)
-        return {"status": "success", "changes": changes}
+        db_result = update_plan_day(plan_id, changes)
+        # Report only what was actually written — never claim success for failed writes
+        return {
+            "status": db_result.get("status", "fail"),
+            "changes": db_result.get("applied", []),
+            "failed": db_result.get("failed", []),
+        }
     except Exception as e:
         print(f"[update_plan] ERROR: {e}")
         return {"status": f"fail with error {e}"}

@@ -367,6 +367,13 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 .msg.coach .msg-bubble table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13px}
 .msg.coach .msg-bubble td,.msg.coach .msg-bubble th{border:1px solid var(--border);padding:5px 9px}
 .msg.coach .msg-bubble th{background:var(--tile);font-weight:600}
+.msg-foot{display:flex;align-items:center;gap:6px}
+.msg-copy{display:flex;align-items:center;justify-content:center;padding:2px;background:transparent;border:none;border-radius:4px;color:var(--faint);cursor:pointer;opacity:0;transition:opacity .15s,color .15s}
+.msg-copy[hidden]{display:none}
+.msg.coach:hover .msg-copy,.msg-copy:focus-visible{opacity:1}
+.msg-copy:hover{color:var(--accent)}
+.msg-copy.copied{opacity:1;color:var(--accent)}
+@media(hover:none){.msg-copy{opacity:1}}
 
 /* Follow-up chips */
 .followup-chips{display:flex;flex-direction:column;gap:6px;margin-top:8px;max-width:90%}
@@ -1218,14 +1225,42 @@ function hideEmptyState(){
   if(empty)empty.style.display='none';if(msgs)msgs.style.display='flex';
 }
 
-function sendPrompt(text){document.getElementById('chat-input').value=text;sendMessage();}
+function sendPrompt(text){const input=document.getElementById('chat-input');input.value=text;input.focus();}
+
+const COPY_ICON='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+const CHECK_ICON='<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+// Copies the raw markdown (stashed on .msg dataset), not the rendered HTML.
+// execCommand fallback covers non-HTTPS origins where navigator.clipboard is undefined.
+function copyMessage(btn){
+  const raw=(btn.closest('.msg')||{}).dataset?.raw||'';
+  if(!raw)return;
+  const done=()=>{btn.innerHTML=CHECK_ICON;btn.classList.add('copied');btn.title='Copied';
+    setTimeout(()=>{btn.innerHTML=COPY_ICON;btn.classList.remove('copied');btn.title='Copy';},1500);};
+  if(navigator.clipboard&&window.isSecureContext)navigator.clipboard.writeText(raw).then(done).catch(()=>legacyCopy(raw,done));
+  else legacyCopy(raw,done);
+}
+
+function legacyCopy(text,done){
+  const ta=document.createElement('textarea');ta.value=text;ta.setAttribute('readonly','');
+  ta.style.cssText='position:fixed;top:-1000px;opacity:0';
+  document.body.appendChild(ta);ta.select();
+  try{document.execCommand('copy');done();}catch(e){}
+  ta.remove();
+}
+
+function msgFoot(isUser,hideCopy){
+  const copy=isUser?'':`<button class="msg-copy" type="button" title="Copy" aria-label="Copy message"${hideCopy?' hidden':''} onclick="copyMessage(this)">${COPY_ICON}</button>`;
+  return `<div class="msg-foot"><span class="msg-time">${fmtTime()}</span>${copy}</div>`;
+}
 
 function addMessage(role,text){
   hideEmptyState();
   const container=document.getElementById('chat-messages');
   const isUser=role==='user';
   const div=document.createElement('div');div.className=`msg ${isUser?'user':'coach'}`;
-  div.innerHTML=`<div class="msg-label">${isUser?'You':'Coach'}</div><div class="msg-bubble"></div><div class="msg-time">${fmtTime()}</div>`;
+  div.innerHTML=`<div class="msg-label">${isUser?'You':'Coach'}</div><div class="msg-bubble"></div>${msgFoot(isUser)}`;
+  if(!isUser)div.dataset.raw=text;
   container.appendChild(div);
   const bubble=div.querySelector('.msg-bubble');
   bubble.innerHTML=isUser?text.replace(/</g,'&lt;'):marked.parse(text);
@@ -1236,7 +1271,8 @@ function createCoachMessage(){
   hideEmptyState();
   const container=document.getElementById('chat-messages');
   const div=document.createElement('div');div.className='msg coach';
-  div.innerHTML=`<div class="msg-label">Coach</div><div class="msg-bubble"></div><div class="msg-time">${fmtTime()}</div>`;
+  // Copy stays hidden until the stream finishes — nothing worse than copying half a reply
+  div.innerHTML=`<div class="msg-label">Coach</div><div class="msg-bubble"></div>${msgFoot(false,true)}`;
   container.appendChild(div);container.scrollTop=container.scrollHeight;
   return div.querySelector('.msg-bubble');
 }
@@ -1248,11 +1284,12 @@ function showFollowUpChips(questions){
   container.appendChild(wrap);container.scrollTop=container.scrollHeight;
 }
 
+let isAnalyzing=false;
 function setAnalyzing(on){
+  isAnalyzing=on;
   document.getElementById('analyzing-bar').style.display=on?'flex':'none';
   document.getElementById('stop-btn').style.display=on?'flex':'none';
   document.getElementById('send-btn').style.display=on?'none':'flex';
-  document.getElementById('chat-input').disabled=on;
   if(on)document.getElementById('analyzing-text').textContent='Analyzing...';
 }
 
@@ -1267,7 +1304,8 @@ async function clearChat(){
 
 async function sendMessage(){
   const input=document.getElementById('chat-input');const text=input.value.trim();
-  if(!text||input.disabled)return;
+  if(isAnalyzing){if(text)showToast('Hang on — finishing the current answer first');return;}
+  if(!text)return;
   input.value='';addMessage('user',text);setAnalyzing(true);
   try{
     const res=await apiFetch(`${API}/ask`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({query:text,session_id:SID,has_plan:hasPlan,location:userLocation,today:localToday()})});
@@ -1295,7 +1333,8 @@ async function consumeStream(afterId,isReconnect){
   streamAbort=new AbortController();
   let bubble=null,fullText='',hasChunks=false,renderTimer=null;
   let lastId=afterId||'0',userShown=false,retries=0;
-  const render=()=>{if(bubble&&fullText)bubble.innerHTML=marked.parse(fullText.replace(/~~([\s\S]+?)~~/g,'$1'));};
+  const render=()=>{if(bubble&&fullText){const clean=fullText.replace(/~~([\s\S]+?)~~/g,'$1');bubble.innerHTML=marked.parse(clean);const m=bubble.closest('.msg');if(m)m.dataset.raw=clean;}};
+  const revealCopy=()=>{const m=bubble&&bubble.closest('.msg');const c=m&&m.querySelector('.msg-copy');if(c)c.hidden=false;};
   const scheduleRender=()=>{if(renderTimer)return;renderTimer=setTimeout(()=>{renderTimer=null;render();},150);};
   try{
     while(true){
@@ -1325,7 +1364,7 @@ async function consumeStream(afterId,isReconnect){
       if(retries>5){setAnalyzing(false);addMessage('coach','Sorry, I lost the connection. Please try again.');break;}
       await new Promise(r=>setTimeout(r,Math.min(1000*retries,5000)));
     }
-  }finally{if(renderTimer){clearTimeout(renderTimer);renderTimer=null;}render();setAnalyzing(false);streamAbort=null;document.getElementById('chat-input').focus();}
+  }finally{if(renderTimer){clearTimeout(renderTimer);renderTimer=null;}render();revealCopy();setAnalyzing(false);streamAbort=null;document.getElementById('chat-input').focus();}
 }
 
 document.getElementById('chat-input').addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendMessage();}});
@@ -1503,7 +1542,12 @@ function jumpToToday(){_planWeekOffset=0;document.getElementById('jump-today-btn
 
 async function runPlanSync(){
   const btn=document.getElementById('plan-sync-btn');btn.textContent='Syncing...';btn.disabled=true;
-  try{const res=await apiFetch(`${API}/plan/sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({today:localToday()})});const data=await res.json();const count=data.changes?data.changes.length:0;showToast(count>0?`Plan updated — ${count} day${count!==1?'s':''} changed`:'Plan already up to date','var(--accent-dark)');loadPlan();}
+  try{const res=await apiFetch(`${API}/plan/sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({today:localToday()})});const data=await res.json();
+    const count=data.changes?data.changes.length:0,failed=data.failed?data.failed.length:0,status=data.status||'';
+    if(status.startsWith('fail'))showToast('Sync failed — try again','#8b4a42');
+    else if(failed)showToast(`${count} day${count!==1?'s':''} changed, ${failed} couldn't be saved`,'#8b4a42');
+    else showToast(count>0?`Plan updated — ${count} day${count!==1?'s':''} changed`:'Plan already up to date','var(--accent-dark)');
+    loadPlan();}
   catch(e){showToast('Sync failed — try again','#8b4a42');}
   finally{btn.textContent='Sync Plan';btn.disabled=false;}
 }

@@ -129,11 +129,13 @@ def delete_plan(user_id) -> dict:
         return {"status": "fail"}
 
 
-# To be implemented in the future
 def update_plan_day(plan_id: int, changes: list) -> dict:
+    """Apply changes per-day. One failing change no longer aborts the rest;
+    returns applied/failed lists so callers report only what actually happened."""
     client = get_supabase_client()
-    try:
-        for change in changes:
+    applied, failed = [], []
+    for change in changes:
+        try:
             day_id = get_day_id(plan_id, change["plan_date"])
             data = {k: v for k, v in change.items() if k != "intervals"}
             if data.get("workout_type") in {"REST", "CROSS", "STRENGTH"}:
@@ -162,11 +164,22 @@ def update_plan_day(plan_id: int, changes: list) -> dict:
                 day_id = result[0]["id"]
             else:
                 client.table("plan_days").update(data).eq("id", day_id).execute()
-            if change.get("workout_type") == "INTERVAL":
-                replace_plan_intervals(day_id, change.get("intervals"))
-        return {"status": "success"}
-    except Exception as e:
-        return {"status": f"fail with error {e}"}
+            # Only touch intervals when the change actually supplies them — an omitted
+            # field must leave the day's existing interval breakdown intact
+            if change.get("workout_type") == "INTERVAL" and change.get("intervals"):
+                interval_result = replace_plan_intervals(day_id, change.get("intervals"))
+                if isinstance(interval_result, dict) and interval_result.get("status") != "success":
+                    raise RuntimeError(f"interval update failed: {interval_result.get('status')}")
+            applied.append(change)
+        except Exception as e:
+            failed.append({"change": change, "error": str(e)})
+    if failed and applied:
+        status = "partial"
+    elif failed:
+        status = "fail"
+    else:
+        status = "success"
+    return {"status": status, "applied": applied, "failed": failed}
 
 
 def replace_plan_intervals(day_id: int, intervals) -> None:

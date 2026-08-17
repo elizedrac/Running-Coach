@@ -243,7 +243,11 @@ def orchestrate(
                         tool_results[name].append(result)
                     else:
                         tool_results[name] = result
-                    if name == "update_plan" and isinstance(result, dict) and result.get("status") == "success":
+                    # Partial counts too — some days were written, so the UI must refresh
+                    if name == "update_plan" and isinstance(result, dict) and result.get("status") in (
+                        "success",
+                        "partial",
+                    ):
                         yield ("plan_updated", None)
                     if name == "update_settings" and isinstance(result, dict) and result.get("status") == "success":
                         yield ("theme_updated", result.get("theme"))
