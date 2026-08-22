@@ -206,6 +206,9 @@ tempCodeRunnerFile.py
 # Garmin session tokens
 .garmin_tokens
 
+# Working docs (scratch planning, not part of the project docs)
+TOOL_LOOP_PLAN.md
+
 # Ruff stuff:
 .ruff_cache/
 

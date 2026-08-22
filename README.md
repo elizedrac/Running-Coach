@@ -1,5 +1,9 @@
 # Running-Coach
 
+A personal AI running coach. It ingests Garmin health and activity data, stores it in Supabase, and runs an LLM tool system over it to build training plans, adjust them around illness and injury, and answer questions about training load, pacing, and race readiness. Python, FastAPI, Redis, and the Claude API.
+
+📄 **[Design document](DESIGN.md)** — architecture and data flow, the multi-model LLM strategy and tool suite, caching, guardrails, memory compression, and error handling.
+
 ## Local Development
 
 **Setup (venv):**
