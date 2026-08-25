@@ -184,7 +184,10 @@ def sync_plan(body: SyncPlanRequest = SyncPlanRequest(), user_id: str = Depends(
 @router.patch("/plan/day/{day_id}")
 def patch_day(day_id: str, body: PatchDayRequest, user_id: str = Depends(get_current_user)):
     try:
-        return patch_plan(day_id, body.model_dump())
+        # exclude_unset keeps "field omitted" distinct from "field explicitly null" —
+        # without it a cleared field looks identical to an untouched one and can never
+        # be written back as empty.
+        return patch_plan(day_id, body.model_dump(exclude_unset=True))
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

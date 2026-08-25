@@ -281,10 +281,11 @@ create table plan_days (
     target_miles    float,
     target_pace     text,                                           -- e.g. "8:30-8:45/mi"
     notes           text,
-    completed       boolean default false,
-    completed_at    timestamptz
+    completed       boolean default false,                          -- UNUSED: nothing reads or writes these
+    completed_at    timestamptz                                     -- UNUSED: see note below
 );
 ```
+> **Completion is derived, not stored.** The `completed` / `completed_at` columns are never written. "DONE" is computed in the browser at render time (`static/index.html`) by matching plan days against synced Garmin activities: a running day counts as done at ≥95% of target miles, a STRENGTH/CROSS day when a matching activity is logged that week, and a REST day once the date is past. This means completion self-heals when you sync late, but a workout Garmin never captured cannot be marked done.
 
 ### plan_intervals (intervals within a specific plan day)
 ```sql
@@ -505,7 +506,7 @@ Question arrives
 ### 5. Update Plan ✓
 - `POST /plan/sync` for activity reconciliation; triggered by chat intent otherwise via `update_plan` tool
 - `UPDATE_PLAN_SYSTEM` prompt handles all cases: illness (mild/moderate/severe), injury, skipping, reconciliation with actual activities
-- **Scope**: ±7 days from today only. Returns `{"changes": []}` if outside window; coach directs user to click the day or regenerate plan
+- **Scope**: reads a fixed ±7/+8 day window; the *writable* range depends on mode. Chat: today−7 → today+8. Sync: this week's Monday → the coming Sunday, with one day of grace so a Monday sync can still reconcile Sunday's run. Weekly refresh: this week's Monday → the coming Sunday, no grace. Changes outside the writable range are dropped into `out_of_range`; the coach directs the user to click the day or regenerate the plan. The floor is passed into `build_update_plan_system(earliest=...)` so the prompt and the filter always agree
 - `include_activities=true` fetches Garmin activities for the same window and passes them to the LLM for reconciliation
 - LLM outputs `{"changes": [...]}` list; `update_plan_day()` applies each change deterministically
 - **Undo history**: when `update_plan_day()` changes a `workout_type`, it reads the current plan day from DB and prepends `"Was: {WORKOUT_TYPE} {miles}mi @ {pace}"` to notes (only if notes don't already start with `"Was:"`). For INTERVAL days, the full intervals JSON is appended. This enables one-step revert via `REVERTING A DAY` rule in `UPDATE_PLAN_SYSTEM`.
@@ -514,8 +515,9 @@ Question arrives
 ### 5a. Manual Day Edit ✓
 - `PATCH /plan/day/{day_id}` — partial update of a single plan day (workout_type, target_miles, target_pace, notes, intervals)
 - `DELETE /plan/day/{day_id}` — sets the day to REST with all fields nulled (does not delete the row)
-- Triggered from UI: click a plan day → "Edit" button top-right of modal → edit form pre-filled with current values → Save / Clear / Cancel
-- `patch_plan()` in `db/plan.py` filters None values before writing; conditionally replaces intervals if provided
+- Triggered from UI: click a plan day → "Edit" button top-right of modal → edit form pre-filled with current values → Save / Clear / Cancel. INTERVAL days additionally get editable rep rows (type + distance + pace); `interval_num` is derived from row order, and the rows prefill from `GET /plan/intervals/{day_id}`
+- The route sends `body.model_dump(exclude_unset=True)` so an omitted field stays untouched while an explicit `null` clears the column. `patch_plan()` writes whatever it receives, nulls included — the one exception is `workout_type`, which is never nulled since every day needs a type
+- Intervals are best effort and run *after* the day row is written: a failed rep write returns `{"status": "success", "intervals": {...}}` rather than failing the whole patch, so the UI never claims a day didn't save when it did. Switching a day away from INTERVAL deletes its orphaned reps
 
 ### 6. Pacing Calculator ✓
 - Used by plan creation or direct user request

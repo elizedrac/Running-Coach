@@ -161,7 +161,7 @@ TOOL_SNIPPETS = {
     "race_prep_info": "Use the race prep knowledge to give specific, actionable advice tailored to the user's question. Cover the relevant section only (nutrition, morning routine, warm-up, pacing strategy, or gear) — don't dump everything. If the user asked about a specific distance, tailor advice to that distance.",
     "get_plan": "Data is a list of plan days plus a plan_overview block. CRITICAL: NEVER invent or fabricate workout details — only state what is explicitly in the returned data. If plan_overview is null/empty AND the list is empty, the user has no training plan at all — say so directly (e.g. 'you don't have a training plan set up yet') and tell them to use the '+ Create Training Plan' button. If plan_overview exists but the list is empty for the requested period, the plan doesn't cover that period — use plan_overview to explain why (e.g. plan started after that date). If days are returned: for each day include date/day of week, workout type, target miles (if set), target pace (if set), and notes (if set). For INTERVAL days mention the session type from notes. For TEMPO days state the pace from target_pace. Keep it scannable — short list format. IMPORTANT: Never infer the user's goal time from workout notes — notes may be outdated or incorrect. The authoritative goal time is in the race metadata (plan_overview), not in individual day notes.",
     "create_plan": "Confirm the plan was created. State the total weeks, race date, and weekly mileage peak.",
-    "update_plan": "The result contains a 'changes' list (changes actually written to the plan — absolute ground truth) and a 'failed' list (changes that could NOT be applied). If status is 'success' and changes is non-empty: the update succeeded. Summarize what changed in 1-2 sentences of plain prose. NEVER refuse, apologize, or say the change can't be done — it already happened. Do NOT re-analyze or second-guess the changes. Do NOT say 'let me try again' or 'let me fix that'. If status is 'partial': state plainly which day(s) WERE updated and that the rest could not be applied — suggest retrying or editing those days directly in the Training Plan tab. Do NOT claim full success. If status is 'fail': the plan was NOT changed — say the update didn't go through and do NOT describe the intended changes as if they happened. NEVER echo raw data, the changes/failed lists as JSON, dict output, or bracket-style labels like [get_preferences] or [preferences data] — those are internal system artifacts, never show them to the user. If changes is empty because the requested dates fall outside the ±7-day edit window: explain that the plan editor only covers the rolling 2-week window around today, then tell the user they can click directly on the day in the plan view to edit it manually, or — if they're early enough in their training schedule — delete and regenerate the plan to apply larger structural changes. If changes is empty for any other reason and nothing failed, say something went wrong on your end in plain prose.",
+    "update_plan": "The result contains a 'changes' list (changes actually written to the plan — absolute ground truth) and a 'failed' list (changes that could NOT be applied). If status is 'success' and changes is non-empty: the update succeeded. Summarize what changed in 1-2 sentences of plain prose. NEVER refuse, apologize, or say the change can't be done — it already happened. Do NOT re-analyze or second-guess the changes. Do NOT say 'let me try again' or 'let me fix that'. If status is 'partial': state plainly which day(s) WERE updated and that the rest could not be applied — suggest retrying or editing those days directly in the Training Plan tab. Do NOT claim full success. If status is 'fail': the plan was NOT changed — say the update didn't go through and do NOT describe the intended changes as if they happened. If the result contains 'interval_failures': the day's workout type and notes DID save, only its rep-by-rep breakdown did not — say the day is set with the session in its notes, mention the detailed rep list couldn't be saved, and point them to clicking that day in the Training Plan tab to add it. Never call the whole update a failure because of this. NEVER echo raw data, the changes/failed lists as JSON, dict output, or bracket-style labels like [get_preferences] or [preferences data] — those are internal system artifacts, never show them to the user. If changes is empty because the requested dates fall outside the ±7-day edit window: explain that the plan editor only covers the rolling 2-week window around today, then tell the user they can click directly on the day in the plan view to edit it manually, or — if they're early enough in their training schedule — delete and regenerate the plan to apply larger structural changes. If changes is empty for any other reason and nothing failed, say something went wrong on your end in plain prose.",
     "clear_plan": "Confirm the plan was cleared and ask if the user wants to create a new one.",
     "pacing_calculator": "Match your response to the user's intent. If they asked a simple pace question (e.g. 'what pace is 30 min for 4 miles?', 'what's my average pace?'), respond with just the pace in 1-2 sentences — do NOT show training zones. Only show the full zones table if the user asked about training zones, workout paces, or race preparation. \n\n"
     "IMPORTANT — interpreting fields:\n"
@@ -270,7 +270,7 @@ SPACING RULES:
 - Place REST before or after hard efforts where possible."""
 
 
-def build_update_plan_system(today: str, mode: str = "chat") -> str:
+def build_update_plan_system(today: str, mode: str = "chat", earliest: str = None) -> str:
     """mode: 'chat' (explicit user request, full flexibility, can touch a named past day),
     'sync' (Sync Plan button — light-touch, today-only reconciliation, no past edits),
     or 'weekly_refresh' (cron — light weekly adjustment based on last week, no past edits)."""
@@ -282,12 +282,13 @@ def build_update_plan_system(today: str, mode: str = "chat") -> str:
             "date genuinely does not appear in the provided plan data at all."
         )
     else:
+        earliest = earliest or today
         scope = (
-            f"SCOPE: Today is {today}. You may ONLY write changes for {today} or a later date — days before "
-            f"{today} are READ-ONLY CONTEXT, never editable, no exceptions. Use that past data only to inform "
-            "decisions about today/future days (e.g. recent load, missed workouts) — do NOT include any day before "
-            "today in your output changes, and do NOT narrate or review each past day individually. Only mention a "
-            "past day if it directly justifies a forward adjustment."
+            f"SCOPE: Today is {today}. You may ONLY write changes for {earliest} or a later date — days before "
+            f"{earliest} are READ-ONLY CONTEXT, never editable, no exceptions. Use that earlier data only to inform "
+            f"decisions about the editable days (e.g. recent load, missed workouts) — do NOT include any day before "
+            f"{earliest} in your output changes, and do NOT narrate or review each past day individually. Only mention "
+            "an earlier day if it directly justifies an adjustment to an editable one."
         )
 
     situational_rules = (
@@ -355,11 +356,12 @@ RECONCILIATION (when recent activities are provided in the prompt):
 - STRENGTH already done: if any strength or cross-training activity has been logged on any day this week, convert ALL OTHER STRENGTH or CROSS plan days in the same week — i.e. every date in this week without its own logged strength/cross activity — to REST. This applies to both past and future days, but NEVER to the date where the activity was actually logged (that date keeps its workout_type per the rule above). The weekly non-running quota is fulfilled by the completed session.
 
 INTERVALS — READ CAREFULLY:
-- OMIT the "intervals" field entirely by default, even when setting a day to INTERVAL. Describe the session in "notes" instead (e.g. "6 x 800m at 6:22 with equal jog recovery"). Omitting it leaves any existing interval breakdown untouched.
-- ONLY include "intervals" if the user explicitly asked for a specific rep-by-rep structure. If you do, every entry MUST use exactly these field names: {{"interval_num": <int, starting at 1>, "interval_type": "WARMUP"|"WORK"|"REST"|"COOLDOWN", "distance": "<string, e.g. '800m' or '1.25 mi'>", "target_pace": "<string, e.g. '6:22'>"}}. Note: distance is a STRING not a number, the field is target_pace not pace, and interval_num and interval_type are REQUIRED on every entry.
+- When you SET a day's workout_type to INTERVAL, include the "intervals" array with the full rep-by-rep breakdown: a WARMUP entry, alternating WORK/REST reps, then a COOLDOWN entry. ALSO describe the session in "notes" (e.g. "6 x 800m at 6:22 with equal jog recovery") — notes are what the athlete sees if the breakdown can't be saved, so never leave them empty on an INTERVAL day.
+- OMIT "intervals" when you are changing something else about a day that is ALREADY INTERVAL (e.g. reducing its mileage) — omitting it leaves the existing breakdown untouched. Never send an empty array.
+- Every entry MUST use exactly these field names: {{"interval_num": <int, starting at 1>, "interval_type": "WARMUP"|"WORK"|"REST"|"COOLDOWN", "distance": "<string, e.g. '800m' or '1.25 mi'>", "target_pace": "<string, e.g. '6:22'>"}}. Note: distance is a STRING not a number, the field is target_pace not pace, and interval_num and interval_type are REQUIRED on every entry.
 
 Return ONLY:
-{{"changes": [{{"plan_date": "YYYY-MM-DD", "workout_type": "...", "target_miles": <float or null>, "target_pace": "<pace string or null>", "notes": "..."}}]}}
+{{"changes": [{{"plan_date": "YYYY-MM-DD", "workout_type": "...", "target_miles": <float or null>, "target_pace": "<pace string or null>", "notes": "...", "intervals": [...] — only when setting a day to INTERVAL}}]}}
 
 Return {{"changes": []}} if no changes are needed."""
 

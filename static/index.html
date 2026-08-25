@@ -410,7 +410,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 .modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);z-index:300;align-items:center;justify-content:center}
 #activity-modal{z-index:400}
 .modal-overlay.open{display:flex}
-.modal{background:var(--card);border-radius:8px;position:relative;padding:28px;width:460px;max-width:90vw;box-shadow:0 20px 60px rgba(0,0,0,.2)}
+.modal{background:var(--card);border-radius:8px;position:relative;padding:28px;width:460px;max-width:90vw;max-height:90vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.2)}
 .modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
 .modal-title{font-family:'Archivo',sans-serif;font-weight:700;font-size:17px;color:var(--ink)}
 .modal-close{background:none;border:none;font-size:22px;color:var(--muted);cursor:pointer;line-height:1}
@@ -449,9 +449,23 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 .interval-table{width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px}
 .interval-table th{background:var(--tile);padding:7px 10px;text-align:left;font-weight:600;font-size:11px;color:var(--muted)}
 .interval-table td{padding:7px 10px;border-top:1px solid var(--border);vertical-align:middle;color:var(--body)}
+.iv-row{display:flex;gap:6px;align-items:center;margin-bottom:6px}
+.iv-row select,.iv-row input{border:1px solid var(--border);border-radius:4px;padding:7px 8px;font-size:12.5px;outline:none;color:var(--ink);background:var(--card);font-family:'Hanken Grotesk',sans-serif;min-width:0}
+.iv-row select{flex:0 0 92px}
+.iv-row input{flex:1 1 0}
+.iv-row select:focus,.iv-row input:focus{border-color:var(--accent)}
+.iv-del{flex:0 0 20px;background:none;border:none;cursor:pointer;color:var(--faint);font-size:15px;line-height:1;padding:2px}
+.iv-del:hover{color:#c0392b}
+.iv-add{background:none;border:1px dashed var(--border);border-radius:4px;padding:7px;width:100%;cursor:pointer;font-size:12px;color:var(--muted);font-family:'Hanken Grotesk',sans-serif}
+.iv-add:hover{border-color:var(--accent);color:var(--accent)}
+[data-theme="dark"] .iv-row select,[data-theme="dark"] .iv-row input{background:var(--tile);color:var(--ink);border-color:var(--border)}
 #day-modal-body{max-height:60vh;overflow-y:auto;padding-right:4px}
 #day-modal-body::-webkit-scrollbar{width:3px}
 #day-modal-body::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
+/* Fields scroll, actions stay pinned — a long rep list must never push Save out of reach */
+#day-modal-edit-fields{max-height:52vh;overflow-y:auto;padding-right:4px}
+#day-modal-edit-fields::-webkit-scrollbar{width:3px}
+#day-modal-edit-fields::-webkit-scrollbar-thumb{background:var(--border);border-radius:2px}
 
 /* Toast */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);background:var(--ink);color:white;padding:10px 20px;border-radius:4px;font-size:13px;z-index:999;opacity:1;transition:opacity .4s;white-space:nowrap}
@@ -865,10 +879,17 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
     </div>
     <div id="day-modal-body"></div>
     <div id="day-modal-edit" style="display:none">
-      <div class="modal-field"><label>Workout Type</label><select id="edit-workout-type"><option value="EASY">EASY</option><option value="AEROBIC">AEROBIC</option><option value="LONG">LONG</option><option value="TEMPO">TEMPO</option><option value="INTERVAL">INTERVAL</option><option value="STRENGTH">STRENGTH</option><option value="CROSS">CROSS</option><option value="REST">REST</option></select></div>
-      <div class="modal-field"><label>Target Miles</label><input type="number" id="edit-target-miles" step="0.1" min="0" placeholder="e.g. 6.0"/></div>
-      <div class="modal-field"><label>Target Pace</label><input type="text" id="edit-target-pace" placeholder="e.g. 8:30/mi"/></div>
-      <div class="modal-field"><label>Notes</label><textarea id="edit-notes" rows="3" placeholder="Workout notes..."></textarea></div>
+      <div id="day-modal-edit-fields">
+        <div class="modal-field"><label>Workout Type</label><select id="edit-workout-type" onchange="toggleIntervalsField()"><option value="EASY">EASY</option><option value="AEROBIC">AEROBIC</option><option value="LONG">LONG</option><option value="TEMPO">TEMPO</option><option value="INTERVAL">INTERVAL</option><option value="STRENGTH">STRENGTH</option><option value="CROSS">CROSS</option><option value="REST">REST</option></select></div>
+        <div class="modal-field"><label>Target Miles</label><input type="number" id="edit-target-miles" step="0.1" min="0" placeholder="e.g. 6.0"/></div>
+        <div class="modal-field"><label>Target Pace</label><input type="text" id="edit-target-pace" placeholder="e.g. 8:30/mi"/></div>
+        <div class="modal-field" id="edit-intervals-field" style="display:none">
+          <label>Intervals</label>
+          <div id="edit-intervals-rows"></div>
+          <button type="button" class="iv-add" onclick="addIntervalRow()">+ Add interval</button>
+        </div>
+        <div class="modal-field"><label>Notes</label><textarea id="edit-notes" rows="3" placeholder="Workout notes..."></textarea></div>
+      </div>
       <div class="modal-actions"><button class="modal-btn-secondary" onclick="exitDayEditMode()">Cancel</button><button class="modal-btn-primary" onclick="saveDayEdit()">Save</button></div>
       <div style="text-align:center;margin-top:10px"><button onclick="confirmClearDay()" style="background:none;border:none;cursor:pointer;font-size:12px;color:#c0392b">Clear day</button></div>
       <div id="day-edit-error" style="display:none;font-size:12px;color:#c0392b;margin-top:8px;text-align:center"></div>
@@ -1594,14 +1615,71 @@ async function openDayModal(dayId,fromMonth=false){
 }
 
 function closeDayModal(){document.getElementById('day-modal').classList.remove('open');_dayModalFromMonth=false;_currentDayId=null;}
-function enterDayEditMode(){const day=_planDays[_currentDayId];if(!day)return;document.getElementById('edit-workout-type').value=day.workout_type||'REST';document.getElementById('edit-target-miles').value=day.target_miles??'';document.getElementById('edit-target-pace').value=day.target_pace||'';document.getElementById('edit-notes').value=day.notes||'';document.getElementById('day-edit-error').style.display='none';document.getElementById('day-modal-body').style.display='none';document.getElementById('day-modal-edit').style.display='block';document.getElementById('day-modal-edit-btn').style.display='none';}
+const IV_TYPES=['WARMUP','WORK','REST','COOLDOWN'];
+const ivAttr=v=>String(v??'').replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;');
+
+function ivRowHtml(iv){
+  const opts=IV_TYPES.map(t=>`<option value="${t}"${iv.interval_type===t?' selected':''}>${t}</option>`).join('');
+  // No recovery input: recovery is expressed as its own REST row, which is what the
+  // plan generator and update_plan both produce. rest_duration would be a second way
+  // to say the same thing and the two would drift apart.
+  return `<div class="iv-row"><select>${opts}</select>`+
+    `<input type="text" placeholder="800m" value="${ivAttr(iv.distance||iv.duration)}"/>`+
+    `<input type="text" placeholder="6:22" value="${ivAttr(iv.target_pace)}"/>`+
+    `<button type="button" class="iv-del" title="Remove" onclick="this.parentElement.remove()">×</button></div>`;
+}
+
+function addIntervalRow(){document.getElementById('edit-intervals-rows').insertAdjacentHTML('beforeend',ivRowHtml({interval_type:'WORK'}));}
+function toggleIntervalsField(){document.getElementById('edit-intervals-field').style.display=document.getElementById('edit-workout-type').value==='INTERVAL'?'block':'none';}
+
+// interval_num comes from row order, so reordering is just moving rows
+function collectIntervals(){
+  return [...document.querySelectorAll('#edit-intervals-rows .iv-row')].map((row,i)=>{
+    const inputs=row.querySelectorAll('input');
+    return {interval_num:i+1,interval_type:row.querySelector('select').value,
+      distance:inputs[0].value.trim()||null,target_pace:inputs[1].value.trim()||null};
+  });
+}
+
+async function enterDayEditMode(){
+  const day=_planDays[_currentDayId];if(!day)return;
+  document.getElementById('edit-workout-type').value=day.workout_type||'REST';
+  document.getElementById('edit-target-miles').value=day.target_miles??'';
+  document.getElementById('edit-target-pace').value=day.target_pace||'';
+  document.getElementById('edit-notes').value=day.notes||'';
+  document.getElementById('day-edit-error').style.display='none';
+  document.getElementById('day-modal-body').style.display='none';
+  document.getElementById('day-modal-edit').style.display='block';
+  document.getElementById('day-modal-edit-btn').style.display='none';
+  const rows=document.getElementById('edit-intervals-rows');rows.innerHTML='';
+  toggleIntervalsField();
+  if(day.workout_type==='INTERVAL'){
+    try{
+      const res=await apiFetch(`${API}/plan/intervals/${_currentDayId}`);
+      const ivs=await res.json();
+      if(Array.isArray(ivs))ivs.sort((a,b)=>(a.interval_num||0)-(b.interval_num||0)).forEach(iv=>rows.insertAdjacentHTML('beforeend',ivRowHtml(iv)));
+    }catch(e){}
+  }
+}
 function exitDayEditMode(){document.getElementById('day-modal-edit').style.display='none';document.getElementById('day-modal-body').style.display='block';document.getElementById('day-modal-edit-btn').style.display='inline';}
 
 async function saveDayEdit(){
   if(!_currentDayId)return;
-  const body={workout_type:document.getElementById('edit-workout-type').value||null,target_miles:parseFloat(document.getElementById('edit-target-miles').value)||null,target_pace:document.getElementById('edit-target-pace').value.trim()||null,notes:document.getElementById('edit-notes').value.trim()||null};
-  try{const res=await apiFetch(`${API}/plan/day/${_currentDayId}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});if(!res.ok)throw new Error();Object.assign(_planDays[_currentDayId],body);closeDayModal();loadPlan();}
-  catch(e){const err=document.getElementById('day-edit-error');err.textContent='Failed to save. Please try again.';err.style.display='block';}
+  const type=document.getElementById('edit-workout-type').value||null;
+  const body={workout_type:type,target_miles:parseFloat(document.getElementById('edit-target-miles').value)||null,target_pace:document.getElementById('edit-target-pace').value.trim()||null,notes:document.getElementById('edit-notes').value.trim()||null};
+  // Only send intervals for INTERVAL days. For any other type the server clears
+  // orphaned reps itself, so sending an empty list here would be redundant.
+  if(type==='INTERVAL')body.intervals=collectIntervals();
+  // The API returns 200 even when the write failed (patch_plan catches its own
+  // exception and returns {"status": "fail with error..."}), so res.ok alone is
+  // not enough — check the status body or a failure looks identical to a success.
+  try{
+    const res=await apiFetch(`${API}/plan/day/${_currentDayId}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    const data=await res.json().catch(()=>({}));
+    if(!res.ok||(data.status&&data.status!=='success'))throw new Error(data.status||data.detail||`HTTP ${res.status}`);
+    Object.assign(_planDays[_currentDayId],body);closeDayModal();loadPlan();
+  }
+  catch(e){const err=document.getElementById('day-edit-error');err.textContent=e.message||'Failed to save. Please try again.';err.style.display='block';}
 }
 
 function confirmClearDay(){if(!_currentDayId)return;document.getElementById('clear-day-modal').style.display='flex';}

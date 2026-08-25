@@ -108,7 +108,21 @@ def update_plan(
     today = date.fromisoformat(local_today) if local_today else date.today()
     start_date = today - timedelta(days=7)
     end_date = today + timedelta(days=8)
-    allowed_start = start_date.isoformat() if mode == "chat" else today.isoformat()
+    if mode == "chat":
+        allowed_start = start_date.isoformat()
+    else:
+        # Reconciliation has to be able to write the days it is reconciling, so the
+        # floor is this week's Monday rather than today — today-only silently dropped
+        # every earlier day of the current week into out_of_range.
+        this_monday = today - timedelta(days=today.weekday())
+        floor = this_monday
+        if mode == "sync":
+            # One day of grace for the Sunday-run-synced-on-Monday case. On a Monday
+            # this reaches back to Sunday; every other day it changes nothing, so last
+            # week stays an immutable record of planned vs actual. Not applied to
+            # weekly_refresh, whose job is this week only.
+            floor = min(this_monday, today - timedelta(days=1))
+        allowed_start = floor.isoformat()
     allowed_end = allowed_end or end_date.isoformat()
     plan = get_plan_days(plan_id, start_date=start_date.isoformat(), end_date=end_date.isoformat())
 
@@ -137,7 +151,10 @@ def update_plan(
             pass
 
     prompt = f"Today is {today.isoformat()}.\nUser intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (±7 days): {plan}{pacing_block}{activities_block}"
-    system_prompt = build_update_plan_system(today.isoformat(), mode=mode)
+    # Pass the real write floor so the prompt and the out_of_range filter agree —
+    # otherwise the model is told "today only" while the filter accepts more, or asked
+    # for days the filter silently drops.
+    system_prompt = build_update_plan_system(today.isoformat(), mode=mode, earliest=allowed_start)
     response = call_llm(system_prompt=system_prompt, user_prompt=prompt, max_tokens=8192)
     response = response.strip()
     start = response.find("{")
@@ -156,11 +173,17 @@ def update_plan(
         changes = list({c["plan_date"]: c for c in changes}.values())
         db_result = update_plan_day(plan_id, changes)
         # Report only what was actually written — never claim success for failed writes
-        return {
+        result = {
             "status": db_result.get("status", "fail"),
             "changes": db_result.get("applied", []),
             "failed": db_result.get("failed", []),
         }
+        # Only present when a rep breakdown failed to save — the day itself still
+        # changed, so this is a caveat on a success, not a failure. Omitted when
+        # empty so the common case reaches the coach exactly as it does today.
+        if db_result.get("interval_failures"):
+            result["interval_failures"] = db_result["interval_failures"]
+        return result
     except Exception as e:
         print(f"[update_plan] ERROR: {e}")
         return {"status": f"fail with error {e}"}

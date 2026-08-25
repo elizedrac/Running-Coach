@@ -24,7 +24,7 @@ from db.plan import (
     update_plan_day,
 )
 from db.preferences import get_preferences, set_notes, update_preferences
-from models.planner import History
+from models.planner import History, PatchDayRequest
 from routes.ask import _history_key, _load_history, _save_history, get_session
 from services import chat_stream
 from services import garmin as garmin_service
@@ -44,6 +44,7 @@ from services.pacing import (
     get_pacing_zones,
     pacing_calculator,
 )
+from services.plan import update_plan
 from services.prompts import build_query_data_extra
 from services.rate_limit import check_rate_limit
 from services.trend_analysis import (
@@ -1438,8 +1439,12 @@ def test_detect_end_calls_llm_when_end_word_detected(mock_llm):
 # ── patch_plan and clear_day tests ───────────────────────────────────────────
 
 
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
 @patch("db.plan.get_supabase_client")
-def test_patch_plan_filters_none_values(mock_client):
+def test_patch_plan_writes_nulls_to_clear_fields(mock_client, mock_replace):
+    """A null means "clear this field", not "ignore it". The route strips untouched
+    fields with exclude_unset, so anything arriving here was deliberately set — if
+    nulls were filtered out, blanking the notes box could never empty the column."""
     chain = mock_client.return_value
     chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
     result = patch_plan(
@@ -1447,38 +1452,86 @@ def test_patch_plan_filters_none_values(mock_client):
         {"workout_type": "EASY", "target_miles": None, "target_pace": None, "notes": None, "intervals": None},
     )
     update_call = chain.table.return_value.update.call_args[0][0]
-    assert "workout_type" in update_call
-    assert "target_miles" not in update_call
-    assert "target_pace" not in update_call
+    assert update_call["workout_type"] == "EASY"
+    assert update_call["target_miles"] is None
+    assert update_call["target_pace"] is None
+    assert update_call["notes"] is None
     assert result == {"status": "success"}
 
 
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
 @patch("db.plan.get_supabase_client")
-def test_patch_plan_all_none_returns_no_changes(mock_client):
-    result = patch_plan(
-        "day-uuid", {"workout_type": None, "target_miles": None, "target_pace": None, "notes": None, "intervals": None}
-    )
+def test_patch_plan_never_nulls_workout_type(mock_client, mock_replace):
+    """Every day needs a type, so a null workout_type is dropped rather than written."""
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    patch_plan("day-uuid", {"workout_type": None, "notes": "just notes"})
+    update_call = chain.table.return_value.update.call_args[0][0]
+    assert "workout_type" not in update_call
+    assert update_call["notes"] == "just notes"
+
+
+@patch("db.plan.get_supabase_client")
+def test_patch_plan_no_fields_returns_no_changes(mock_client):
+    result = patch_plan("day-uuid", {})
     assert result == {"status": "no changes"}
     mock_client.return_value.table.assert_not_called()
 
 
-@patch("db.plan.replace_plan_intervals")
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
 @patch("db.plan.get_supabase_client")
 def test_patch_plan_calls_replace_intervals_when_provided(mock_client, mock_replace):
     chain = mock_client.return_value
     chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
     intervals = [{"interval_num": 1, "interval_type": "WARMUP"}]
-    patch_plan("day-uuid", {"workout_type": "INTERVAL", "intervals": intervals})
+    result = patch_plan("day-uuid", {"workout_type": "INTERVAL", "intervals": intervals})
     mock_replace.assert_called_once_with("day-uuid", intervals)
+    assert result == {"status": "success"}
 
 
-@patch("db.plan.replace_plan_intervals")
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
 @patch("db.plan.get_supabase_client")
-def test_patch_plan_skips_replace_when_intervals_none(mock_client, mock_replace):
+def test_patch_plan_clears_intervals_when_leaving_interval(mock_client, mock_replace):
+    """A day that is no longer INTERVAL must not keep its reps — otherwise switching
+    back to INTERVAL later resurrects the breakdown of a workout that was replaced."""
     chain = mock_client.return_value
     chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
     patch_plan("day-uuid", {"workout_type": "EASY", "intervals": None})
+    mock_replace.assert_called_once_with("day-uuid", [])
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
+@patch("db.plan.get_supabase_client")
+def test_patch_plan_keeps_intervals_for_interval_day_without_new_ones(mock_client, mock_replace):
+    """Editing only the mileage of an INTERVAL day must leave its existing reps alone."""
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    patch_plan("day-uuid", {"workout_type": "INTERVAL", "target_miles": 5.5, "intervals": None})
     mock_replace.assert_not_called()
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
+@patch("db.plan.get_supabase_client")
+def test_patch_plan_skips_replace_when_no_workout_type(mock_client, mock_replace):
+    """A notes-only edit says nothing about the workout type, so it must not touch reps."""
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    patch_plan("day-uuid", {"notes": "felt easy", "intervals": None})
+    mock_replace.assert_not_called()
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "fail", "error": "boom"})
+@patch("db.plan.get_supabase_client")
+def test_patch_plan_reports_interval_failure_but_keeps_day(mock_client, mock_replace):
+    """The day row is already written by the time reps are attempted, so a rep failure
+    is a caveat on a success — reporting it as a failure would make the UI claim the
+    day didn't save when it did."""
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    intervals = [{"interval_num": 1, "interval_type": "WARMUP"}]
+    result = patch_plan("day-uuid", {"workout_type": "INTERVAL", "intervals": intervals})
+    assert result["status"] == "success"
+    assert result["intervals"]["error"] == "boom"
 
 
 @patch("db.plan.get_supabase_client")
@@ -2065,3 +2118,154 @@ def test_cache_fails_open_when_redis_down(monkeypatch):
     assert get_cached("user1", "2026-05-01", "2026-05-31", "activity_data") is None
     set_cached("user1", "2026-05-01", "2026-05-31", "activity_data", FAKE_ACTIVITIES)
     clear_user_cache("user1")
+
+
+# ── update_plan writable window (allowed_start) ───────────────────────────────
+#
+# The window is date math with a weekday-dependent edge case, and getting it wrong
+# fails silently: out-of-range changes are dropped into out_of_range rather than
+# raising, so a too-narrow window looks like "the model decided not to change that".
+
+
+def _writable_window(local_today: str, mode: str):
+    """Runs update_plan far enough to capture the window it would write with.
+    Everything past the LLM call is stubbed — only the date arithmetic is under test."""
+    captured = {}
+
+    def fake_call_llm(system_prompt, user_prompt, **kwargs):
+        captured["system_prompt"] = system_prompt
+        return '{"changes": []}'
+
+    with (
+        patch("services.plan.get_plan_id", return_value="plan-uuid"),
+        patch("services.plan.get_plan_days", return_value=[]),
+        patch("services.plan.get_preferences", return_value={}),
+        patch("services.plan.get_race", return_value={}),
+        patch("services.plan.get_activities", return_value=[]),
+        patch("services.plan.update_plan_day", return_value={"status": "success", "applied": [], "failed": []}),
+        patch("services.plan.call_llm", side_effect=fake_call_llm),
+        patch("services.plan.build_update_plan_system", return_value="SYSTEM") as mock_build,
+    ):
+        update_plan("user1", "reconcile", local_today=local_today, mode=mode)
+    return mock_build.call_args.kwargs["earliest"]
+
+
+def test_sync_window_starts_at_monday_midweek():
+    """Mid-week sync must reach back to Monday — today-only silently dropped every
+    earlier day of the current week, so reconciliation could not reconcile."""
+    assert _writable_window("2026-08-26", "sync") == "2026-08-24"  # Wed -> Mon
+
+
+def test_sync_window_grace_day_on_monday():
+    """A Sunday run synced on Monday morning is the one case worth reaching back for."""
+    assert _writable_window("2026-08-24", "sync") == "2026-08-23"  # Mon -> Sun
+
+
+def test_sync_window_does_not_reach_last_week_on_sunday():
+    """Late in the week the floor stays at this Monday — last week is an immutable
+    record of planned vs actual, which weekly_refresh reads to decide load."""
+    assert _writable_window("2026-08-30", "sync") == "2026-08-24"  # Sun -> Mon
+
+
+def test_weekly_refresh_window_has_no_grace_day():
+    """weekly_refresh adjusts this week only, so it never gets the Sunday grace day."""
+    assert _writable_window("2026-08-24", "weekly_refresh") == "2026-08-24"  # Mon -> Mon
+
+
+def test_chat_window_still_reaches_back_seven_days():
+    """Chat is the deliberate escape hatch for fixing an earlier day, and is unchanged."""
+    assert _writable_window("2026-08-26", "chat") == "2026-08-19"
+
+
+# ── update_plan_day interval handling ─────────────────────────────────────────
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
+@patch("db.plan.get_plan_intervals", return_value=[])
+@patch("db.plan.get_plan_days", return_value=[{"workout_type": "EASY"}])
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_update_plan_day_writes_intervals_when_supplied(
+    mock_day_id, mock_client, mock_get_days, mock_intervals, mock_replace
+):
+    """The AI path must be able to create a rep breakdown, not just set the type."""
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    reps = [{"interval_num": 1, "interval_type": "WARMUP", "distance": "10min"}]
+    result = update_plan_day(
+        "plan-uuid",
+        [{"plan_date": "2026-06-01", "workout_type": "INTERVAL", "notes": "6 x 800m", "intervals": reps}],
+    )
+    mock_replace.assert_called_once_with("day-uuid", reps)
+    assert result["status"] == "success"
+    assert result["interval_failures"] == []
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "fail", "error": "boom"})
+@patch("db.plan.get_plan_intervals", return_value=[])
+@patch("db.plan.get_plan_days", return_value=[{"workout_type": "EASY"}])
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_update_plan_day_interval_failure_does_not_fail_the_day(
+    mock_day_id, mock_client, mock_get_days, mock_intervals, mock_replace
+):
+    """The day's type and notes still describe the session, so a failed rep write is a
+    caveat the coach mentions — not a reason to tell the user nothing changed."""
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    result = update_plan_day(
+        "plan-uuid",
+        [
+            {
+                "plan_date": "2026-06-01",
+                "workout_type": "INTERVAL",
+                "notes": "6 x 800m",
+                "intervals": [{"interval_num": 1, "interval_type": "WORK"}],
+            }
+        ],
+    )
+    assert result["status"] == "success"
+    assert len(result["applied"]) == 1
+    assert result["interval_failures"] == [{"plan_date": "2026-06-01", "error": "boom"}]
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
+@patch("db.plan.get_plan_intervals", return_value=[])
+@patch("db.plan.get_plan_days", return_value=[{"workout_type": "INTERVAL"}])
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_update_plan_day_clears_reps_when_leaving_interval(
+    mock_day_id, mock_client, mock_get_days, mock_intervals, mock_replace
+):
+    """Orphaned reps would otherwise resurface if the day is switched back later."""
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    update_plan_day("plan-uuid", [{"plan_date": "2026-06-01", "workout_type": "EASY"}])
+    mock_replace.assert_called_once_with("day-uuid", [])
+
+
+# ── PATCH /plan/day route: clearing a field vs leaving it alone ────────────────
+
+
+@patch("routes.plan.patch_plan", return_value={"status": "success"})
+def test_patch_day_route_forwards_only_fields_the_client_sent(mock_patch):
+    """exclude_unset is what makes clearing possible: an omitted field must not reach
+    patch_plan at all, or every save would overwrite untouched columns with null."""
+    from routes.plan import patch_day
+
+    patch_day("day-uuid", PatchDayRequest(notes="just the notes"), user_id="user1")
+    forwarded = mock_patch.call_args[0][1]
+    assert forwarded == {"notes": "just the notes"}
+    assert "workout_type" not in forwarded
+    assert "target_miles" not in forwarded
+
+
+@patch("routes.plan.patch_plan", return_value={"status": "success"})
+def test_patch_day_route_forwards_explicit_nulls(mock_patch):
+    """A field the client explicitly set to null is a clear request and must survive."""
+    from routes.plan import patch_day
+
+    patch_day("day-uuid", PatchDayRequest(workout_type="EASY", notes=None), user_id="user1")
+    forwarded = mock_patch.call_args[0][1]
+    assert forwarded["notes"] is None
+    assert forwarded["workout_type"] == "EASY"
