@@ -4,6 +4,8 @@ A personal AI running coach. It ingests Garmin health and activity data, stores 
 
 📄 **[Design document](DESIGN.md)** — architecture and data flow, the multi-model LLM strategy and tool suite, caching, guardrails, memory compression, and error handling.
 
+🔗 **[katerina.fit](https://katerina.fit)** — the live app. Access is invite-only for now; email elizedrac@gmail.com to request an account.
+
 ## Local Development
 
 **Setup (venv):**
