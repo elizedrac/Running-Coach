@@ -1,11 +1,13 @@
 # Haiku call that picks a write action + args from REGISTRY (write path — see sql_selector.py for reads).
 import json
-import sys
 
 from db.user_info import get_user_info, set_theme
 from models.planner import WritePlan
 from services.llm import call_llm
+from services.logging_config import get_logger
 from services.prompts import WRITE_SELECTOR_SYSTEM
+
+logger = get_logger(__name__)
 
 VALID_THEMES = {"arc", "jarvis", "hotrod", "stealth", "workshop"}
 
@@ -39,8 +41,7 @@ def execute_write(user_id, action_intent: str) -> dict:
     raw = select_write(action_intent)
     response = WritePlan.model_validate(json.loads(raw))
 
-    if "--debug" in sys.argv:
-        print(f"[write_selector] picked: {response.action} args={response.args}", file=sys.stderr)
+    logger.info("write_selector_picked", extra={"action": response.action, "args": response.args})
 
     if response.action == "set_theme":
         theme = response.args.get("theme")

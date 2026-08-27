@@ -1,7 +1,7 @@
 # Orchestrator. ask(question, user_id): single-shot planner + dispatch (no_tools / sql / tools).
 import json
 import os
-import sys
+import time
 from datetime import date, timedelta
 from pathlib import Path
 
@@ -15,6 +15,7 @@ from services.course_details import get_course_details
 from services.final import final_output
 from services.garmin import garmin_sync, run_locked_sync
 from services.guardrails import input_check
+from services.logging_config import get_logger
 from services.memory import compress_history
 from services.pacing import _time_to_mins, pacing_calculator
 from services.plan import update_plan
@@ -23,6 +24,8 @@ from services.race_info import get_race_info
 from services.sql_selector import execute_query
 from services.weather import get_weather
 from services.write_selector import execute_write
+
+logger = get_logger(__name__)
 
 RACE_DISTANCES_KNOWLEDGE = json.loads(
     Path(__file__).parent.parent.joinpath("knowledge/race_distances.json").read_text()
@@ -151,8 +154,6 @@ def orchestrate(
     should_cancel=None,
     on_progress=None,
 ):
-    debug = "--debug" in sys.argv
-
     hist = hist or History()
 
     def cancelled():
@@ -177,9 +178,12 @@ def orchestrate(
     min_date = get_user_min_date(user_id)
     planner_response = planner(planner_prompt, min_date=min_date, local_today=today)
 
-    if debug:
-        print(f"[coach] path={planner_response.path}, tools={[t.name for t in planner_response.tools]}")
-        print("Planner response:", planner_response.model_dump_json(), file=sys.stderr)
+    logger.info(
+        "planner_decided",
+        extra={"path": planner_response.path, "tools": [t.name for t in planner_response.tools]},
+    )
+    # Reasoning restates the user's question, so the full body stays at DEBUG.
+    logger.debug("planner_response", extra={"raw": planner_response.model_dump_json()})
 
     path = planner_response.path
     tool_results = {}
@@ -214,6 +218,7 @@ def orchestrate(
                     user_id, **tool.args, on_day=_on_day, should_cancel=cancelled
                 )
             except Exception as e:
+                logger.error("tool_failed", extra={"tool": "garmin_sync"}, exc_info=True)
                 tool_results["garmin_sync"] = f"Error running garmin_sync: {e}"
 
         for tool in planner_response.tools:
@@ -221,8 +226,7 @@ def orchestrate(
                 break
             name = tool.name.strip()
             if name not in TOOL_REGISTRY:
-                if debug:
-                    print(f"[coach] unknown tool: {name}")
+                logger.warning("tool_unknown", extra={"tool": name})
                 continue
             if name != "garmin_sync":
                 try:
@@ -232,11 +236,14 @@ def orchestrate(
                         input_id = user_id
                     if name == "get_weather" and "location" not in tool.args:
                         tool.args["location"] = location
-                    if debug:
-                        print(f"[coach] calling {name} args={tool.args}")
+                    tool_started = time.monotonic()
                     result = call_tool(name, tool.args, input_id)
-                    if debug:
-                        print(f"[coach] {name} result={str(result)[:200]}")
+                    logger.info(
+                        "tool_call",
+                        extra={"tool": name, "duration_ms": round((time.monotonic() - tool_started) * 1000)},
+                    )
+                    # Results carry health data, so the body is DEBUG only.
+                    logger.debug("tool_result", extra={"tool": name, "result": str(result)[:500]})
                     if name in tool_results:
                         existing = tool_results[name]
                         tool_results[name] = existing if isinstance(existing, list) else [existing]
@@ -252,13 +259,12 @@ def orchestrate(
                     if name == "update_settings" and isinstance(result, dict) and result.get("status") == "success":
                         yield ("theme_updated", result.get("theme"))
                 except Exception as e:
-                    print(f"[coach] {name} EXCEPTION: {e}")
+                    logger.error("tool_failed", extra={"tool": name}, exc_info=True)
                     tool_results[name] = f"Error running {name}: {e}"
         if not tool_results:
             planner_response.path = "no_tools"
 
-    if debug:
-        print("Tool results:", tool_results, file=sys.stderr)
+    logger.debug("tool_results", extra={"tools": list(tool_results.keys())})
 
     recent_turns = "\n".join(f"{m['role']}: {m['content']}" for m in hist.recent[-4:])
     full_history = "\n".join(p for p in [hist.summary, recent_turns] if p)

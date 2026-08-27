@@ -3,6 +3,9 @@ import json
 import redis
 
 from db.redis import get_redis
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 CACHE_TTL = 3600
 
@@ -15,8 +18,8 @@ def get_cached(user_id: str, start_date: str, end_date: str, query_type: str) ->
     key = f"cache:{user_id}:{query_type}"
     try:
         raw = get_redis().get(key)
-    except redis.RedisError as e:
-        print(f"[cache] redis unavailable, treating as miss: {e}")
+    except redis.RedisError:
+        logger.warning("cache_unavailable", extra={"op": "get", "query_type": query_type}, exc_info=True)
         return None
     if not raw:
         return None
@@ -35,8 +38,8 @@ def set_cached(user_id: str, start_date: str, end_date: str, query_type: str, da
         entries = json.loads(raw) if raw else []
         entries.append({"start": start_date, "end": end_date, "data": data})
         r.set(key, json.dumps(entries), ex=CACHE_TTL)
-    except redis.RedisError as e:
-        print(f"[cache] redis unavailable, skipping cache write: {e}")
+    except redis.RedisError:
+        logger.warning("cache_unavailable", extra={"op": "set", "query_type": query_type}, exc_info=True)
 
 
 def clear_user_cache(user_id: str) -> None:
@@ -45,5 +48,5 @@ def clear_user_cache(user_id: str) -> None:
         keys = r.keys(f"cache:{user_id}:*")
         if keys:
             r.delete(*keys)
-    except redis.RedisError as e:
-        print(f"[cache] redis unavailable, skipping cache clear: {e}")
+    except redis.RedisError:
+        logger.warning("cache_unavailable", extra={"op": "clear"}, exc_info=True)

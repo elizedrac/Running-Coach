@@ -1,5 +1,8 @@
 # Read/write for the training_preferences table (days per week, preferred days, mileage caps, time vs mile based).
 from db.client import get_supabase_client
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def update_preferences(user_id, field, value) -> dict:
@@ -11,8 +14,8 @@ def get_preferences(user_id: str) -> dict:
     try:
         response = client.table("training_preferences").select("*").eq("user_id", user_id).execute()
         return response.data[0] if response.data else {}
-    except Exception as e:
-        print(f"Error querying training preferences: {e}")
+    except Exception:
+        logger.error("preferences_query_failed", exc_info=True)
         return {}
 
 
@@ -21,8 +24,8 @@ def _set(user_id: str, col: str, val) -> dict:
     try:
         client.table("training_preferences").upsert({"user_id": user_id, col: val}, on_conflict="user_id").execute()
         return {"status": "success"}
-    except Exception as e:
-        print(f"Error updating training preferences: {e}")
+    except Exception:
+        logger.error("preferences_update_failed", extra={"column": col}, exc_info=True)
         return {"status": "fail"}
 
 

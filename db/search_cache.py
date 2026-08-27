@@ -1,6 +1,9 @@
 from datetime import datetime, timedelta, timezone
 
 from db.client import get_supabase_client
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 TTL_DAYS = {
     "race_info": 365,
@@ -26,8 +29,8 @@ def get_raw_search(race: str, location: str, info_type: str) -> str | None:
             .execute()
         )
         return response.data[0]["raw_result"] if response.data else None
-    except Exception as e:
-        print(f"Error reading raw search cache: {e}")
+    except Exception:
+        logger.error("search_cache_raw_read_failed", extra={"info_type": info_type}, exc_info=True)
         return None
 
 
@@ -47,8 +50,8 @@ def get_candidates(topic: str, race: str, location: str, info_type: str) -> list
             .execute()
         )
         return response.data
-    except Exception as e:
-        print(f"Error reading search cache: {e}")
+    except Exception:
+        logger.error("search_cache_read_failed", extra={"topic": topic, "info_type": info_type}, exc_info=True)
         return []
 
 
@@ -80,5 +83,5 @@ def set_cached(
                 "raw_result": raw_result,
             }
         ).execute()
-    except Exception as e:
-        print(f"Error writing search cache: {e}")
+    except Exception:
+        logger.error("search_cache_write_failed", extra={"topic": topic, "info_type": info_type}, exc_info=True)

@@ -8,8 +8,11 @@ from dotenv import load_dotenv
 from db.search_cache import get_candidates, get_raw_search, set_cached
 from models.planner import RaceDayInfo, RaceInfoPlan, RaceRegistrationInfo
 from services.llm import call_llm
+from services.logging_config import get_logger
 from services.prompts import RACE_INFO_SYSTEM
 from services.web_search import web_search
+
+logger = get_logger(__name__)
 
 load_dotenv()
 
@@ -92,8 +95,9 @@ Original user query: {query}"""
             location=raw["location"],
             info=info_model.model_validate(raw["info"]),
         )
-    except Exception as e:
-        print("Error parsing race info output:", e)
+    except Exception:
+        logger.error("race_info_parse_failed", exc_info=True)
+        logger.debug("race_info_raw_response", extra={"raw": raw})
         raise
 
     info_dict = {

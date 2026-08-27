@@ -4,6 +4,9 @@ from datetime import date
 
 from db.client import get_supabase_client
 from db.race import get_race
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_current_plan(user_id) -> dict:
@@ -115,11 +118,8 @@ def save_plan(user_id, days: list):
                 save_plan_intervals(in_day["id"], intervals)
 
         return {"status": "success"}
-    except Exception as e:
-        print(f"[save_plan] ERROR: {e}")
-        import traceback
-
-        traceback.print_exc()
+    except Exception:
+        logger.error("save_plan_failed", extra={"days": len(days)}, exc_info=True)
         return {"status": "fail"}
 
 
@@ -141,7 +141,7 @@ def update_plan_day(plan_id: int, changes: list) -> dict:
         try:
             day_id = get_day_id(plan_id, change["plan_date"])
             data = {k: v for k, v in change.items() if k != "intervals"}
-            if data.get("workout_type") in {"REST", "CROSS", "STRENGTH"}:
+            if data.get("workout_type") in {"REST", "STRENGTH"}:
                 data["target_pace"] = None
                 data["target_miles"] = None
             if day_id and data.get("workout_type"):

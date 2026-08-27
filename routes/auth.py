@@ -4,6 +4,9 @@ from fastapi import APIRouter, HTTPException
 from supabase import create_client
 
 from models.planner import LoginRequest
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -18,5 +21,7 @@ def login(body: LoginRequest):
         response = login_client.auth.sign_in_with_password({"email": body.email, "password": body.password})
         return {"access_token": response.session.access_token}
     except Exception as e:
-        print(f"[auth/login] error: {e}")
+        # Never log the email or password. The exception type separates a bad
+        # credential from Supabase being unreachable.
+        logger.warning("login_failed", extra={"reason": type(e).__name__})
         raise HTTPException(status_code=401, detail="Invalid email or password")

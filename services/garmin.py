@@ -2,7 +2,6 @@
 # Run directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
 import json
 import os
-import sys
 import tempfile
 from datetime import datetime, timedelta
 from time import sleep
@@ -16,9 +15,12 @@ from db.health_history import insert_health_history
 from db.redis import get_redis
 from db.user_info import set_last_synced
 from services.cache import clear_user_cache
+from services.logging_config import get_logger, set_log_context, setup_logging
 
 # Load environment variables from .env file
 load_dotenv()
+
+logger = get_logger(__name__)
 
 DAY_PAUSE = 2  # Seconds to sleep between Garmin API calls to avoidw rate limits
 CALL_PAUSE = 1  # Seconds to sleep between individual API calls within a day
@@ -31,21 +33,35 @@ def garmin_sync(user_id: str, day_iso_start: str, day_iso_end: str, on_day=None,
     try:
         activities, stats, was_cancelled = fetch_garmin_data(user_id, day_iso_start, day_iso_end, on_day, should_cancel)
     except Exception as e:
+        logger.error(
+            "garmin_sync_failed",
+            extra={"start_date": day_iso_start, "end_date": day_iso_end},
+            exc_info=True,
+        )
         return {"status": "error", "error": str(e), "date_range": f"{day_iso_start} to {day_iso_end}"}
 
     if activities:
         insert_activities([{**a, "user_id": user_id} for a in activities])
     else:
-        if "--debug" in sys.argv:
-            print("No Garmin activities to insert.")
+        logger.debug("garmin_no_activities", extra={"start_date": day_iso_start, "end_date": day_iso_end})
 
     if stats:
         insert_health_history([{**s, "user_id": user_id} for s in stats])
     else:
-        if "--debug" in sys.argv:
-            print("No Garmin health stats to insert.")
+        logger.debug("garmin_no_health_stats", extra={"start_date": day_iso_start, "end_date": day_iso_end})
 
     set_last_synced(user_id)
+
+    logger.info(
+        "garmin_sync_done",
+        extra={
+            "status": "cancelled" if was_cancelled else "success",
+            "start_date": day_iso_start,
+            "end_date": day_iso_end,
+            "activities": len(activities),
+            "days": len(stats),
+        },
+    )
 
     return {
         "status": "cancelled" if was_cancelled else "success",
@@ -181,8 +197,7 @@ def fetch_garmin_data(
             if should_cancel and should_cancel():
                 was_cancelled = True
                 break
-            if "--debug" in sys.argv:
-                print(f"Fetching Garmin data for {day_iso_start}...")
+            logger.debug("garmin_fetch_day", extra={"day": day_iso_start})
             all_stats.append(get_daily_stats(client, day_iso_start))
             all_activities.extend(extract_activities(client, day_iso_start))
             day_iso_start = (datetime.fromisoformat(day_iso_start) + timedelta(days=1)).date().isoformat()
@@ -192,8 +207,8 @@ def fetch_garmin_data(
             sleep(DAY_PAUSE)  # To avoid hitting Garmin's rate limits
 
         return all_activities, all_stats, was_cancelled
-    except Exception as e:
-        print(f"Error fetching Garmin data: {e}")
+    except Exception:
+        logger.error("garmin_fetch_failed", extra={"day": day_iso_start, "days_done": days_done}, exc_info=True)
         raise
 
 
@@ -289,14 +304,14 @@ def _to_int(v) -> int | None:
 def _call(client: Garmin, method: str, *args):
     try:
         return getattr(client, method)(*args)
-    except Exception as e:
-        print(f"Error calling Garmin method {method} with args {args}: {e}")
+    except Exception:
+        logger.warning("garmin_call_failed", extra={"method": method}, exc_info=True)
         return None
 
 
 def _pick(data: dict, keys: tuple) -> any:
     if not isinstance(data, dict):
-        print(f"Expected dict for _pick, got {type(data)}")
+        logger.warning("garmin_pick_bad_type", extra={"got": type(data).__name__})
         return None
     for key in keys:
         if key in data:
@@ -366,12 +381,14 @@ def _mps_to_pace(mps) -> str | None:
 
 # allow running directly for cron sync: python services/garmin.py [YYYY-MM-DD [YYYY-MM-DD]]
 if __name__ == "__main__":
+    setup_logging()
     today = datetime.now().date().isoformat()
     yesterday = (datetime.now() - timedelta(days=1)).date().isoformat()
     user_ids = [u.strip() for u in os.getenv("USER_IDS", "").split(",") if u.strip()]
     if not user_ids:
         raise ValueError("USER_IDS env var not set")
     for user_id in user_ids:
-        print(f"[cron] syncing user {user_id} ({yesterday} to {today})")
+        set_log_context(user_id=user_id, job="garmin_cron")
+        logger.info("cron_garmin_start", extra={"start_date": yesterday, "end_date": today})
         result = garmin_sync(user_id, yesterday, today)
-        print(f"[cron] result: {result}")
+        logger.info("cron_garmin_done", extra={"status": result.get("status")})

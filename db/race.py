@@ -1,5 +1,8 @@
 # Read/write for the race table (user's target race: distance, goal time, date).
 from db.client import get_supabase_client
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_race(user_id):
@@ -7,8 +10,8 @@ def get_race(user_id):
     try:
         response = client.table("race").select("*").eq("user_id", user_id).execute()
         return response.data[0] if response.data else {}
-    except Exception as e:
-        print(f"Error querying current race data: {e}")
+    except Exception:
+        logger.error("race_query_failed", exc_info=True)
         return {}
 
 
@@ -17,8 +20,8 @@ def _set(user_id: str, col: str, val) -> dict:
     try:
         client.table("race").upsert({"user_id": user_id, col: val}, on_conflict="user_id").execute()
         return {"status": "success"}
-    except Exception as e:
-        print(f"Error updating current race data: {e}")
+    except Exception:
+        logger.error("race_update_failed", extra={"column": col}, exc_info=True)
         return {"status": "fail"}
 
 

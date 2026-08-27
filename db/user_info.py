@@ -2,6 +2,9 @@
 from datetime import datetime, timezone
 
 from db.client import get_supabase_client
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_user_info(user_id: str) -> dict:
@@ -9,8 +12,8 @@ def get_user_info(user_id: str) -> dict:
     try:
         response = client.table("user_info").select("*").eq("user_id", user_id).execute()
         return response.data[0] if response.data else {}
-    except Exception as e:
-        print(f"Error querying user info: {e}")
+    except Exception:
+        logger.error("user_info_query_failed", exc_info=True)
         return {}
 
 
@@ -19,8 +22,8 @@ def _set(user_id: str, col: str, val) -> dict:
     try:
         client.table("user_info").upsert({"user_id": user_id, col: val}, on_conflict="user_id").execute()
         return {"status": "success"}
-    except Exception as e:
-        print(f"Error updating user info: {e}")
+    except Exception:
+        logger.error("user_info_update_failed", extra={"column": col}, exc_info=True)
         return {"status": "fail"}
 
 
@@ -37,8 +40,8 @@ def set_name(user_id: str, name: str) -> dict:
             on_conflict="user_id",
         ).execute()
         return {"status": "success"}
-    except Exception as e:
-        print(f"Error updating user info: {e}")
+    except Exception:
+        logger.error("user_info_set_name_failed", exc_info=True)
         return {"status": "fail"}
 
 

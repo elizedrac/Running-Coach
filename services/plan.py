@@ -1,6 +1,5 @@
 # Training plan creation, update, injury logic.
 import os
-import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
@@ -14,10 +13,13 @@ from models.planner import UpdatePlanOutput
 from services.course_details import get_course_details
 from services.guardrails import challenger
 from services.llm import call_llm, client
+from services.logging_config import get_logger, set_log_context, setup_logging
 from services.pacing import pacing_calculator
 from services.prompts import CREATE_PLAN_SYSTEM, PLAN_CREATOR_TOOLS, build_create_plan_prompt, build_update_plan_system
 from services.sql_selector import execute_query
 from services.trend_analysis import compute_load
+
+logger = get_logger(__name__)
 
 PLAN_TOOL_REGISTRY = {
     "pacing_calculator": pacing_calculator,
@@ -57,7 +59,9 @@ def create_plan(user_id: str) -> dict:
         messages.append({"role": "assistant", "content": response.content})
 
         if response.stop_reason != "tool_use":
-            print(f"[plan] loop ended without save_training_plan, stop_reason={response.stop_reason}")
+            logger.warning(
+                "create_plan_no_save", extra={"stop_reason": response.stop_reason, "iteration": i, "weeks": total_weeks}
+            )
             break
 
         save_block = next(
@@ -80,6 +84,7 @@ def create_plan(user_id: str) -> dict:
             violations = [] if validated else challenger(days, user_id, race.get("race_type", ""))
             if violations:
                 validated = True
+                logger.info("create_plan_violations", extra={"iteration": i, "violations": violations})
                 tool_results.append(
                     {
                         "type": "tool_result",
@@ -89,10 +94,12 @@ def create_plan(user_id: str) -> dict:
                     }
                 )
             else:
+                logger.info("create_plan_saved", extra={"days": len(days), "iterations": i + 1})
                 return save_plan(user_id, days)
 
         messages.append({"role": "user", "content": tool_results})
 
+    logger.error("create_plan_exhausted", extra={"iterations": 10})
     return {"status": "fail"}
 
 
@@ -160,7 +167,7 @@ def update_plan(
     start = response.find("{")
     end = response.rfind("}") + 1
     if start == -1 or end <= start:
-        print("[update_plan] ERROR: no JSON found in response")
+        logger.error("update_plan_no_json", extra={"mode": mode})
         return {"status": "fail with error: LLM returned no valid JSON"}
     response = response[start:end]
     try:
@@ -172,6 +179,19 @@ def update_plan(
         # Collapse duplicate entries for the same day (last wins) so counts and writes are per-day
         changes = list({c["plan_date"]: c for c in changes}.values())
         db_result = update_plan_day(plan_id, changes)
+        # The reconciliation audit trail: what the model decided, and what stuck.
+        # Without this a wrong workout_type leaves no trace of how it was chosen.
+        logger.info(
+            "plan_updated",
+            extra={
+                "mode": mode,
+                "changes": [{"date": c["plan_date"], "type": c.get("workout_type")} for c in changes],
+                "out_of_range": [c["plan_date"] for c in out_of_range],
+                "applied": len(db_result.get("applied", [])),
+                "failed": len(db_result.get("failed", [])),
+                "had_activities": bool(activities_block),
+            },
+        )
         # Report only what was actually written — never claim success for failed writes
         result = {
             "status": db_result.get("status", "fail"),
@@ -185,12 +205,13 @@ def update_plan(
             result["interval_failures"] = db_result["interval_failures"]
         return result
     except Exception as e:
-        print(f"[update_plan] ERROR: {e}")
+        logger.error("update_plan_failed", extra={"mode": mode}, exc_info=True)
         return {"status": f"fail with error {e}"}
 
 
 if __name__ == "__main__":
     load_dotenv()
+    setup_logging()
 
     user_ids = [u.strip() for u in os.getenv("USER_IDS", "").split(",") if u.strip()]
     if not user_ids:
@@ -228,7 +249,8 @@ if __name__ == "__main__":
             + f"Keep weekly mileage within 10% of the planned total unless ACWR or missed workouts clearly demand otherwise. Never increase week-over-week mileage by more than 20%. Long runs must stay flat or increase (unless within 3 weeks of race day {race_date})."
         )
 
-        print(f"[cron] refreshing plan for user {user_id}")
+        set_log_context(user_id=user_id, job="weekly_plan_refresh")
+        logger.info("cron_plan_refresh_start", extra={"week_start": this_monday.isoformat()})
         result = update_plan(
             user_id,
             intent,
@@ -236,4 +258,4 @@ if __name__ == "__main__":
             include_activities=True,
             allowed_end=next_sunday.isoformat(),
         )
-        print(f"[cron] result: {result}")
+        logger.info("cron_plan_refresh_done", extra={"status": result.get("status")})

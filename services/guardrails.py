@@ -7,7 +7,10 @@ from typing import Tuple
 from db.activity_history import get_avg_weekly_miles
 from db.preferences import get_preferences
 from services.llm import call_llm
+from services.logging_config import get_logger
 from services.prompts import PLAN_CHECKER_SYSTEM
+
+logger = get_logger(__name__)
 
 _RACE_MILES = json.loads(Path(__file__).parent.parent.joinpath("knowledge/race_miles.json").read_text())
 
@@ -44,6 +47,10 @@ def challenger(days: list, user_id: str, race_type: str = "") -> list:
     check_phase2_variety(days, violations, race_type)
     llm_check(days, violations)
 
+    logger.info(
+        "plan_challenged",
+        extra={"days": len(days), "race_type": race_type, "violations": violations},
+    )
     return violations
 
 

@@ -6,7 +6,11 @@ from datetime import datetime
 import requests
 from dotenv import load_dotenv
 
+from services.logging_config import get_logger
+
 load_dotenv()
+
+logger = get_logger(__name__)
 
 WEATHER_API_URL = "http://api.weatherapi.com/v1/forecast.json"
 WEATHER_API_KEY = os.getenv("WEATHER_API_KEY")
@@ -45,5 +49,5 @@ def get_weather(user_id: str, location: str = DEFAULT_LOCATION, date: str = None
         ]
 
     except Exception as e:
-        print(f"Error fetching weather data: {e}")
+        logger.error("weather_fetch_failed", extra={"location": location}, exc_info=True)
         return f"Error fetching weather data: {e}"

@@ -1,12 +1,12 @@
 # Haiku call that picks SQL func + args from REGISTRY (read-only path — see write_selector.py for writes).
 import json
-import sys
 from datetime import datetime, timedelta
 
 from db.activity_history import get_activities
 from db.health_history import get_health_history
 from models.planner import SQLPlan
 from services.llm import call_llm
+from services.logging_config import get_logger
 from services.prompts import SQL_SELECTOR_SYSTEM
 from services.trend_analysis import (
     activity_count_trend,
@@ -26,6 +26,8 @@ from services.trend_analysis import (
     total_steps,
     total_time_trend,
 )
+
+logger = get_logger(__name__)
 
 TREND_FNS = {
     "miles_trend": miles_trend,
@@ -126,8 +128,10 @@ def execute_query(
     if any(q not in ("get_activities", "get_health_data") for q in response.queries):
         response.queries = [q for q in response.queries if q != "get_health_data"]
 
-    if "--debug" in sys.argv:
-        print(f"[sql_selector] picked: {response.queries}", file=sys.stderr)
+    logger.info(
+        "sql_selector_picked",
+        extra={"queries": response.queries, "start_date": start_date, "end_date": end_date},
+    )
 
     query_outputs = {}
     for query in response.queries:

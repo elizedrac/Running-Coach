@@ -1,8 +1,9 @@
-import sys
-
 from models.planner import EndBehaviorClassification
 from services.llm import call_llm
+from services.logging_config import get_logger
 from services.prompts import END_DETECTION, FOLLOW_UP
+
+logger = get_logger(__name__)
 
 END_WORDS = {"bye", "thanks", "thank you", "that's all", "no thanks", "nope", "all good", "ok"}
 
@@ -29,9 +30,8 @@ def detect_end(query, recent):
             response = EndBehaviorClassification.model_validate_json(response)
             return response.end_conversation
 
-        except Exception as e:
-            if "--debug" in sys.argv:
-                print("Error parsing end behavior output:", e)
+        except Exception:
+            logger.warning("end_detection_parse_failed", exc_info=True)
             return False
 
     return False
@@ -48,7 +48,6 @@ def generate_followups(query, recent):
     end = response.rfind("}") + 1
     try:
         return json.loads(response[start:end]).get("follow_ups", [])
-    except Exception as e:
-        if "--debug" in sys.argv:
-            print("Error parsing follow-ups:", e)
+    except Exception:
+        logger.warning("followups_parse_failed", exc_info=True)
         return []

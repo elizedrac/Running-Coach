@@ -1,10 +1,12 @@
 # Hardcoded queries for the activity_history table (per-activity rows from Garmin).
-import sys
 from datetime import date as date_type
 from datetime import datetime
 
 from db.client import get_supabase_client
 from services.cache import get_cached, set_cached
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 MIN_DATE = "2020-01-01"
 
@@ -16,10 +18,9 @@ def insert_activities(rows: list[dict]) -> None:
         supabase = get_supabase_client()
         # upsert duplicates on garmin_activity_id to avoid inserting the same activity multiple times
         supabase.table("activity_history").upsert(rows, on_conflict="garmin_activity_id").execute()
-        if "--debug" in sys.argv:
-            print(f"Inserted/updated {len(rows)} activities into activity_history.")
-    except Exception as e:
-        print(f"Error inserting activities: {e}")
+        logger.info("activities_upserted", extra={"rows": len(rows)})
+    except Exception:
+        logger.error("activities_insert_failed", extra={"rows": len(rows)}, exc_info=True)
 
 
 def get_avg_weekly_miles(user_id: str, weeks: int = 4) -> float:
@@ -50,8 +51,7 @@ def get_activities(user_id: str, start_date: str, end_date: str) -> list[dict]:
 
     cached = get_cached(user_id, start_date, end_date, "activity_data")
     if cached is not None:
-        if "--debug" in sys.argv:
-            print(f"[cache hit] activities {start_date} to {end_date}", file=sys.stderr)
+        logger.debug("activity_cache_hit", extra={"start_date": start_date, "end_date": end_date})
         return cached
 
     try:
@@ -65,10 +65,11 @@ def get_activities(user_id: str, start_date: str, end_date: str) -> list[dict]:
             .execute()
         )
         data = response.data
-        if "--debug" in sys.argv:
-            print(f"Queried {len(data)} activities from {start_date} to {end_date}.")
+        logger.debug("activities_queried", extra={"rows": len(data), "start_date": start_date, "end_date": end_date})
         set_cached(user_id, start_date, end_date, "activity_data", data)
         return data
-    except Exception as e:
-        print(f"Error querying activities: {e}")
+    except Exception:
+        logger.error(
+            "activities_query_failed", extra={"start_date": start_date, "end_date": end_date}, exc_info=True
+        )
         return []

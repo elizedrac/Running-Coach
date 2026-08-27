@@ -2,7 +2,6 @@ import hashlib
 import json
 import os
 import re
-import sys
 from pathlib import Path
 
 import numpy as np
@@ -11,8 +10,11 @@ from dotenv import load_dotenv
 
 from models.planner import CourseDetailsPlan
 from services.llm import call_llm
+from services.logging_config import get_logger
 from services.prompts import COURSE_DETAILS
 from services.web_search import web_search
+
+logger = get_logger(__name__)
 
 _cached_chunks = None
 _file_hash = None
@@ -78,8 +80,7 @@ def find_relevant_chunks(location: str, race: str, query: str):
     # Skip embedding when query closely matches a cached chunk query by word overlap
     for c in candidates:
         if _word_overlap(query, c.get("query", "")) >= 0.7:
-            if "--debug" in sys.argv:
-                print(f"[course_details] word-overlap hit: '{c['query']}'", file=sys.stderr)
+            logger.debug("course_chunk_overlap_hit", extra={"chunk_query": c["query"]})
             return {"query": c["query"], "details": c["details"]}
 
     _embed_chunks(chunks, candidates)
@@ -90,11 +91,10 @@ def find_relevant_chunks(location: str, race: str, query: str):
 
     if len(similarities) > 0:
         best_idx = int(np.argmax(similarities))
-        if "--debug" in sys.argv:
-            print(
-                f"[course_details] top match score: {similarities[best_idx]:.3f} | chunk query: {candidates[best_idx]['query']}",
-                file=sys.stderr,
-            )
+        logger.debug(
+            "course_chunk_similarity",
+            extra={"score": round(float(similarities[best_idx]), 3), "chunk_query": candidates[best_idx]["query"]},
+        )
         if similarities[best_idx] > THRESHOLD_SIMILARITY:
             return {"query": candidates[best_idx]["query"], "details": candidates[best_idx]["details"]}
     return None
@@ -118,8 +118,7 @@ def _add_course_chunk(location: str, race: str, query: str, details: str) -> Non
 def get_course_details(user_id: str, location: str, race: str, query: str):
     relevant = find_relevant_chunks(location, race, query)
     if relevant:
-        if "--debug" in sys.argv:
-            print("Found relevant course chunk with query:", relevant["query"])
+        logger.debug("course_chunk_hit", extra={"chunk_query": relevant["query"]})
         return relevant
 
     results = web_search(user_id, query)
@@ -145,8 +144,7 @@ def get_course_details(user_id: str, location: str, race: str, query: str):
         response = CourseDetailsPlan.model_validate_json(response)
         _add_course_chunk(response.location, response.race, response.query, response.details)
         return {"query": response.query, "details": response.details}
-    except Exception as e:
-        print("Error parsing course details output:", e)
-        if "--debug" in sys.argv:
-            print("Raw response was:", response)
+    except Exception:
+        logger.error("course_details_parse_failed", extra={"race": race, "location": location}, exc_info=True)
+        logger.debug("course_details_raw_response", extra={"raw": response})
         raise

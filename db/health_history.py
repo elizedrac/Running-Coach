@@ -1,9 +1,11 @@
 # Hardcoded queries for the health_history table (one row per day; merges daily + sleep metrics).
-import sys
 from datetime import datetime
 
 from db.client import get_supabase_client
 from services.cache import get_cached, set_cached
+from services.logging_config import get_logger
+
+logger = get_logger(__name__)
 
 MIN_DATE = "2020-01-01"
 
@@ -39,10 +41,9 @@ def insert_health_history(rows: list[dict]) -> None:
     client = get_supabase_client()
     try:
         client.table("health_history").upsert(rows, on_conflict="user_id,calendar_date").execute()
-        if "--debug" in sys.argv:
-            print(f"Inserted/updated {len(rows)} health history records.")
-    except Exception as e:
-        print(f"Error inserting health history: {e}")
+        logger.info("health_history_upserted", extra={"rows": len(rows)})
+    except Exception:
+        logger.error("health_history_insert_failed", extra={"rows": len(rows)}, exc_info=True)
 
 
 def get_health_history(user_id: str, start_date: str, end_date: str) -> list[dict]:
@@ -59,8 +60,7 @@ def get_health_history(user_id: str, start_date: str, end_date: str) -> list[dic
 
     cached = get_cached(user_id, start_date, end_date, "health_data")
     if cached is not None:
-        if "--debug" in sys.argv:
-            print(f"[cache hit] health {start_date} to {end_date}", file=sys.stderr)
+        logger.debug("health_cache_hit", extra={"start_date": start_date, "end_date": end_date})
         return cached
 
     client = get_supabase_client()
@@ -77,6 +77,6 @@ def get_health_history(user_id: str, start_date: str, end_date: str) -> list[dic
         data = response.data
         set_cached(user_id, start_date, end_date, "health_data", data)
         return data
-    except Exception as e:
-        print(f"Error querying health history: {e}")
+    except Exception:
+        logger.error("health_history_query_failed", extra={"start_date": start_date, "end_date": end_date}, exc_info=True)
         return []

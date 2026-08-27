@@ -9,6 +9,9 @@ import time
 from db.redis import get_redis
 from models.planner import History
 from services.coach import orchestrate
+from services.logging_config import get_logger, init_log_context
+
+logger = get_logger(__name__)
 
 SESSION_TTL = 86400  # chat history
 STREAM_TTL = 900  # stream stays replayable for 15 min after last write
@@ -90,6 +93,10 @@ def run_chat_job(
 ) -> None:
     r = get_redis()
     key = _stream_key(user_id, session_id)
+    # Background task: runs outside the request, so it needs its own log scope.
+    init_log_context(user_id=user_id, session_id=session_id, job="chat")
+    started = time.monotonic()
+    logger.info("chat_job_start", extra={"query_chars": len(user_query)})
     try:
         r.delete(_cancel_key(user_id, session_id))  # stale flag from a previous answer
         r.delete(key)  # one answer per stream — fresh replay from id 0
@@ -122,11 +129,19 @@ def run_chat_job(
                 _xadd(r, key, "plan_updated")
             elif event_type == "theme_updated":
                 _xadd(r, key, "theme_updated", data or "")
+        logger.info("chat_job_done", extra={"duration_ms": round((time.monotonic() - started) * 1000)})
     except Exception as e:
+        # The user sees a generic error in the UI; without this line the cause
+        # left no trace anywhere on the server.
+        logger.error(
+            "chat_job_failed",
+            extra={"duration_ms": round((time.monotonic() - started) * 1000)},
+            exc_info=True,
+        )
         try:
             _xadd(r, key, "error", str(e))
         except Exception:
-            pass
+            logger.error("chat_job_error_publish_failed", exc_info=True)
     finally:
         _release_chat_lock(user_id, session_id)
         r.delete(_cancel_key(user_id, session_id))
@@ -149,6 +164,11 @@ def read_chat_stream(user_id: str, session_id: str, after_id: str = "0"):
         if not resp:
             budget = SILENCE_AFTER_CHUNK if last_type == "chunk" else SILENCE_AFTER_STATUS
             if time.time() - last_event_at > budget:
+                # Orphan guard fired: the job died without writing a terminal event.
+                logger.warning(
+                    "chat_stream_orphaned",
+                    extra={"user_id": user_id, "session_id": session_id, "last_type": last_type, "budget_s": budget},
+                )
                 yield ("", "error", "The response was interrupted, please try again.")
                 return
             continue

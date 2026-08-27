@@ -7,14 +7,17 @@ from db import client
 from models.planner import History
 from services.coach import orchestrate
 from services.end import detect_end
+from services.logging_config import set_log_context, setup_logging
 
 load_dotenv()
+setup_logging()
 
 USER_ID = os.getenv("USER_ID")
 _hist = History()
 
 
 def main():
+    set_log_context(user_id=USER_ID)
     while True:
         user_input = input("You: ")
         if user_input.lower().strip() in ["exit", "quit", "q", "bye", ""]:

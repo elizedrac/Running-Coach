@@ -1,7 +1,8 @@
-import sys
-
 from services.llm import call_llm
+from services.logging_config import get_logger
 from services.prompts import COMPRESSION
+
+logger = get_logger(__name__)
 
 
 def compress_history(history: str) -> str:
@@ -17,7 +18,5 @@ def compress_history(history: str) -> str:
 
     if response:
         return response
-    else:
-        if "--debug" in sys.argv:
-            print("[memory] compression returned empty, returning uncompressed history", file=sys.stderr)
-        return history
+    logger.warning("memory_compression_empty", extra={"history_chars": len(history)})
+    return history

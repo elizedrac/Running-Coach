@@ -1653,14 +1653,16 @@ def test_auth_invalid_token_raises_401(mock_client):
         assert e.status_code == 401
 
 
-# ── update_plan_day CROSS/STRENGTH nulls miles/pace ───────────────────────────
+# ── update_plan_day REST/STRENGTH nulls miles/pace, CROSS keeps them ──────────
 
 
 @patch("db.plan.get_plan_intervals", return_value=[])
 @patch("db.plan.get_supabase_client")
 @patch("db.plan.get_plan_days")
 @patch("db.plan.get_day_id", return_value="day-uuid")
-def test_update_plan_day_nulls_pace_and_miles_for_cross(mock_day_id, mock_get_days, mock_client, mock_intervals):
+def test_update_plan_day_preserves_miles_for_cross(mock_day_id, mock_get_days, mock_client, mock_intervals):
+    # A CROSS day can carry a logged run's numbers — reconciliation sets them
+    # from the actual activity, so the write path must not discard them.
     mock_get_days.return_value = [{"workout_type": "EASY", "target_miles": 5.0, "target_pace": "9:30/mi"}]
     chain = mock_client.return_value
     chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
@@ -1677,8 +1679,8 @@ def test_update_plan_day_nulls_pace_and_miles_for_cross(mock_day_id, mock_get_da
         ],
     )
     update_call = chain.table.return_value.update.call_args[0][0]
-    assert update_call["target_miles"] is None
-    assert update_call["target_pace"] is None
+    assert update_call["target_miles"] == 3.0
+    assert update_call["target_pace"] == "8:00/mi"
 
 
 @patch("db.plan.get_plan_intervals", return_value=[])
