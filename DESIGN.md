@@ -113,7 +113,6 @@ runcoach/
 ├── db/
 │   ├── client.py                  # create_client() — imported everywhere
 │   ├── redis.py                   # get_redis() — connection pool singleton (REDIS_URL; hostname `redis` inside Docker, so host-run tests use fakeredis)
-│   ├── queries.py                 # REGISTRY of callable SQL functions (name → callable + description + args); Haiku selects from this list
 │   ├── activity_history.py        # insert_activities, get_activities (self-caching via services/cache.py)
 │   ├── health_history.py          # insert_health_history, get_health_history (self-caching via services/cache.py)
 │   ├── garmin.py                  # Garmin credential CRUD: get/save/delete credentials + save_garmin_token
@@ -135,8 +134,7 @@ runcoach/
 │   └── course_chunks.json         # RAG store for race course details — embeddings inline, keyed by location + race
 │
 ├── tests/
-│   ├── test_deterministic.py      # All deterministic logic (plan constraints etc)
-│   ├── test_integration.py        # End-to-end consistency + temperature tuning
+│   ├── test_deterministic.py      # All deterministic logic (plan constraints etc) + orchestrate()/update_plan() flow tests with LLM boundaries mocked
 │   └── test_race_info.py          # get_candidates/set_cached, word-overlap + embedding similarity, get_race_info cache hit/miss paths
 │
 └── .github/
@@ -639,7 +637,7 @@ User question
 
 ### Coach Service (single-shot planner, deterministic chaining)
 
-The planner runs **once**, outputs a JSON plan listing every tool to call (with args and order), and Python executes the plan deterministically against the `db/queries.py` REGISTRY. There is no agentic loop and no back-and-forth between the model and the tool layer.
+The planner runs **once**, outputs a JSON plan listing every tool to call (with args and order), and Python executes the plan deterministically against the `services/sql_selector.py` REGISTRY. There is no agentic loop and no back-and-forth between the model and the tool layer.
 
 ```python
 # models/planner.py
