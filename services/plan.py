@@ -1,4 +1,5 @@
 # Training plan creation, update, injury logic.
+import json
 import os
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
@@ -9,11 +10,12 @@ from db.activity_history import get_activities
 from db.plan import get_plan_days, get_plan_id, save_plan, update_plan_day
 from db.preferences import get_preferences
 from db.race import get_race
+from db.redis import get_redis
 from models.planner import UpdatePlanOutput
 from services.course_details import get_course_details
 from services.guardrails import challenger
 from services.llm import call_llm, client
-from services.logging_config import get_logger, set_log_context, setup_logging
+from services.logging_config import get_logger, init_log_context, set_log_context, setup_logging
 from services.pacing import pacing_calculator
 from services.prompts import CREATE_PLAN_SYSTEM, PLAN_CREATOR_TOOLS, build_create_plan_prompt, build_update_plan_system
 from services.sql_selector import execute_query
@@ -26,6 +28,69 @@ PLAN_TOOL_REGISTRY = {
     "query_data": execute_query,
     "get_course_details": get_course_details,
 }
+
+PLAN_STATUS_TTL = 86400  # Status blob stays readable for a day after the job finishes
+PLAN_LOCK_TTL = 2400  # 40 min; must outlive the longest create_plan agent loop
+
+
+def acquire_plan_lock(user_id: str) -> bool:
+    # nx=True → only sets if not already set; returns None if a job holds the lock
+    return bool(get_redis().set(f"plan_job_lock:{user_id}", "1", nx=True, ex=PLAN_LOCK_TTL))
+
+
+def _release_plan_lock(user_id: str) -> None:
+    get_redis().delete(f"plan_job_lock:{user_id}")
+
+
+def get_plan_job_status(user_id: str) -> dict:
+    raw = get_redis().get(f"plan_job_status:{user_id}")
+    return json.loads(raw) if raw else {"status": "idle"}
+
+
+def _set_plan_job_status(user_id: str, status: dict) -> None:
+    get_redis().set(f"plan_job_status:{user_id}", json.dumps(status, default=str), ex=PLAN_STATUS_TTL)
+
+
+def mark_plan_job_running(user_id: str, kind: str) -> None:
+    """Called from the route, before it responds. BackgroundTasks only run after the
+    response is sent, so without this the client's first poll could read the previous
+    run's terminal blob and stop immediately."""
+    _set_plan_job_status(user_id, {"status": "running", "kind": kind})
+
+
+def run_plan_job(user_id: str, kind: str, **kwargs) -> dict:
+    """Background wrapper for create_plan/update_plan. The caller must already hold
+    the lock (acquired in the route so it can 409 before returning)."""
+    # Background task: runs outside the request, so it needs its own log scope.
+    init_log_context(user_id=user_id, job=f"plan_{kind}")
+    logger.info("plan_job_start", extra={"kind": kind})
+    try:
+        result = create_plan(user_id) if kind == "create" else update_plan(user_id, **kwargs)
+        # The whole result dict goes into the status blob: the frontend reads
+        # changes/failed off it to build the same toast the sync POST used to return.
+        _set_plan_job_status(user_id, {**result, "kind": kind})
+        logger.info("plan_job_done", extra={"kind": kind, "status": result.get("status")})
+        return result
+    except Exception as e:
+        logger.error("plan_job_failed", extra={"kind": kind}, exc_info=True)
+        result = {"status": "error", "error": str(e), "kind": kind}
+        _set_plan_job_status(user_id, result)
+        return result
+    finally:
+        _release_plan_lock(user_id)
+
+
+def run_locked_plan_update(user_id: str, **kwargs) -> dict:
+    # Chat/tool path: shares the web route's lock so a coach-driven plan change and
+    # a Sync Plan click can never write the same days concurrently. Already inside
+    # run_chat_job, so it runs inline rather than backgrounding again, and it skips
+    # the status blob because nothing polls for chat-initiated changes.
+    if not acquire_plan_lock(user_id):
+        return {"status": "error", "error": "A plan update is already running; wait for it to finish."}
+    try:
+        return update_plan(user_id, **kwargs)
+    finally:
+        _release_plan_lock(user_id)
 
 
 def create_plan(user_id: str) -> dict:

@@ -1561,16 +1561,34 @@ async function loadPlan(){
 function shiftWeek(dir){_planWeekOffset+=dir;document.getElementById('jump-today-btn').style.display=_planWeekOffset!==0?'flex':'none';loadPlan();}
 function jumpToToday(){_planWeekOffset=0;document.getElementById('jump-today-btn').style.display='none';loadPlan();}
 
+// Plan create/sync run as background jobs, so the POST only starts them.
+// Poll until the job writes a terminal status, then hand the blob to onDone.
+function pollPlanJob(onDone){
+  const poll=setInterval(async()=>{
+    try{
+      const s=await(await apiFetch(`${API}/plan/job/status`)).json();
+      if(s.status==='running')return;
+      clearInterval(poll);
+      onDone(s);
+    }catch(e){clearInterval(poll);onDone({status:'error'});}
+  },3000);
+}
+
 async function runPlanSync(){
   const btn=document.getElementById('plan-sync-btn');btn.textContent='Syncing...';btn.disabled=true;
-  try{const res=await apiFetch(`${API}/plan/sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({today:localToday()})});const data=await res.json();
+  const done=(data)=>{
     const count=data.changes?data.changes.length:0,failed=data.failed?data.failed.length:0,status=data.status||'';
-    if(status.startsWith('fail'))showToast('Sync failed — try again','#8b4a42');
+    if(status==='error'||status.startsWith('fail'))showToast('Sync failed — try again','#8b4a42');
     else if(failed)showToast(`${count} day${count!==1?'s':''} changed, ${failed} couldn't be saved`,'#8b4a42');
     else showToast(count>0?`Plan updated — ${count} day${count!==1?'s':''} changed`:'Plan already up to date','var(--accent-dark)');
-    loadPlan();}
-  catch(e){showToast('Sync failed — try again','#8b4a42');}
-  finally{btn.textContent='Sync Plan';btn.disabled=false;}
+    loadPlan();
+    btn.textContent='Sync Plan';btn.disabled=false;
+  };
+  try{
+    const res=await apiFetch(`${API}/plan/sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({today:localToday()})});
+    if(!res.ok){done({status:'error'});return;}
+    pollPlanJob(done);
+  }catch(e){done({status:'error'});}
 }
 
 function showPlanGenerating(){const list=document.getElementById('plan-list');list.innerHTML=`<div class="plan-generating"><div style="font-size:13px;color:var(--muted);margin-bottom:12px">Building your training plan...</div><div class="plan-progress-track"><div class="plan-progress-fill" id="plan-progress-fill"></div></div><div style="font-size:11px;color:var(--faint);margin-top:8px">Analyzing race goal, fitness data, and course details</div></div>`;let pct=0;_progressInterval=setInterval(()=>{pct=Math.min(pct+(90-pct)*0.015,90);const el=document.getElementById('plan-progress-fill');if(el)el.style.width=pct+'%';},800);}
@@ -1774,7 +1792,12 @@ function toggleDay(el){el.classList.toggle('selected');}
 async function submitPlan(){
   const days=document.getElementById('p-days').value,err=document.getElementById('step2-error');if(!days){err.textContent='Please enter days per week.';err.style.display='block';return;}err.style.display='none';
   const distVal=document.getElementById('p-distance').value;const miles=distVal==='custom'?parseFloat(document.getElementById('p-custom-miles').value):parseFloat(distVal);const prefDays=[...document.querySelectorAll('#p-pref-days .day-chip.selected')].map(d=>d.textContent);const btn=document.querySelector('#plan-step-2 .modal-btn-primary');btn.disabled=true;btn.textContent='Saving...';
-  try{const post=(url,body)=>apiFetch(`${API}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const calls=[post('/race/date',{race_date:document.getElementById('p-race-date').value}),post('/race/distance',{race_distance_miles:miles}),post('/preferences/total-days',{days_per_week:parseInt(days)})];const rn=document.getElementById('p-race-name').value.trim(),gt=document.getElementById('p-goal-time').value.trim(),avg=parseFloat(document.getElementById('p-avg-miles').value),max=parseFloat(document.getElementById('p-max-miles').value);if(rn)calls.push(post('/race/description',{race_description:rn}));if(gt)calls.push(post('/race/time',{goal_time:gt}));if(!isNaN(avg))calls.push(post('/preferences/avg-miles',{avg_miles:avg}));if(!isNaN(max))calls.push(post('/preferences/max-miles',{max_miles:max}));if(prefDays.length)calls.push(post('/preferences/preferred-days',{preferred_days:prefDays}));await Promise.all(calls);closePlanModal();showPlanGenerating();const planRes=await apiFetch(`${API}/plan/create`,{method:'POST'});hidePlanGenerating();const planData=await planRes.json();if(!planRes.ok||planData.status!=='success')throw new Error();showToast('Training plan created!','var(--accent-dark)');_planWeekOffset=0;loadPlan();switchTab('plan',document.querySelector('[onclick*="plan"]').parentElement.children[2]);}
+  try{const post=(url,body)=>apiFetch(`${API}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const calls=[post('/race/date',{race_date:document.getElementById('p-race-date').value}),post('/race/distance',{race_distance_miles:miles}),post('/preferences/total-days',{days_per_week:parseInt(days)})];const rn=document.getElementById('p-race-name').value.trim(),gt=document.getElementById('p-goal-time').value.trim(),avg=parseFloat(document.getElementById('p-avg-miles').value),max=parseFloat(document.getElementById('p-max-miles').value);if(rn)calls.push(post('/race/description',{race_description:rn}));if(gt)calls.push(post('/race/time',{goal_time:gt}));if(!isNaN(avg))calls.push(post('/preferences/avg-miles',{avg_miles:avg}));if(!isNaN(max))calls.push(post('/preferences/max-miles',{max_miles:max}));if(prefDays.length)calls.push(post('/preferences/preferred-days',{preferred_days:prefDays}));await Promise.all(calls);closePlanModal();showPlanGenerating();const planRes=await apiFetch(`${API}/plan/create`,{method:'POST'});if(!planRes.ok)throw new Error();
+    pollPlanJob((s)=>{
+      hidePlanGenerating();
+      if(s.status!=='success'){showToast('Failed to create plan. Please try again.','#8b4a42');btn.disabled=false;btn.textContent='Create Plan';return;}
+      showToast('Training plan created!','var(--accent-dark)');_planWeekOffset=0;loadPlan();switchTab('plan',document.querySelector('[onclick*="plan"]').parentElement.children[2]);
+    });}
   catch(e){hidePlanGenerating();showToast('Failed to create plan. Please try again.','#8b4a42');btn.disabled=false;btn.textContent='Create Plan';}
 }
 document.getElementById('plan-modal').addEventListener('click',e=>{if(e.target===document.getElementById('plan-modal'))closePlanModal();});

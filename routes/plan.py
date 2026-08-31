@@ -1,6 +1,6 @@
 from datetime import date, timedelta
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
 from db.plan import clear_day, delete_plan, get_plan_days, get_plan_id, get_plan_intervals, patch_plan
 from db.preferences import (
@@ -15,8 +15,11 @@ from db.preferences import (
 from db.race import get_race, set_goal_time, set_race_date, set_race_distance, set_race_type
 from models.planner import PatchDayRequest, PreferencesRequest, RaceRequest, SyncPlanRequest
 from services.auth import get_current_user
-from services.plan import create_plan, update_plan
+from services.logging_config import get_logger
+from services.plan import acquire_plan_lock, get_plan_job_status, mark_plan_job_running, run_plan_job
 from services.rate_limit import check_rate_limit
+
+logger = get_logger(__name__)
 
 router = APIRouter()
 
@@ -121,15 +124,18 @@ def notes(body: PreferencesRequest, user_id: str = Depends(get_current_user)):
 
 # plan routers
 @router.post("/plan/create")
-def new_plan(user_id: str = Depends(get_current_user)):
+def new_plan(background_tasks: BackgroundTasks, user_id: str = Depends(get_current_user)):
     check_rate_limit(user_id, limit=5, window=3600)
-    try:
-        return create_plan(user_id)
-    except Exception as e:
-        import traceback
+    if not acquire_plan_lock(user_id):
+        raise HTTPException(status_code=409, detail="A plan job is already running.")
+    mark_plan_job_running(user_id, "create")
+    background_tasks.add_task(run_plan_job, user_id, "create")
+    return {"status": "started", "kind": "create"}
 
-        traceback.print_exc()
-        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/plan/job/status")
+def plan_job_status(user_id: str = Depends(get_current_user)):
+    return get_plan_job_status(user_id)
 
 
 @router.get("/plan/days")
@@ -162,23 +168,33 @@ def remove_plan(user_id: str = Depends(get_current_user)):
 
 
 @router.post("/plan/sync")
-def sync_plan(body: SyncPlanRequest = SyncPlanRequest(), user_id: str = Depends(get_current_user)):
+def sync_plan(
+    background_tasks: BackgroundTasks,
+    body: SyncPlanRequest = SyncPlanRequest(),
+    user_id: str = Depends(get_current_user),
+):
     check_rate_limit(user_id, limit=10, window=3600)
+    today = body.today or date.today().isoformat()
     try:
-        today = body.today or date.today().isoformat()
         today_dt = date.fromisoformat(today)
-        next_sunday = today_dt + timedelta(days=6 - today_dt.weekday())
-        intent = f"Reconcile plan with actual Garmin activities. Today is {today}. Update completed days (start of current week through today) to reflect actual Garmin activities. For future days within this week: only adjust if a completed day's load warrants it (e.g. ease the next hard day if today's run was significantly harder or longer than planned)."
-        return update_plan(
-            user_id,
-            intent,
-            include_activities=True,
-            local_today=today,
-            mode="sync",
-            allowed_end=next_sunday.isoformat(),
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid 'today' date.")
+    next_sunday = today_dt + timedelta(days=6 - today_dt.weekday())
+    intent = f"Reconcile plan with actual Garmin activities. Today is {today}. Update completed days (start of current week through today) to reflect actual Garmin activities. For future days within this week: only adjust if a completed day's load warrants it (e.g. ease the next hard day if today's run was significantly harder or longer than planned)."
+    if not acquire_plan_lock(user_id):
+        raise HTTPException(status_code=409, detail="A plan job is already running.")
+    mark_plan_job_running(user_id, "sync")
+    background_tasks.add_task(
+        run_plan_job,
+        user_id,
+        "sync",
+        intent=intent,
+        include_activities=True,
+        local_today=today,
+        mode="sync",
+        allowed_end=next_sunday.isoformat(),
+    )
+    return {"status": "started", "kind": "sync"}
 
 
 @router.patch("/plan/day/{day_id}")

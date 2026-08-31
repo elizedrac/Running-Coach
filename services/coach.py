@@ -18,7 +18,7 @@ from services.guardrails import input_check
 from services.logging_config import get_logger
 from services.memory import compress_history
 from services.pacing import _time_to_mins, pacing_calculator
-from services.plan import update_plan
+from services.plan import run_locked_plan_update
 from services.planner import planner
 from services.race_info import get_race_info
 from services.sql_selector import execute_query
@@ -60,7 +60,7 @@ TOOL_REGISTRY = {
     "get_preferences": get_preferences,
     "update_preferences": update_preferences,
     "get_plan": get_plan,
-    "update_plan": update_plan,
+    "update_plan": run_locked_plan_update,
     "get_race": get_race,
     "race_prep_info": lambda user_id, **kwargs: None,
     "update_settings": _update_settings,
