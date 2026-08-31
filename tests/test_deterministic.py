@@ -28,6 +28,7 @@ from models.planner import History, PatchDayRequest
 from routes.ask import _history_key, _load_history, _save_history, get_session
 from services import chat_stream
 from services import garmin as garmin_service
+from services import plan as plan_service
 from services.auth import get_current_user
 from services.cache import clear_user_cache, get_cached, set_cached
 from services.coach import orchestrate
@@ -1913,6 +1914,63 @@ def test_run_locked_sync_busy_when_lock_held(monkeypatch):
     assert "already running" in result["error"]
     assert not garmin_service.acquire_sync_lock("busy-user")  # busy path didn't release the other sync's lock
     garmin_service._release_sync_lock("busy-user")
+
+
+# ── plan background jobs (lock shared between the web route and the chat tool) ─
+
+
+def test_run_locked_plan_update_acquires_and_releases_lock(monkeypatch):
+    result = {"status": "success", "changes": [{"plan_date": "2026-06-01"}], "failed": []}
+    monkeypatch.setattr(plan_service, "update_plan", lambda *a, **k: result)
+    assert plan_service.run_locked_plan_update("chat-user", intent="ease tomorrow") == result
+    assert plan_service.acquire_plan_lock("chat-user")  # lock was released
+    plan_service._release_plan_lock("chat-user")
+
+
+def test_run_locked_plan_update_busy_when_lock_held(monkeypatch):
+    def boom(*a, **k):
+        raise AssertionError("plan update must not run while the lock is held")
+
+    monkeypatch.setattr(plan_service, "update_plan", boom)
+    assert plan_service.acquire_plan_lock("busy-plan-user")  # a Sync Plan click holds the lock
+    result = plan_service.run_locked_plan_update("busy-plan-user", intent="ease tomorrow")
+    assert result["status"] == "error"
+    assert "already running" in result["error"]
+    assert not plan_service.acquire_plan_lock("busy-plan-user")  # busy path didn't release the other job's lock
+    plan_service._release_plan_lock("busy-plan-user")
+
+
+def test_run_plan_job_publishes_whole_result_for_the_toast(monkeypatch):
+    # The frontend builds "N days changed, M couldn't be saved" from the status
+    # blob, so changes/failed must survive the trip through Redis.
+    result = {"status": "success", "changes": [{"plan_date": "2026-06-01"}, {"plan_date": "2026-06-02"}], "failed": []}
+    monkeypatch.setattr(plan_service, "update_plan", lambda *a, **k: result)
+    assert plan_service.acquire_plan_lock("job-user")
+    plan_service.run_plan_job("job-user", "sync", intent="reconcile")
+    status = plan_service.get_plan_job_status("job-user")
+    assert status["status"] == "success"
+    assert len(status["changes"]) == 2
+    assert status["failed"] == []
+    assert plan_service.acquire_plan_lock("job-user")  # lock released so the next sync can start
+    plan_service._release_plan_lock("job-user")
+
+
+def test_run_plan_job_publishes_error_and_releases_lock(monkeypatch):
+    def boom(*a, **k):
+        raise RuntimeError("claude timed out")
+
+    monkeypatch.setattr(plan_service, "update_plan", boom)
+    assert plan_service.acquire_plan_lock("fail-user")
+    result = plan_service.run_plan_job("fail-user", "sync", intent="reconcile")
+    assert result["status"] == "error"
+    # A crashed job must still publish, or the browser polls "running" forever.
+    assert plan_service.get_plan_job_status("fail-user")["status"] == "error"
+    assert plan_service.acquire_plan_lock("fail-user")  # released despite the exception
+    plan_service._release_plan_lock("fail-user")
+
+
+def test_plan_job_status_idle_when_never_run():
+    assert plan_service.get_plan_job_status("nobody")["status"] == "idle"
 
 
 def test_get_session_returns_recent_turns():

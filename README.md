@@ -86,6 +86,8 @@ Tests do NOT need Redis, they run against fakeredis.
 
 Chat answers are generated in a background task and streamed through a Redis Stream, not tied to the HTTP request, so a page reload reattaches to an in-flight answer instead of killing it. `POST /ask` starts the job; `GET /ask/stream/{session_id}` follows it; `POST /ask/stop/{session_id}` cancels. A garmin sync inside a chat turn emits per-day progress into the stream, which both shows "day X of Y" and keeps the connection from tripping the orphan guard during a long sync. Chat-triggered syncs share the same Redis lock, status key, and cancel flag as the sync button (`POST /garmin-sync`), so only one sync can run per user at a time and a chat sync can be cancelled from either the chat Stop button or the sync popover's Cancel.
 
+Plan creation and plan sync follow the same shape, minus the streaming: `POST /plan/create` and `POST /plan/sync` acquire a Redis lock, start a background job, and return `{"status": "started"}` immediately, and the frontend polls `GET /plan/job/status` until the job publishes a terminal blob. Neither has token output to stream, so they use status polling rather than a Redis Stream. A second concurrent job gets a 409. The coach's `update_plan` tool shares that lock too (`run_locked_plan_update`), so a Sync Plan click and a chat-driven plan change can never write the same days at once. Chat-initiated updates run inline, since the chat turn is already a background job.
+
 ## Docker
 
 **Build:**

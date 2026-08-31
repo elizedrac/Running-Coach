@@ -76,7 +76,7 @@ runcoach/
 ├── routes/
 │   ├── ask.py                     # POST /ask (starts background generation) + GET /ask/stream/{session_id} (SSE, resumable) + POST /ask/stop + GET/DELETE /session/{session_id}
 │   ├── activities.py              # GET /health/recent, /health/v02, /health/body-battery, /activities/recent, /weather; POST /garmin-sync (starts background job) + GET /garmin-sync/status + POST /garmin-sync/cancel
-│   ├── plan.py                    # Plan CRUD: GET /plan/days, GET /plan/intervals/{day_id}, POST /plan/create, POST /plan/sync, DELETE /plan/delete, PATCH /plan/day/{day_id}, DELETE /plan/day/{day_id}
+│   ├── plan.py                    # Plan CRUD: GET /plan/days, GET /plan/intervals/{day_id}, POST /plan/create + POST /plan/sync (both start background jobs) + GET /plan/job/status, DELETE /plan/delete, PATCH /plan/day/{day_id}, DELETE /plan/day/{day_id}
 │   ├── auth.py                    # POST /auth/login — Supabase Auth sign-in, returns JWT access token
 │   └── user.py                    # GET /user/info, POST /user/info/name, /user/info/theme, /user/info/location — profile read/write, scoped via get_current_user
 │
@@ -485,6 +485,8 @@ Question arrives
 
 ### 2. Plan Creation ✓
 - Triggered via `POST /plan/create`; user clicks "Create Plan" button in UI
+- **Runs as a background job** (`run_plan_job` in `services/plan.py`): the route acquires a per-user Redis lock (40 min TTL; 409 if held), publishes `{"status": "running"}` synchronously, schedules the job via FastAPI `BackgroundTasks`, and returns `{"status": "started"}`. The agentic loop below can run for minutes and would otherwise die on nginx/browser timeouts. The status is published before returning because `BackgroundTasks` only run after the response is sent, so the client's first poll would otherwise read the previous run's terminal blob
+- Job publishes the full result dict to Redis (24h TTL); frontend polls `GET /plan/job/status` every 3s. No cancel endpoint: the loop is blocked inside a single Claude call most of the time, so cancellation would not be responsive
 - Uses **native Anthropic tool_use API** with Claude Opus 4-7 in an agentic loop (up to 10 iterations) — unlike the rest of the system which uses the JSON plan approach
 - Tools available to the plan creator: `pacing_calculator`, `query_data`, `get_course_details`, `save_training_plan`
 - Plan creator calls tools to gather context (pacing zones, recent training load, course terrain), then calls `save_training_plan` as final action
@@ -505,6 +507,8 @@ Question arrives
 
 ### 5. Update Plan ✓
 - `POST /plan/sync` for activity reconciliation; triggered by chat intent otherwise via `update_plan` tool
+- **Both paths share one Redis lock**, so a Sync Plan click and a chat-driven plan change can never write the same days concurrently. The web path backgrounds the work (`run_plan_job`, same shape as Plan Creation above); the chat path goes through `run_locked_plan_update`, which takes the lock but runs inline, since the chat turn is already a background job, and returns `{"status": "error", "error": "A plan update is already running..."}` for the coach to relay when the lock is held
+- The chat path deliberately skips the status blob: nothing polls for chat-initiated changes, and writing it would confuse the frontend poller
 - `UPDATE_PLAN_SYSTEM` prompt handles all cases: illness (mild/moderate/severe), injury, skipping, reconciliation with actual activities
 - **Scope**: reads a fixed ±7/+8 day window; the *writable* range depends on mode. Chat: today−7 → today+8. Sync: this week's Monday → the coming Sunday, with one day of grace so a Monday sync can still reconcile Sunday's run. Weekly refresh: this week's Monday → the coming Sunday, no grace. Changes outside the writable range are dropped into `out_of_range`; the coach directs the user to click the day or regenerate the plan. The floor is passed into `build_update_plan_system(earliest=...)` so the prompt and the filter always agree
 - `include_activities=true` fetches Garmin activities for the same window and passes them to the LLM for reconciliation
