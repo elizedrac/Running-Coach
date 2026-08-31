@@ -1485,6 +1485,8 @@ async function cancelSync(){
 
 // ── Training Plan ─────────────────────────────────────────────
 async function loadPlan(){
+  // A create is in flight; its progress bar owns #plan-list until the job lands.
+  if(_progressInterval)return;
   const list=document.getElementById('plan-list');
   const monday=getWeekMonday(_planWeekOffset),sunday=new Date(monday);sunday.setDate(sunday.getDate()+6);
   const fmt=d=>d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
@@ -1498,6 +1500,7 @@ async function loadPlan(){
       apiFetch(`${API}/activities/recent?start_date=${isoFromDate(monday)}&end_date=${isoFromDate(sunday)}`)
     ]);
     const days=await daysRes.json();const acts=await actsRes.json().catch(()=>[]);
+    if(_progressInterval)return;  // a create began while these were in flight
     _weekActivities={};(acts||[]).forEach(a=>{const date=a.calendar_date.split('T')[0];if(!_weekActivities[date])_weekActivities[date]=[];_weekActivities[date].push(a);});
     _effectiveMiles={};
     days.forEach(d=>{if(!RUNNING_TYPES.has(d.workout_type))return;let miles=(_weekActivities[d.plan_date]||[]).reduce((s,a)=>s+(a.miles||0),0);_effectiveMiles[d.plan_date]=miles;});
@@ -1555,7 +1558,7 @@ async function loadPlan(){
         <div class="plan-status">${chip}</div>
       </div>`;
     }).join('');
-  }catch(e){list.innerHTML=`<div class="plan-placeholder">Could not load plan.</div>`;}
+  }catch(e){if(_progressInterval)return;list.innerHTML=`<div class="plan-placeholder">Could not load plan.</div>`;}
 }
 
 function shiftWeek(dir){_planWeekOffset+=dir;document.getElementById('jump-today-btn').style.display=_planWeekOffset!==0?'flex':'none';loadPlan();}
@@ -1574,21 +1577,32 @@ function pollPlanJob(onDone){
   },3000);
 }
 
+// Terminal handlers sit at top level so the Init reattach can reuse them. pollPlanJob
+// is otherwise only reachable from a click, which is what strands the UI on reload.
+function planSyncDone(data){
+  const btn=document.getElementById('plan-sync-btn');
+  const count=data.changes?data.changes.length:0,failed=data.failed?data.failed.length:0,status=data.status||'';
+  if(status==='error'||status.startsWith('fail'))showToast('Sync failed — try again','#8b4a42');
+  else if(failed)showToast(`${count} day${count!==1?'s':''} changed, ${failed} couldn't be saved`,'#8b4a42');
+  else showToast(count>0?`Plan updated — ${count} day${count!==1?'s':''} changed`:'Plan already up to date','var(--accent-dark)');
+  loadPlan();
+  if(btn){btn.textContent='Sync Plan';btn.disabled=false;}
+}
+
+function planCreateDone(s){
+  hidePlanGenerating();
+  const btn=document.querySelector('#plan-step-2 .modal-btn-primary');
+  if(s.status!=='success'){showToast('Failed to create plan. Please try again.','#8b4a42');if(btn){btn.disabled=false;btn.textContent='Create Plan';}return;}
+  showToast('Training plan created!','var(--accent-dark)');_planWeekOffset=0;loadPlan();switchTab('plan',document.querySelector('[onclick*="plan"]').parentElement.children[2]);
+}
+
 async function runPlanSync(){
   const btn=document.getElementById('plan-sync-btn');btn.textContent='Syncing...';btn.disabled=true;
-  const done=(data)=>{
-    const count=data.changes?data.changes.length:0,failed=data.failed?data.failed.length:0,status=data.status||'';
-    if(status==='error'||status.startsWith('fail'))showToast('Sync failed — try again','#8b4a42');
-    else if(failed)showToast(`${count} day${count!==1?'s':''} changed, ${failed} couldn't be saved`,'#8b4a42');
-    else showToast(count>0?`Plan updated — ${count} day${count!==1?'s':''} changed`:'Plan already up to date','var(--accent-dark)');
-    loadPlan();
-    btn.textContent='Sync Plan';btn.disabled=false;
-  };
   try{
     const res=await apiFetch(`${API}/plan/sync`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({today:localToday()})});
-    if(!res.ok){done({status:'error'});return;}
-    pollPlanJob(done);
-  }catch(e){done({status:'error'});}
+    if(!res.ok){planSyncDone({status:'error'});return;}
+    pollPlanJob(planSyncDone);
+  }catch(e){planSyncDone({status:'error'});}
 }
 
 function showPlanGenerating(){const list=document.getElementById('plan-list');list.innerHTML=`<div class="plan-generating"><div style="font-size:13px;color:var(--muted);margin-bottom:12px">Building your training plan...</div><div class="plan-progress-track"><div class="plan-progress-fill" id="plan-progress-fill"></div></div><div style="font-size:11px;color:var(--faint);margin-top:8px">Analyzing race goal, fitness data, and course details</div></div>`;let pct=0;_progressInterval=setInterval(()=>{pct=Math.min(pct+(90-pct)*0.015,90);const el=document.getElementById('plan-progress-fill');if(el)el.style.width=pct+'%';},800);}
@@ -1793,11 +1807,7 @@ async function submitPlan(){
   const days=document.getElementById('p-days').value,err=document.getElementById('step2-error');if(!days){err.textContent='Please enter days per week.';err.style.display='block';return;}err.style.display='none';
   const distVal=document.getElementById('p-distance').value;const miles=distVal==='custom'?parseFloat(document.getElementById('p-custom-miles').value):parseFloat(distVal);const prefDays=[...document.querySelectorAll('#p-pref-days .day-chip.selected')].map(d=>d.textContent);const btn=document.querySelector('#plan-step-2 .modal-btn-primary');btn.disabled=true;btn.textContent='Saving...';
   try{const post=(url,body)=>apiFetch(`${API}${url}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});const calls=[post('/race/date',{race_date:document.getElementById('p-race-date').value}),post('/race/distance',{race_distance_miles:miles}),post('/preferences/total-days',{days_per_week:parseInt(days)})];const rn=document.getElementById('p-race-name').value.trim(),gt=document.getElementById('p-goal-time').value.trim(),avg=parseFloat(document.getElementById('p-avg-miles').value),max=parseFloat(document.getElementById('p-max-miles').value);if(rn)calls.push(post('/race/description',{race_description:rn}));if(gt)calls.push(post('/race/time',{goal_time:gt}));if(!isNaN(avg))calls.push(post('/preferences/avg-miles',{avg_miles:avg}));if(!isNaN(max))calls.push(post('/preferences/max-miles',{max_miles:max}));if(prefDays.length)calls.push(post('/preferences/preferred-days',{preferred_days:prefDays}));await Promise.all(calls);closePlanModal();showPlanGenerating();const planRes=await apiFetch(`${API}/plan/create`,{method:'POST'});if(!planRes.ok)throw new Error();
-    pollPlanJob((s)=>{
-      hidePlanGenerating();
-      if(s.status!=='success'){showToast('Failed to create plan. Please try again.','#8b4a42');btn.disabled=false;btn.textContent='Create Plan';return;}
-      showToast('Training plan created!','var(--accent-dark)');_planWeekOffset=0;loadPlan();switchTab('plan',document.querySelector('[onclick*="plan"]').parentElement.children[2]);
-    });}
+    pollPlanJob(planCreateDone);}
   catch(e){hidePlanGenerating();showToast('Failed to create plan. Please try again.','#8b4a42');btn.disabled=false;btn.textContent='Create Plan';}
 }
 document.getElementById('plan-modal').addEventListener('click',e=>{if(e.target===document.getElementById('plan-modal'))closePlanModal();});
@@ -2039,6 +2049,15 @@ function toggleSidebar(){
 // ── Init ──────────────────────────────────────────────────────
 loadActivity();loadHealthChart();loadMileageChart();loadMetricBadges();loadPlan();loadUserInfo();
 (async()=>{try{const s=await(await apiFetch(`${API}/garmin-sync/status`)).json();if(s.status==='running')pollSyncStatus();}catch(e){}})();
+// A plan job outlives the page: the POST only starts it, so a reload mid-job left
+// no progress bar and fired no toast even though the job finished and saved.
+// Terminal blobs live for PLAN_STATUS_TTL, so only "running" is worth reattaching to.
+(async()=>{try{
+  const s=await(await apiFetch(`${API}/plan/job/status`)).json();
+  if(s.status!=='running')return;
+  if(s.kind==='create'){showPlanGenerating();pollPlanJob(planCreateDone);}
+  else{const btn=document.getElementById('plan-sync-btn');if(btn){btn.textContent='Syncing...';btn.disabled=true;}pollPlanJob(planSyncDone);}
+}catch(e){}})();
 // Chat area stays blank until we know what belongs there — restored turns, an
 // in-flight answer, or (only for a truly fresh session) the suggested questions
 (async()=>{
