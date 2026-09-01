@@ -1629,7 +1629,12 @@ async function refreshUndoButtons(){
 async function _planRestore(path,btn,label){
   const el=document.getElementById(btn);el.disabled=true;
   try{
-    const r=await(await apiFetch(`${API}${path}`,{method:'POST'})).json();
+    // apiFetch does not throw on 5xx, and an error body carries `detail`, not `status`,
+    // so without this check a failed undo fell through to the success branch below and
+    // told the user it worked.
+    const res=await apiFetch(`${API}${path}`,{method:'POST'});
+    if(!res||!res.ok){showToast('Could not '+label+' — try again','#8b4a42');return;}
+    const r=await res.json();
     if(r.status==='nothing_to_undo'){showToast('Nothing to '+label,'#8b4a42');}
     else if(r.status==='skipped'){showToast('No training plan to '+label,'#8b4a42');}
     else if(r.status==='error'){showToast(r.error||'Could not '+label,'#8b4a42');}

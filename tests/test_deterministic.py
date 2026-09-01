@@ -2364,6 +2364,20 @@ def test_undo_releases_the_lock():
     assert plan_service.acquire_plan_lock("u1") is True
 
 
+def test_undo_blocked_by_a_running_job_leaves_the_stack_intact():
+    """The lock is taken before the pop, so a restore refused mid-sync must not consume
+    an undo level — the user should be able to press Undo again once the sync lands."""
+    plan_service.record_plan_undo("u1", [{"plan_date": "2026-09-01", "absent": True}])
+    plan_service.acquire_plan_lock("u1")  # stand in for a sync in flight
+
+    with patch("services.plan.get_plan_id", return_value="plan-uuid"):
+        result = plan_service.undo_plan("u1")
+
+    assert result["status"] == "error"
+    assert "already running" in result["error"]
+    assert plan_service.get_undo_depths("u1")["undo"] == 1
+
+
 def test_undo_with_an_empty_stack_is_not_an_error():
     with patch("services.plan.get_plan_id", return_value="plan-uuid"):
         assert plan_service.undo_plan("u1")["status"] == "nothing_to_undo"
@@ -2480,6 +2494,50 @@ def test_a_redis_outage_does_not_block_the_edit():
         patch("services.plan.get_day_date", side_effect=ConnectionError("redis down")),
     ):
         plan_service.record_day_undo("u1", "day-uuid")  # must not raise
+
+
+def test_a_db_error_mid_restore_puts_the_entry_back():
+    """The entry is popped before the DB work starts. Without a rollback a Supabase blip
+    loses that undo level outright and 500s the route, so the user cannot even retry."""
+    plan_service.record_plan_undo("u1", [{"plan_date": "2026-09-01", "absent": True}])
+
+    with (
+        patch("services.plan.get_plan_id", return_value="plan-uuid"),
+        patch("services.plan.snapshot_days", side_effect=Exception("supabase down")),
+    ):
+        result = plan_service.undo_plan("u1")
+
+    assert result["status"] == "fail"
+    assert plan_service.get_undo_depths("u1")["undo"] == 1  # still there to retry
+    assert plan_service.acquire_plan_lock("u1") is True  # and the lock was released
+
+
+def test_undo_depths_survive_a_redis_outage():
+    """The buttons should grey out, not 500 on every plan change. undo_snapshot_failed
+    already reports that Redis is down."""
+    with patch("services.plan.get_redis", side_effect=ConnectionError("redis down")):
+        assert plan_service.get_undo_depths("u1") == {"undo": 0, "redo": 0}
+
+
+def test_a_rest_day_is_compared_against_what_would_actually_be_written():
+    """update_plan_day nulls pace and mileage for REST and STRENGTH before writing, so
+    comparing the raw change called an identical write a change and burned an undo
+    level on every repeated sync over a rest day."""
+    from services.plan import _drop_unchanged
+
+    before = [
+        {
+            "plan_date": "2026-09-05",
+            "absent": False,
+            "day": {"workout_type": "REST", "target_miles": None, "target_pace": None},
+            "intervals": [],
+        }
+    ]
+    change = {"plan_date": "2026-09-05", "workout_type": "REST", "target_miles": 5.0, "target_pace": "8:52"}
+
+    keep, unchanged = _drop_unchanged([change], before)
+
+    assert keep == [] and unchanged == ["2026-09-05"]
 
 
 def test_a_manual_day_edit_also_snapshots_and_clears_redo():

@@ -481,6 +481,16 @@ Question arrives
 - `POST /garmin-sync/cancel` sets a Redis flag checked between days; cancelled syncs keep all days already fetched (upserts). Cache cleared per user via `clear_user_cache` after success/cancel
 - Cron path (`python services/garmin.py`) calls `garmin_sync()` directly — blocking, no Redis involvement
 
+### Day routes are ownership-checked
+
+- Three routes address a plan day by raw uuid: `GET /plan/intervals/{day_id}`, `PATCH /plan/day/{day_id}`, `DELETE /plan/day/{day_id}`. None of the underlying DB helpers filter by user — `get_plan_intervals` queries on `day_id` alone — so authentication alone let any logged-in caller read, edit or clear another athlete's day given its id.
+- `_owned_day(user_id, day_id)` in `routes/plan.py` resolves the caller's plan and calls `day_belongs_to(plan_id, day_id)`, which is `select id from plan_days where id = ... and plan_id = ...`. The chain is `user_id → current_plan.id → plan_days.plan_id → plan_intervals.day_id`.
+- Returns **404, not 403**: a caller who does not own the day should not learn it exists.
+- `day_belongs_to` **fails closed** — a DB error returns `False` rather than letting the write through.
+- It returns the `plan_id`, which `record_day_undo(..., plan_id=...)` reuses so the undo snapshot does not repeat the lookup.
+- Called **outside** each route's `try`, so its 404 is not caught and reworded as a 500.
+- The frontend only ever sends ids from the user's own plan, but that is a convention the client follows, not something the server can assume.
+
 ### Plan writes are idempotent
 
 - **Changes matching the current row are dropped before writing** (`_drop_unchanged` in `services/plan.py`). A repeated sync re-emits the same values for an already-reconciled day, and an UPDATE with identical values still succeeds, so every sync counted as `applied: 1`. Two syncs 16 minutes apart both "changed" a day that was byte-for-byte identical between them.

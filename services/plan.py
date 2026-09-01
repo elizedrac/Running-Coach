@@ -103,8 +103,15 @@ def record_day_undo(user_id: str, day_id: str, plan_id=None) -> None:
 
 
 def get_undo_depths(user_id: str) -> dict:
-    r = get_redis()
-    return {"undo": r.llen(_undo_key(user_id)), "redo": r.llen(_redo_key(user_id))}
+    # Best effort like the write side: a Redis outage should grey the buttons out, not
+    # 500 on every plan change. The undo_snapshot_failed warnings already say Redis is
+    # down, so failing loudly here only adds noise that can mask real errors.
+    try:
+        r = get_redis()
+        return {"undo": r.llen(_undo_key(user_id)), "redo": r.llen(_redo_key(user_id))}
+    except Exception:
+        logger.warning("undo_depths_failed", exc_info=True)
+        return {"undo": 0, "redo": 0}
 
 
 def _step(user_id: str, from_key: str, to_key: str) -> dict:
@@ -120,8 +127,15 @@ def _step(user_id: str, from_key: str, to_key: str) -> dict:
         snapshot = _pop(from_key)
         if snapshot is None:
             return {"status": "nothing_to_undo"}
-        _push(to_key, snapshot_days(plan_id, [e["plan_date"] for e in snapshot]))
-        result = restore_days(plan_id, snapshot)
+        try:
+            _push(to_key, snapshot_days(plan_id, [e["plan_date"] for e in snapshot]))
+            result = restore_days(plan_id, snapshot)
+        except Exception:
+            # The entry is already popped. Without this a DB blip mid-undo loses that
+            # level outright and 500s the route, so the user cannot even retry.
+            logger.error("plan_restore_failed", exc_info=True)
+            _push(from_key, snapshot)
+            return {"status": "fail", "restored": [], "failed": [], **get_undo_depths(user_id)}
         if result["status"] == "fail":
             # Nothing was written, so the stacks must not move either: drop the entry
             # just pushed and put the popped one back, or the user silently loses an
@@ -312,7 +326,14 @@ def _drop_unchanged(changes: list, before: list) -> tuple[list, list]:
             keep.append(c)  # the day does not exist yet, so this creates it
             continue
         day = entry.get("day") or {}
-        fields_match = all(_same(v, day.get(k)) for k, v in c.items() if k not in ("plan_date", "intervals"))
+        # update_plan_day nulls pace and mileage for REST and STRENGTH before writing,
+        # so compare against that, not the raw change. Otherwise a REST day where the
+        # model still sent miles reads as a change and writes an identical row.
+        effective = dict(c)
+        if effective.get("workout_type") in {"REST", "STRENGTH"}:
+            effective["target_pace"] = None
+            effective["target_miles"] = None
+        fields_match = all(_same(v, day.get(k)) for k, v in effective.items() if k not in ("plan_date", "intervals"))
         intervals_match = True
         if c.get("intervals") is not None:
             existing = entry.get("intervals") or []
