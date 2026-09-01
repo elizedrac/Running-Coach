@@ -65,6 +65,8 @@ REDIS_URL=             # redis://redis:6379 in Docker; redis://localhost:6379 fo
 USER_IDS=              # comma-separated; cron jobs + rate-limit exempt users
 GARMIN_EMAIL=          # cron sync fallback credentials
 GARMIN_PASSWORD=
+AXIOM_TOKEN=           # ingest token for the log shipper (app.axiom.co)
+AXIOM_DATASET=         # runcoach on EC2, runcoach-local on your machine
 ```
 
 ## UI Themes
@@ -153,10 +155,21 @@ ssh -i ~/.ssh/run-key.pem ubuntu@18.222.142.90 "cd Running-Coach && git pull && 
 ```
 
 ### View logs
+
+In a browser: [app.axiom.co](https://app.axiom.co), dataset `runcoach` (EC2) or `runcoach-local`.
+**Stream** is a live tail, **Builder** searches back 30 days. Filter on `container_name`
+to isolate the app or Redis.
+
+Over SSH:
 ```bash
 cd Running-Coach
 docker compose logs -f
 ```
+
+Logs are shipped by the `vector` container (see `vector.yaml`), which tails the Docker
+socket and posts batches to Axiom over HTTPS. It redacts obvious credential patterns
+first, but it is a keyword match, not a guarantee: treat anything you log as something
+that leaves the box.
 
 ### Restart app
 ```bash

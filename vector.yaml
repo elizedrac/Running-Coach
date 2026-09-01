@@ -1,0 +1,36 @@
+# Ships every container's stdout/stderr to Axiom, so logs are viewable in a
+# browser and survive a rebuild. Local and prod set different AXIOM_DATASET
+# values so the two don't mix.
+sources:
+  docker:
+    type: docker_logs
+    # Without this Vector ships its own log lines, which produce more log
+    # lines, forever.
+    exclude_containers:
+      - runcoach-logs
+
+transforms:
+  # Logs leave the box here, so strip anything that looks like a credential
+  # before it reaches a third party. Catches "token=abc", "Authorization:
+  # Bearer x", "api_key: y". It will not catch a secret logged on its own with
+  # no keyword next to it.
+  redact:
+    type: remap
+    inputs:
+      - docker
+    source: |
+      if is_string(.message) {
+        .message = replace(
+          string!(.message),
+          r'(?i)\b(authorization|bearer|api[_-]?key|access[_-]?token|token|password|secret)\b["\s:=]+\S+',
+          "[redacted]"
+        )
+      }
+
+sinks:
+  axiom:
+    type: axiom
+    inputs:
+      - redact
+    dataset: ${AXIOM_DATASET}
+    token: ${AXIOM_TOKEN}

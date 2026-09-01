@@ -25,3 +25,21 @@ services:
     depends_on:
       - redis
     logging: *default-logging
+
+  # Tails every container via the Docker socket and ships the lines to Axiom
+  # (app.axiom.co), so logs are searchable in a browser instead of over SSH.
+  # Outbound HTTPS only, no port exposed. See vector.yaml for the config.
+  vector:
+    image: timberio/vector:0.58.0-debian
+    container_name: runcoach-logs
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Vector ignores ${VAR} in its config unless this is set, so without it
+      # the token and dataset in vector.yaml stay literal and Axiom 401s.
+      VECTOR_DANGEROUSLY_ALLOW_ENV_VAR_INTERPOLATION: "true"
+    volumes:
+      # Read-only: Vector can read logs, but cannot start or stop containers.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./vector.yaml:/etc/vector/vector.yaml:ro
+    logging: *default-logging

@@ -1,5 +1,5 @@
 """Structured JSON logging. One line per event on stdout, which Docker captures
-and a log shipper (Grafana Alloy) forwards off-box.
+and a log shipper (Vector, see vector.yaml) forwards off-box to Axiom.
 
 Never log secrets or health data here: no Garmin credentials, no JWTs, no full
 prompt bodies. Log identifiers, counts, and durations instead. Anything that
