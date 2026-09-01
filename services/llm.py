@@ -1,4 +1,5 @@
 # Central call_llm() with retry + caching. All LLM traffic flows through here.
+import json
 import os
 import random
 import time
@@ -127,3 +128,46 @@ def _backoff(attempt: int, error: Exception, model: str = DEFAULT_MODEL) -> None
         },
     )
     time.sleep(wait)
+
+
+def extract_json(text: str) -> dict | None:
+    """Pull the JSON object out of a model reply, or None if there isn't one.
+
+    Scans for balanced top-level {...} blocks and keeps the largest one that parses.
+    Taking first-brace-to-last-brace instead spliced together every object in the
+    reply plus the prose between them: a model that echoes the example from its own
+    prompt before answering ('{"changes": []} if nothing matches, otherwise {...}')
+    produced one unparseable string, and the real payload was thrown away.
+
+    Braces inside strings are skipped, so notes containing { or } stay intact.
+    """
+    best = None
+    depth = start = 0
+    start = -1
+    in_str = esc = False
+    for i, ch in enumerate(text):
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == "{":
+            if depth == 0:
+                start = i
+            depth += 1
+        elif ch == "}" and depth:
+            depth -= 1
+            if depth == 0 and start >= 0:
+                block = text[start : i + 1]
+                try:
+                    parsed = json.loads(block)
+                except ValueError:
+                    continue
+                if isinstance(parsed, dict) and (best is None or len(block) > best[0]):
+                    best = (len(block), parsed)
+    return best[1] if best else None

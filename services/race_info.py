@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 
 from db.search_cache import get_candidates, get_raw_search, set_cached
 from models.planner import RaceDayInfo, RaceInfoPlan, RaceRegistrationInfo
-from services.llm import call_llm
+from services.llm import call_llm, extract_json
 from services.logging_config import get_logger
 from services.prompts import RACE_INFO_SYSTEM
 from services.web_search import web_search
@@ -80,11 +80,8 @@ Original user query: {query}"""
     )
 
     response = response.strip()
-    start = response.find("{")
-    end = response.rfind("}") + 1
-    response = response[start:end]
     try:
-        raw = json.loads(response)
+        raw = extract_json(response) or {}
         # info is a plain (non-discriminated) Union in RaceInfoPlan — model_validate_json would
         # silently match RaceRegistrationInfo first since all its fields are optional, dropping
         # race_day fields. Resolve the right submodel ourselves instead.

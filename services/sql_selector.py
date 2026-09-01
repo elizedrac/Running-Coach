@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from db.activity_history import get_activities
 from db.health_history import get_health_history
 from models.planner import SQLPlan
-from services.llm import call_llm
+from services.llm import call_llm, extract_json
 from services.logging_config import get_logger
 from services.prompts import SQL_SELECTOR_SYSTEM
 from services.trend_analysis import (
@@ -108,10 +108,7 @@ Query descriptions: {REGISTRY}"""
         cache_system=True,
     )
 
-    response = response.strip()
-    start = response.find("{")
-    end = response.rfind("}") + 1
-    return response[start:end]
+    return response.strip()
 
 
 def execute_query(
@@ -122,7 +119,7 @@ def execute_query(
     end_date = end_date or today.isoformat()
 
     raw = select_queries(query_intent)
-    response = SQLPlan.model_validate(json.loads(raw))
+    response = SQLPlan.model_validate(extract_json(raw) or {})
 
     # If trend functions were picked, drop get_health_data (redundant) but keep get_activities (individual rows)
     if any(q not in ("get_activities", "get_health_data") for q in response.queries):

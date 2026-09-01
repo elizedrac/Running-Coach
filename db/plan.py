@@ -175,9 +175,13 @@ def update_plan_day(plan_id: int, changes: list) -> dict:
                 # gets a usable day. Surfaced in interval_failures for the caller to log.
                 interval_result = replace_plan_intervals(day_id, change["intervals"])
                 if interval_result.get("status") != "success":
-                    interval_failures.append(
-                        {"plan_date": change["plan_date"], "error": interval_result.get("error")}
-                    )
+                    interval_failures.append({"plan_date": change["plan_date"], "error": interval_result.get("error")})
+            elif change.get("workout_type") == "INTERVAL" and not get_plan_intervals(day_id):
+                # Skipping the write is right when the day already has a breakdown (a
+                # notes or mileage edit must not wipe it), but after a type change to
+                # INTERVAL there is nothing to preserve — the day saved as an interval
+                # workout with no reps, and used to be reported as a clean success.
+                interval_failures.append({"plan_date": change["plan_date"], "error": "no interval breakdown supplied"})
             elif change.get("workout_type") and change.get("workout_type") != "INTERVAL":
                 # Type changed away from INTERVAL — drop the orphaned reps so switching
                 # back later doesn't resurrect a breakdown for a workout that's gone

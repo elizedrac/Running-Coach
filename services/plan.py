@@ -5,16 +5,17 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
 from dotenv import load_dotenv
+from pydantic import ValidationError
 
 from db.activity_history import get_activities
 from db.plan import get_plan_days, get_plan_id, save_plan, update_plan_day
 from db.preferences import get_preferences
 from db.race import get_race
 from db.redis import get_redis
-from models.planner import UpdatePlanOutput
+from models.planner import PlanChange
 from services.course_details import get_course_details
 from services.guardrails import challenger
-from services.llm import call_llm, client
+from services.llm import call_llm, client, extract_json
 from services.logging_config import get_logger, init_log_context, set_log_context, setup_logging
 from services.pacing import pacing_calculator
 from services.prompts import CREATE_PLAN_SYSTEM, PLAN_CREATOR_TOOLS, build_create_plan_prompt, build_update_plan_system
@@ -229,15 +230,23 @@ def update_plan(
     system_prompt = build_update_plan_system(today.isoformat(), mode=mode, earliest=allowed_start)
     response = call_llm(system_prompt=system_prompt, user_prompt=prompt, max_tokens=8192)
     response = response.strip()
-    start = response.find("{")
-    end = response.rfind("}") + 1
-    if start == -1 or end <= start:
+    raw = extract_json(response)
+    if raw is None:
         logger.error("update_plan_no_json", extra={"mode": mode})
-        return {"status": "fail with error: LLM returned no valid JSON"}
-    response = response[start:end]
+        return {"status": "fail", "error": "model returned no readable JSON"}
     try:
-        parsed = UpdatePlanOutput.model_validate_json(response)
-        all_changes = [c.model_dump() for c in parsed.changes]
+        # Validate one change at a time. Validating the batch meant a single malformed
+        # day (a notes-only edit with no workout_type, a rep missing interval_num)
+        # raised and discarded every other change with it — the exact all-or-nothing
+        # behaviour update_plan_day was written to avoid.
+        all_changes, invalid = [], []
+        for c in raw.get("changes") or []:
+            try:
+                all_changes.append(PlanChange.model_validate(c).model_dump())
+            except ValidationError as e:
+                # Keep the field path, drop pydantic's multi-line dump and doc URLs.
+                reason = "; ".join(f"{'.'.join(str(p) for p in d['loc'])}: {d['msg']}" for d in e.errors())
+                invalid.append({"change": c, "error": reason})
         changes, out_of_range = [], []
         for c in all_changes:
             (changes if allowed_start <= c["plan_date"] <= allowed_end else out_of_range).append(c)
@@ -254,15 +263,30 @@ def update_plan(
                 "out_of_range": [c["plan_date"] for c in out_of_range],
                 "applied": len(db_result.get("applied", [])),
                 "failed": len(db_result.get("failed", [])),
+                "invalid": [i["error"] for i in invalid],
                 "had_activities": bool(activities_block),
             },
         )
-        # Report only what was actually written — never claim success for failed writes
-        result = {
-            "status": db_result.get("status", "fail"),
-            "changes": db_result.get("applied", []),
-            "failed": db_result.get("failed", []),
-        }
+        # Report only what was actually written — never claim success for failed writes.
+        # Rejected-by-validation days are failures the same as rejected-by-DB ones.
+        applied = db_result.get("applied", [])
+        failed = db_result.get("failed", []) + invalid
+        if applied and failed:
+            status = "partial"
+        elif failed:
+            status = "fail"
+        elif applied:
+            status = "success"
+        elif out_of_range:
+            status = "out_of_window"
+        else:
+            # The plan already matched the request. update_plan_day returns "success"
+            # for an empty list, which the coach read as "success but nothing changed"
+            # and reported as a failure.
+            status = "no_changes"
+        result = {"status": status, "changes": applied, "failed": failed}
+        if out_of_range:
+            result["out_of_range"] = [c["plan_date"] for c in out_of_range]
         # Only present when a rep breakdown failed to save — the day itself still
         # changed, so this is a caveat on a success, not a failure. Omitted when
         # empty so the common case reaches the coach exactly as it does today.

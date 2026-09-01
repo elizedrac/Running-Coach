@@ -2,12 +2,14 @@
 import os
 import time
 import uuid
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
+from db.redis import get_redis
 from routes.activities import router as data_router
 from routes.ask import router as ask_router
 from routes.auth import router as auth_router
@@ -18,7 +20,38 @@ from services.logging_config import clear_log_context, get_logger, init_log_cont
 setup_logging()
 logger = get_logger(__name__)
 
-app = FastAPI()
+
+def clear_orphaned_job_locks():
+    """Every job lock is released in a `finally`, which cannot run if the process
+    dies mid-job — a restart or OOM left the key behind for the full 40 min TTL and
+    every plan update, sync or chat turn was refused with nothing actually running.
+    Redis keeps an anonymous volume at /data, so its snapshot brings the stale keys
+    back across a container recreate rather than losing them.
+
+    Background jobs die with the process, so on boot no job can be in flight and any
+    surviving lock is stale by definition. Safe while one app container runs; with
+    two, a restart of one would clear the other's live locks, and the fix then is a
+    heartbeat that re-stamps a short TTL while the job runs.
+    """
+    redis = get_redis()
+    # chatcancel goes too: a stale flag would cancel the next turn on that session
+    # the instant it started, since the session id survives in the browser's storage.
+    # chatstream is deliberately left alone — it is replayable content, not a lock.
+    patterns = ("plan_job_lock:*", "garmin_sync_lock:*", "chatlock:*", "chatcancel:*")
+    cleared = [k for pattern in patterns for k in redis.scan_iter(pattern)]
+    for key in cleared:
+        redis.delete(key)
+    if cleared:
+        logger.warning("cleared_orphaned_locks", extra={"count": len(cleared)})
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    clear_orphaned_job_locks()
+    yield
+
+
+app = FastAPI(lifespan=lifespan)
 
 FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
 os.environ["SERVER_MODE"] = "1"

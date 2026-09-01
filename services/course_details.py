@@ -9,7 +9,7 @@ import voyageai
 from dotenv import load_dotenv
 
 from models.planner import CourseDetailsPlan
-from services.llm import call_llm
+from services.llm import call_llm, extract_json
 from services.logging_config import get_logger
 from services.prompts import COURSE_DETAILS
 from services.web_search import web_search
@@ -137,11 +137,8 @@ def get_course_details(user_id: str, location: str, race: str, query: str):
     )
 
     response = response.strip()
-    start = response.find("{")
-    end = response.rfind("}") + 1
-    response = response[start:end]
     try:
-        response = CourseDetailsPlan.model_validate_json(response)
+        response = CourseDetailsPlan.model_validate(extract_json(response) or {})
         _add_course_chunk(response.location, response.race, response.query, response.details)
         return {"query": response.query, "details": response.details}
     except Exception:

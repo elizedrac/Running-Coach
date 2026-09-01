@@ -24,6 +24,7 @@ from db.plan import (
     update_plan_day,
 )
 from db.preferences import get_preferences, set_notes, update_preferences
+from db.redis import get_redis
 from models.planner import History, PatchDayRequest
 from routes.ask import _history_key, _load_history, _save_history, get_session
 from services import chat_stream
@@ -35,6 +36,7 @@ from services.coach import orchestrate
 from services.course_details import _compute_similarity, find_relevant_chunks
 from services.end import detect_end, is_end_message
 from services.guardrails import input_check
+from services.llm import extract_json
 from services.memory import compress_history
 from services.pacing import (
     _get_pace,
@@ -2237,6 +2239,139 @@ def test_chat_window_still_reaches_back_seven_days():
     assert _writable_window("2026-08-26", "chat") == "2026-08-19"
 
 
+# ── orphaned job locks ────────────────────────────────────────────────────────
+
+
+def test_startup_clears_locks_left_behind_by_a_dead_process():
+    """Locks are released in a `finally`, which never runs if the process is killed
+    mid-job, so a restart used to lock the user out for the full 40 min TTL. Nothing
+    can be running at boot, so any surviving lock is stale."""
+    from main import clear_orphaned_job_locks
+
+    redis = get_redis()
+    redis.set("plan_job_lock:user1", "1")
+    redis.set("garmin_sync_lock:user1", "1")
+    redis.set("chatlock:user1:sess", "1")
+    redis.set("chatcancel:user1:sess", "1")
+
+    clear_orphaned_job_locks()
+
+    assert redis.get("plan_job_lock:user1") is None
+    assert redis.get("garmin_sync_lock:user1") is None
+    assert redis.get("chatlock:user1:sess") is None
+    assert redis.get("chatcancel:user1:sess") is None
+
+
+def test_startup_sweep_leaves_everything_else_alone():
+    """Only the two lock keys go. Sessions, caches and the status blobs the frontend
+    polls must survive a restart."""
+    from main import clear_orphaned_job_locks
+
+    redis = get_redis()
+    redis.set("plan_job_status:user1", '{"status": "running"}')
+    redis.set("session:user1:abc", "history")
+    redis.xadd("chatstream:user1:abc", {"type": "assistant", "data": "half an answer"})
+
+    clear_orphaned_job_locks()
+
+    assert redis.get("plan_job_status:user1") is not None
+    assert redis.get("session:user1:abc") is not None
+    # The stream is replayable content, not a lock — a reload reattaches to it.
+    assert redis.xlen("chatstream:user1:abc") == 1
+
+
+# ── extract_json ──────────────────────────────────────────────────────────────
+
+
+def test_extract_json_skips_an_echoed_example_and_takes_the_real_payload():
+    """Production failure: the model echoed the {"changes": []} example from its own
+    prompt, wrote prose, then gave the real answer. First-brace-to-last-brace spliced
+    all of it into one string ("trailing characters at line 1 column 17") and the
+    edit was discarded."""
+    reply = (
+        '{"changes": []} if no changes are needed, otherwise: '
+        '{"changes": [{"plan_date": "2026-09-01", "workout_type": "INTERVAL"}]}'
+    )
+    assert extract_json(reply)["changes"][0]["plan_date"] == "2026-09-01"
+
+
+def test_extract_json_ignores_braces_inside_strings():
+    """A note like "rest {90s} jog" must not throw off the brace counter."""
+    assert extract_json('{"notes": "rest {90s} jog", "workout_type": "EASY"}')["notes"] == "rest {90s} jog"
+    assert extract_json(r'{"notes": "said \"go\" {x}", "n": 1}')["n"] == 1
+
+
+def test_extract_json_handles_fences_and_gives_up_cleanly():
+    """Markdown fences are common; a reply with no JSON must return None rather than
+    raise, so callers can fall back instead of 500ing."""
+    assert extract_json('```json\n{"changes": [1]}\n```') == {"changes": [1]}
+    assert extract_json("sorry, I cannot do that") is None
+
+
+# ── update_plan result statuses ───────────────────────────────────────────────
+# A no-op used to be indistinguishable from a failure: update_plan_day returns
+# "success" for an empty change list, so "your plan already says that" reached the
+# coach as success-with-no-changes and was reported to the user as a failure.
+
+
+def _update_result(llm_json, local_today="2026-08-31", mode="chat"):
+    """Run update_plan against a canned model response. Everything past the LLM call
+    is stubbed except the validation, window filter, and status logic under test."""
+    with (
+        patch("services.plan.get_plan_id", return_value="plan-uuid"),
+        patch("services.plan.get_plan_days", return_value=[]),
+        patch("services.plan.get_preferences", return_value={}),
+        patch("services.plan.get_race", return_value={}),
+        patch("services.plan.get_activities", return_value=[]),
+        patch("services.plan.build_update_plan_system", return_value="SYSTEM"),
+        patch("services.plan.call_llm", return_value=llm_json),
+        # Echo back whatever survived validation and the window filter.
+        patch(
+            "services.plan.update_plan_day",
+            side_effect=lambda plan_id, changes: {"status": "success", "applied": changes, "failed": []},
+        ),
+    ):
+        return update_plan("user1", "revert tuesday", local_today=local_today, mode=mode)
+
+
+def test_no_changes_is_not_reported_as_a_failure():
+    """Asking to revert a day that is already correct is a no-op, not an error. This
+    is the case that told the user 'something went wrong' while nothing was wrong."""
+    result = _update_result('{"changes": []}')
+    assert result["status"] == "no_changes"
+    assert result["changes"] == []
+    assert result["failed"] == []
+
+
+def test_one_invalid_change_does_not_discard_the_valid_ones():
+    """Validation used to run on the whole batch, so a notes-only edit (no
+    workout_type) raised and threw away every other change in the same payload."""
+    result = _update_result(
+        '{"changes": ['
+        '{"plan_date": "2026-09-01", "workout_type": "EASY", "target_miles": 4},'
+        '{"plan_date": "2026-09-03", "notes": "Birthday!"}'
+        "]}"
+    )
+    assert result["status"] == "partial"
+    assert [c["plan_date"] for c in result["changes"]] == ["2026-09-01"]
+    assert len(result["failed"]) == 1
+
+
+def test_validation_error_names_the_offending_field():
+    """The coach can only explain a rejection if the reason survives the trip back."""
+    result = _update_result('{"changes": [{"plan_date": "2026-09-03", "notes": "Birthday!"}]}')
+    assert result["status"] == "fail"
+    assert "workout_type" in result["failed"][0]["error"]
+
+
+def test_dates_outside_the_window_get_their_own_status():
+    """Out-of-window is a different conversation from a no-op: those days exist and
+    are editable by hand, so the coach needs to name them rather than shrug."""
+    result = _update_result('{"changes": [{"plan_date": "2026-12-25", "workout_type": "EASY"}]}')
+    assert result["status"] == "out_of_window"
+    assert result["out_of_range"] == ["2026-12-25"]
+
+
 # ── update_plan_day interval handling ─────────────────────────────────────────
 
 
@@ -2259,6 +2394,46 @@ def test_update_plan_day_writes_intervals_when_supplied(
     mock_replace.assert_called_once_with("day-uuid", reps)
     assert result["status"] == "success"
     assert result["interval_failures"] == []
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
+@patch("db.plan.get_plan_intervals", return_value=[])
+@patch("db.plan.get_plan_days", return_value=[{"workout_type": "TEMPO"}])
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_interval_day_with_no_reps_on_file_is_reported_not_silently_skipped(
+    mock_day_id, mock_client, mock_get_days, mock_intervals, mock_replace
+):
+    """Converting a day to INTERVAL without supplying reps left it as an interval
+    workout with an empty breakdown and still returned success — five such days
+    exist in the live plan. The day still saves; the missing reps get surfaced."""
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    result = update_plan_day(
+        "plan-uuid", [{"plan_date": "2026-06-01", "workout_type": "INTERVAL", "notes": "6 x 800m"}]
+    )
+    assert result["applied"]  # the day itself is still written
+    assert result["interval_failures"] == [{"plan_date": "2026-06-01", "error": "no interval breakdown supplied"}]
+    mock_replace.assert_not_called()  # must not clear anything
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
+@patch("db.plan.get_plan_intervals", return_value=[{"interval_num": 1, "interval_type": "WORK"}])
+@patch("db.plan.get_plan_days", return_value=[{"workout_type": "INTERVAL"}])
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_editing_an_interval_day_keeps_its_existing_reps(
+    mock_day_id, mock_client, mock_get_days, mock_intervals, mock_replace
+):
+    """The other half of the same branch: editing notes or mileage on a day that
+    already has a breakdown must leave those reps alone and report no failure."""
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = MagicMock()
+    result = update_plan_day(
+        "plan-uuid", [{"plan_date": "2026-06-01", "workout_type": "INTERVAL", "notes": "same session, new note"}]
+    )
+    assert result["interval_failures"] == []
+    mock_replace.assert_not_called()
 
 
 @patch("db.plan.replace_plan_intervals", return_value={"status": "fail", "error": "boom"})
