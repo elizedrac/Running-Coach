@@ -98,7 +98,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 
 /* Panels */
 .panels{flex:1;overflow:hidden;position:relative}
-.panel{display:none;height:100%;overflow-y:auto;padding:20px 20px 40px}
+.panel{display:none;height:100%;overflow-y:auto;padding:20px 20px 88px}
 .panel.active{display:block}
 #p-coach{overflow:hidden;padding:20px 28px 20px}
 
@@ -160,7 +160,13 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 .plan-nav{display:flex;align-items:center;gap:10px;margin-bottom:20px}
 .week-label{font-family:'JetBrains Mono',monospace;font-size:13px;font-weight:700;color:var(--ink)}
 .week-btn{width:32px;height:32px;border-radius:4px;border:1px solid var(--border);background:var(--card);cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--muted);transition:all .15s}
-.week-btn:hover{border-color:var(--accent);color:var(--accent)}
+.week-btn:not(:disabled):hover{border-color:var(--accent);color:var(--accent)}
+button:disabled{cursor:default}
+/* Ghost buttons: undo/redo are secondary to Sync Plan, so no border or fill —
+   two more outlined boxes under a filled one read as clutter. */
+.hist-btn{width:28px;height:28px;padding:0;border:none;background:none;cursor:pointer;display:flex;align-items:center;justify-content:center;color:var(--ink);transition:color .15s}
+.hist-btn:not(:disabled):hover{color:var(--accent)}
+.hist-btn:disabled{color:var(--faint)}
 .plan-spacer{flex:1}
 .plan-table{border-radius:6px;border:1px solid var(--border);overflow:hidden}
 .plan-row{display:flex;align-items:center;padding:14px 20px;border-bottom:1px solid var(--divider);background:var(--card);transition:background .1s}
@@ -233,7 +239,7 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
 [data-theme="dark"] .plan-detail{color:rgba(var(--accent-rgb),.5)}
 [data-theme="dark"] .plan-dist{color:var(--accent)}
 [data-theme="dark"] .week-btn{background:rgba(var(--accent-rgb),.1);border-color:rgba(var(--accent-rgb),.3);color:var(--accent)}
-[data-theme="dark"] .week-btn:hover{background:rgba(var(--accent-rgb),.2);border-color:var(--accent);color:var(--accent)}
+[data-theme="dark"] .week-btn:not(:disabled):hover{background:rgba(var(--accent-rgb),.2);border-color:var(--accent);color:var(--accent)}
 [data-theme="dark"] .week-label{color:var(--ink)}
 [data-theme="dark"] .plan-week-nav .week-label{color:var(--ink)}
 [data-theme="dark"] .btn-accent{background:rgba(var(--accent-rgb),.2);border-color:var(--accent);color:var(--accent)}
@@ -753,12 +759,16 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
           <button class="week-btn" id="jump-today-btn" onclick="jumpToToday()" style="display:none;width:auto;padding:0 10px;font-size:11px;font-family:inherit" data-tooltip="Jump to today">Today</button>
           <div class="plan-spacer"></div>
           <button class="btn" id="month-view-btn" onclick="openMonthModal()" style="display:none" data-tooltip="View full month calendar">View Full Month</button>
-          <button class="btn" id="plan-undo-btn" onclick="runPlanUndo()" style="display:none;opacity:0.4" disabled data-tooltip="Undo the last plan change">Undo</button>
-          <button class="btn" id="plan-redo-btn" onclick="runPlanRedo()" style="display:none;opacity:0.4" disabled data-tooltip="Redo the change you just undid">Redo</button>
           <button class="btn btn-accent" id="plan-sync-btn" onclick="runPlanSync()" style="display:none" data-tooltip="Re-sync plan with recent workouts">Sync Plan</button>
         </div>
+        <!-- Pulled up into .plan-nav's 20px bottom margin so the icons hang just under
+             Sync Plan, with the remaining space left above the table. -->
+        <div id="plan-history-row" style="display:none;justify-content:flex-end;gap:2px;margin:-14px 0 10px;padding-right:2px">
+          <button class="hist-btn" id="plan-undo-btn" onclick="runPlanUndo()" disabled data-tooltip="Undo the last plan change"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></button>
+          <button class="hist-btn" id="plan-redo-btn" onclick="runPlanRedo()" disabled data-tooltip="Redo the change you just undid"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 14 20 9 15 4"/><path d="M4 20v-7a4 4 0 0 1 4-4h12"/></svg></button>
+        </div>
         <div class="plan-table" id="plan-list"></div>
-        <div id="delete-plan-btn" style="display:none;text-align:right;margin-top:20px;padding-right:24px">
+        <div id="delete-plan-btn" style="display:none;text-align:right;margin-top:16px;padding-right:2px">
           <button onclick="confirmDeletePlan()" style="background:none;border:none;cursor:pointer;font-size:12px;color:var(--faint);font-family:'Hanken Grotesk',sans-serif;text-decoration:none">Delete plan</button>
         </div>
       </div>
@@ -1513,11 +1523,11 @@ async function loadPlan(){
     const remaining=nonRunActDates.filter(d=>!claimed.has(d));const unclaimed=nonRunDays.filter(d=>!_nonRunCompleted.has(d.plan_date));remaining.forEach(()=>{if(unclaimed.length)_nonRunCompleted.add(unclaimed.shift().plan_date);});
     if(!days||!days.length){
       hasPlan=_planWeekOffset!==0?hasPlan:false;
-      ['plan-sync-btn','month-view-btn','delete-plan-btn','plan-undo-btn','plan-redo-btn'].forEach(id=>document.getElementById(id).style.display='none');
+      ['plan-sync-btn','month-view-btn','delete-plan-btn','plan-history-row'].forEach(id=>document.getElementById(id).style.display='none');
       list.innerHTML=_planWeekOffset===0?`<div class="plan-placeholder">No training plan yet.<br><button class="create-plan-btn" onclick="openPlanModal()">+ Create Training Plan</button></div>`:`<div class="plan-placeholder">No workouts for this week.</div>`;
       return;
     }
-    if(isCurrentWeek){hasPlan=true;['plan-sync-btn','month-view-btn','delete-plan-btn','plan-undo-btn','plan-redo-btn'].forEach(id=>document.getElementById(id).style.display='');}
+    if(isCurrentWeek){hasPlan=true;['plan-sync-btn','month-view-btn','delete-plan-btn'].forEach(id=>document.getElementById(id).style.display='');document.getElementById('plan-history-row').style.display='flex';}
     _planDays={};const dayMap={};
     days.forEach(d=>{_planDays[d.id]=d;const dow=d.day_of_week||DOW_ORDER[new Date(d.plan_date+'T00:00:00').getDay()===0?6:new Date(d.plan_date+'T00:00:00').getDay()-1];dayMap[dow]=d;});
     // CROSS days have no target_miles (nulled on write) — count any run logged that day on top
@@ -1614,8 +1624,8 @@ async function runPlanSync(){
 // appearing and disappearing — a control that vanishes is harder to find than one that
 // is visibly unavailable, and the header would otherwise reflow on every plan change.
 function _setUndoEnabled(id, enabled){
-  const b=document.getElementById(id);if(!b)return;
-  b.disabled=!enabled;b.style.opacity=enabled?'':'0.4';b.style.cursor=enabled?'':'default';
+  // Only the state — .hist-btn:disabled owns how that looks, so the two cannot drift.
+  const b=document.getElementById(id);if(b)b.disabled=!enabled;
 }
 
 async function refreshUndoButtons(){
