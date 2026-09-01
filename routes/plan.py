@@ -187,8 +187,24 @@ def get_plan_days_route(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+def _owned_day(user_id: str, day_id: str) -> str:
+    """These routes address a plan day by raw uuid, so without this any authenticated
+    user could edit or clear another user's day by supplying its id. Returns the
+    caller's plan_id, which the undo snapshot then reuses.
+
+    404 rather than 403: a caller who does not own the day should not learn it exists.
+    """
+    plan_id = get_plan_id(user_id)
+    if not plan_id or not day_belongs_to(plan_id, day_id):
+        raise HTTPException(status_code=404, detail="Day not found.")
+    return plan_id
+
+
 @router.get("/plan/intervals/{day_id}")
 def get_intervals(day_id: str, user_id: str = Depends(get_current_user)):
+    # Same raw-uuid exposure as the write routes: a read leaks another athlete's
+    # session rather than corrupting it, but it is the same missing check.
+    _owned_day(user_id, day_id)
     try:
         return get_plan_intervals(day_id)
     except Exception as e:
@@ -231,19 +247,6 @@ def sync_plan(
         allowed_end=today,
     )
     return {"status": "started", "kind": "sync"}
-
-
-def _owned_day(user_id: str, day_id: str) -> str:
-    """These routes address a plan day by raw uuid, so without this any authenticated
-    user could edit or clear another user's day by supplying its id. Returns the
-    caller's plan_id, which the undo snapshot then reuses.
-
-    404 rather than 403: a caller who does not own the day should not learn it exists.
-    """
-    plan_id = get_plan_id(user_id)
-    if not plan_id or not day_belongs_to(plan_id, day_id):
-        raise HTTPException(status_code=404, detail="Day not found.")
-    return plan_id
 
 
 @router.patch("/plan/day/{day_id}")
