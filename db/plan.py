@@ -53,8 +53,10 @@ def get_day_id(plan_id, day):
 def get_day_date(day_id: str):
     """Reverse of get_day_id. The manual edit routes address a day by id, but the undo
     snapshot is keyed by date, so one of them has to translate."""
-    client = get_supabase_client()
     try:
+        # Inside the try: get_supabase_client() can raise too, and a guard that only
+        # covers the query is not a guard.
+        client = get_supabase_client()
         response = client.table("plan_days").select("plan_date").eq("id", day_id).execute()
         return response.data[0]["plan_date"] if response.data else None
     except Exception:
@@ -65,8 +67,8 @@ def day_belongs_to(plan_id, day_id: str) -> bool:
     """The day routes are addressed by raw uuid, so this is the only thing standing
     between a caller and another user's plan. Fails closed: a DB error returns False
     rather than letting the write through unchecked."""
-    client = get_supabase_client()
     try:
+        client = get_supabase_client()
         response = client.table("plan_days").select("id").eq("id", day_id).eq("plan_id", plan_id).execute()
         return bool(response.data)
     except Exception:

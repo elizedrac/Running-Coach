@@ -334,7 +334,7 @@ ATHLETE NOTES: The training preferences include a "notes" field with personal pr
 {PLAN_RULES}
 {situational_rules}
 GENERAL RULES:
-- Only output a day you are actually changing. You are given the current plan above: if a day already has the workout type, mileage, pace and notes you were going to write, omit it from changes entirely. Re-sending a day's existing values is not a change, and a reconciliation that finds everything already correct should return {"changes": []}.
+- Only output a day you are actually changing. You are given the current plan above: if a day already has the workout type, mileage, pace and notes you were going to write, omit it from changes entirely. Re-sending a day's existing values is not a change, and a reconciliation that finds everything already correct should return {{"changes": []}}.
 - Respect the user's training preferences (provided in the prompt): don't schedule runs on non-preferred days, don't exceed max_miles per week, respect time_based vs mileage_based.
 - Never add new hard days to compensate for skipped ones.
 - Preserve REST days — do not fill them.

@@ -2256,6 +2256,31 @@ def test_chat_window_still_reaches_back_seven_days():
     assert _writable_window("2026-08-26", "chat")["earliest"] == "2026-08-19"
 
 
+# ── prompt builders ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize("mode", ["chat", "sync", "weekly_refresh"])
+def test_update_plan_prompt_builds_in_every_mode(mode):
+    """These builders return f-strings containing JSON examples, so a single-braced
+    literal is not text — it is a format expression, and it raises at call time rather
+    than import time. One such literal broke every plan sync in production with
+    "Invalid format specifier ' []'". Building each mode is the cheapest guard."""
+    from services.prompts import build_update_plan_system
+
+    prompt = build_update_plan_system("2026-09-01", mode=mode, earliest="2026-08-31", latest="2026-09-01")
+
+    assert prompt
+    # The example must survive as literal text the model can copy, braces intact.
+    assert '{"changes": []}' in prompt
+
+
+def test_planner_prompt_builds():
+    """Same failure mode, same file."""
+    from services.prompts import build_planner_system
+
+    assert build_planner_system(min_date="2020-01-01", local_today="2026-09-01")
+
+
 # ── plan undo / redo ──────────────────────────────────────────────────────────
 
 
@@ -2916,7 +2941,9 @@ def test_update_plan_day_clears_reps_when_leaving_interval(
 
 
 @patch("routes.plan.patch_plan", return_value={"status": "success"})
-def test_patch_day_route_forwards_only_fields_the_client_sent(mock_patch):
+@patch("routes.plan.record_day_undo")
+@patch("routes.plan._owned_day", return_value="plan-uuid")
+def test_patch_day_route_forwards_only_fields_the_client_sent(mock_owned, mock_undo, mock_patch):
     """exclude_unset is what makes clearing possible: an omitted field must not reach
     patch_plan at all, or every save would overwrite untouched columns with null."""
     from routes.plan import patch_day
@@ -2929,7 +2956,9 @@ def test_patch_day_route_forwards_only_fields_the_client_sent(mock_patch):
 
 
 @patch("routes.plan.patch_plan", return_value={"status": "success"})
-def test_patch_day_route_forwards_explicit_nulls(mock_patch):
+@patch("routes.plan.record_day_undo")
+@patch("routes.plan._owned_day", return_value="plan-uuid")
+def test_patch_day_route_forwards_explicit_nulls(mock_owned, mock_undo, mock_patch):
     """A field the client explicitly set to null is a clear request and must survive."""
     from routes.plan import patch_day
 
