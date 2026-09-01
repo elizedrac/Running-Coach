@@ -224,10 +224,13 @@ def update_plan(
             pass
 
     prompt = f"Today is {today.isoformat()}.\nUser intent: {intent}\nTraining preferences: {prefs}\nCurrent plan (±7 days): {plan}{pacing_block}{activities_block}"
-    # Pass the real write floor so the prompt and the out_of_range filter agree —
+    # Pass the real write window so the prompt and the out_of_range filter agree —
     # otherwise the model is told "today only" while the filter accepts more, or asked
-    # for days the filter silently drops.
-    system_prompt = build_update_plan_system(today.isoformat(), mode=mode, earliest=allowed_start)
+    # for days the filter silently drops. The ceiling used to go unstated entirely, so
+    # sync could be handed a week of forward days it was never allowed to write.
+    system_prompt = build_update_plan_system(
+        today.isoformat(), mode=mode, earliest=allowed_start, latest=allowed_end
+    )
     response = call_llm(system_prompt=system_prompt, user_prompt=prompt, max_tokens=8192)
     response = response.strip()
     raw = extract_json(response)

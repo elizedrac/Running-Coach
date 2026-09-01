@@ -270,10 +270,11 @@ SPACING RULES:
 - Place REST before or after hard efforts where possible."""
 
 
-def build_update_plan_system(today: str, mode: str = "chat", earliest: str = None) -> str:
+def build_update_plan_system(today: str, mode: str = "chat", earliest: str = None, latest: str = None) -> str:
     """mode: 'chat' (explicit user request, full flexibility, can touch a named past day),
-    'sync' (Sync Plan button — light-touch, today-only reconciliation, no past edits),
-    or 'weekly_refresh' (cron — light weekly adjustment based on last week, no past edits)."""
+    'sync' (Sync Plan button — reconciliation only: this week's completed days through
+    today, no past weeks and no forward days), or 'weekly_refresh' (cron — light weekly
+    adjustment based on last week, no past edits)."""
     if mode == "chat":
         scope = (
             f"SCOPE: Today is {today}. You can modify any day within 7 days before or after today. The plan data "
@@ -283,12 +284,15 @@ def build_update_plan_system(today: str, mode: str = "chat", earliest: str = Non
         )
     else:
         earliest = earliest or today
+        latest = latest or today
+        window = f"{earliest}" if earliest == latest else f"{earliest} through {latest} inclusive"
         scope = (
-            f"SCOPE: Today is {today}. You may ONLY write changes for {earliest} or a later date — days before "
-            f"{earliest} are READ-ONLY CONTEXT, never editable, no exceptions. Use that earlier data only to inform "
-            f"decisions about the editable days (e.g. recent load, missed workouts) — do NOT include any day before "
-            f"{earliest} in your output changes, and do NOT narrate or review each past day individually. Only mention "
-            "an earlier day if it directly justifies an adjustment to an editable one."
+            f"SCOPE: Today is {today}. You may ONLY write changes for {window} — every day outside that range is "
+            f"READ-ONLY CONTEXT, never editable, no exceptions. That applies to days AFTER {latest} exactly as much "
+            f"as to days before {earliest}. Use the surrounding data only to inform decisions about the editable "
+            "days (e.g. recent load, missed workouts) — do NOT include any day outside the range in your output "
+            "changes, and do NOT narrate or review each past day individually. Only mention a day outside the range "
+            "if it directly justifies an adjustment to an editable one."
         )
 
     situational_rules = (
@@ -317,7 +321,7 @@ REVERTING A DAY: If the user asks to revert, undo, or restore a day, check the d
 
     mode_directive = {
         "chat": "",
-        "sync": "\nLIGHT TOUCH: only adjust forward days if today's completed load clearly warrants it (e.g. ease the next hard day if today was significantly harder or longer than planned). Do not perform a full restructure of the week — make the smallest change that fits. EXCEPTION: any REST day with a logged activity MUST be overridden — this is mandatory and not subject to the light-touch constraint.\n",
+        "sync": "\nLIGHT TOUCH: reconcile what already happened. Record actual activities against the days they fall on and make the smallest change that fits — no restructuring, and no changes to days that have not happened yet. If a completed day's load means a future day should ease, say so in that completed day's notes rather than editing the future day; the user can act on it in chat. EXCEPTION: any REST day with a logged activity MUST be overridden — this is mandatory and not subject to the light-touch constraint.\n",
         "weekly_refresh": "\nWEEKLY ADJUSTMENT: always fix day layout first — runs MUST fall on preferred_days, rest/cross on non-preferred days, no exceptions. Then lightly adjust volume/intensity based on last week's load (ease, maintain, or progress). 'Light adjustment' means volume and pace only — day layout is always corrected regardless.\n",
     }[mode]
 

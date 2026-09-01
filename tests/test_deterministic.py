@@ -2189,7 +2189,7 @@ def test_cache_fails_open_when_redis_down(monkeypatch):
 # raising, so a too-narrow window looks like "the model decided not to change that".
 
 
-def _writable_window(local_today: str, mode: str):
+def _writable_window(local_today: str, mode: str, allowed_end: str = None):
     """Runs update_plan far enough to capture the window it would write with.
     Everything past the LLM call is stubbed — only the date arithmetic is under test."""
     captured = {}
@@ -2208,35 +2208,51 @@ def _writable_window(local_today: str, mode: str):
         patch("services.plan.call_llm", side_effect=fake_call_llm),
         patch("services.plan.build_update_plan_system", return_value="SYSTEM") as mock_build,
     ):
-        update_plan("user1", "reconcile", local_today=local_today, mode=mode)
-    return mock_build.call_args.kwargs["earliest"]
+        update_plan("user1", "reconcile", local_today=local_today, mode=mode, allowed_end=allowed_end)
+    return mock_build.call_args.kwargs
 
 
 def test_sync_window_starts_at_monday_midweek():
     """Mid-week sync must reach back to Monday — today-only silently dropped every
     earlier day of the current week, so reconciliation could not reconcile."""
-    assert _writable_window("2026-08-26", "sync") == "2026-08-24"  # Wed -> Mon
+    assert _writable_window("2026-08-26", "sync")["earliest"] == "2026-08-24"  # Wed -> Mon
 
 
 def test_sync_window_grace_day_on_monday():
     """A Sunday run synced on Monday morning is the one case worth reaching back for."""
-    assert _writable_window("2026-08-24", "sync") == "2026-08-23"  # Mon -> Sun
+    assert _writable_window("2026-08-24", "sync")["earliest"] == "2026-08-23"  # Mon -> Sun
 
 
 def test_sync_window_does_not_reach_last_week_on_sunday():
     """Late in the week the floor stays at this Monday — last week is an immutable
     record of planned vs actual, which weekly_refresh reads to decide load."""
-    assert _writable_window("2026-08-30", "sync") == "2026-08-24"  # Sun -> Mon
+    assert _writable_window("2026-08-30", "sync")["earliest"] == "2026-08-24"  # Sun -> Mon
 
 
 def test_weekly_refresh_window_has_no_grace_day():
     """weekly_refresh adjusts this week only, so it never gets the Sunday grace day."""
-    assert _writable_window("2026-08-24", "weekly_refresh") == "2026-08-24"  # Mon -> Mon
+    assert _writable_window("2026-08-24", "weekly_refresh")["earliest"] == "2026-08-24"  # Mon -> Mon
+
+
+def test_sync_ceiling_is_today_not_the_end_of_the_week():
+    """Sync reconciles what happened; it must not re-plan days that have not happened.
+    The ceiling used to be this week's Sunday, so on a Monday a sync could legally
+    rewrite six days ahead — and did, which is how a future day got changed."""
+    kwargs = _writable_window("2026-08-31", "sync", allowed_end="2026-08-31")  # a Monday
+    assert kwargs["latest"] == "2026-08-31"
+
+
+def test_prompt_is_told_the_ceiling_not_just_the_floor():
+    """The SCOPE text stated only a floor, so anything past the ceiling was proposed by
+    the model and silently dropped into out_of_range. Both bounds now reach the prompt."""
+    kwargs = _writable_window("2026-08-31", "sync", allowed_end="2026-08-31")
+    assert kwargs["earliest"] == "2026-08-30"  # Sunday grace day
+    assert kwargs["latest"] == "2026-08-31"
 
 
 def test_chat_window_still_reaches_back_seven_days():
     """Chat is the deliberate escape hatch for fixing an earlier day, and is unchanged."""
-    assert _writable_window("2026-08-26", "chat") == "2026-08-19"
+    assert _writable_window("2026-08-26", "chat")["earliest"] == "2026-08-19"
 
 
 # ── orphaned job locks ────────────────────────────────────────────────────────

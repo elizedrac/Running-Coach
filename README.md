@@ -88,6 +88,10 @@ Chat answers are generated in a background task and streamed through a Redis Str
 
 Plan creation and plan sync follow the same shape, minus the streaming: `POST /plan/create` and `POST /plan/sync` acquire a Redis lock, start a background job, and return `{"status": "started"}` immediately, and the frontend polls `GET /plan/job/status` until the job publishes a terminal blob. Neither has token output to stream, so they use status polling rather than a Redis Stream. A second concurrent job gets a 409. The coach's `update_plan` tool shares that lock too (`run_locked_plan_update`), so a Sync Plan click and a chat-driven plan change can never write the same days at once. Chat-initiated updates run inline, since the chat turn is already a background job.
 
+Every lock is released in a `finally`, which cannot run if the process dies, so a restart or OOM used to leave the key behind for its full 40 minute TTL and refuse every plan update, sync or chat turn with nothing actually running (Redis keeps an anonymous volume at `/data`, so its snapshot carries the stale keys across a container recreate). A `lifespan` hook clears `plan_job_lock`, `garmin_sync_lock`, `chatlock` and `chatcancel` on startup, when no job can be in flight. `chatstream` is left alone, since a page reload reattaches to it.
+
+`update_plan` reports `success`, `partial`, `fail`, `no_changes` (the plan already matched) or `out_of_window` (the dates are outside the writable range, which is today−7 → today+8 in chat and this week's Monday → today for a sync). Changes are validated one at a time so a single malformed day cannot discard the rest, and every model reply is parsed by `extract_json()` rather than by slicing first-brace-to-last-brace.
+
 ## Docker
 
 **Build:**

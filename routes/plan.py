@@ -176,11 +176,11 @@ def sync_plan(
     check_rate_limit(user_id, limit=10, window=3600)
     today = body.today or date.today().isoformat()
     try:
-        today_dt = date.fromisoformat(today)
+        # Parsed purely to validate: a malformed date must 400 here rather than 500 deeper in.
+        date.fromisoformat(today)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid 'today' date.")
-    next_sunday = today_dt + timedelta(days=6 - today_dt.weekday())
-    intent = f"Reconcile plan with actual Garmin activities. Today is {today}. Update completed days (start of current week through today) to reflect actual Garmin activities. For future days within this week: only adjust if a completed day's load warrants it (e.g. ease the next hard day if today's run was significantly harder or longer than planned)."
+    intent = f"Reconcile plan with actual Garmin activities. Today is {today}. Update completed days (start of current week through today) to reflect actual Garmin activities. Do NOT change any day after {today} — reconciliation reports what happened, it does not re-plan what has not happened yet."
     if not acquire_plan_lock(user_id):
         raise HTTPException(status_code=409, detail="A plan job is already running.")
     mark_plan_job_running(user_id, "sync")
@@ -192,7 +192,7 @@ def sync_plan(
         include_activities=True,
         local_today=today,
         mode="sync",
-        allowed_end=next_sunday.isoformat(),
+        allowed_end=today,
     )
     return {"status": "started", "kind": "sync"}
 
