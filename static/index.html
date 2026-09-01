@@ -753,6 +753,8 @@ body{font-family:'Hanken Grotesk',sans-serif;background:var(--bg);color:var(--bo
           <button class="week-btn" id="jump-today-btn" onclick="jumpToToday()" style="display:none;width:auto;padding:0 10px;font-size:11px;font-family:inherit" data-tooltip="Jump to today">Today</button>
           <div class="plan-spacer"></div>
           <button class="btn" id="month-view-btn" onclick="openMonthModal()" style="display:none" data-tooltip="View full month calendar">View Full Month</button>
+          <button class="btn" id="plan-undo-btn" onclick="runPlanUndo()" style="display:none;opacity:0.4" disabled data-tooltip="Undo the last plan change">Undo</button>
+          <button class="btn" id="plan-redo-btn" onclick="runPlanRedo()" style="display:none;opacity:0.4" disabled data-tooltip="Redo the change you just undid">Redo</button>
           <button class="btn btn-accent" id="plan-sync-btn" onclick="runPlanSync()" style="display:none" data-tooltip="Re-sync plan with recent workouts">Sync Plan</button>
         </div>
         <div class="plan-table" id="plan-list"></div>
@@ -1374,7 +1376,7 @@ async function consumeStream(afterId,isReconnect){
             else if(event.type==='status'){document.getElementById('analyzing-text').textContent=event.text;}
             else if(event.type==='chunk'){if(!hasChunks){hasChunks=true;setAnalyzing(false);bubble=createCoachMessage();}fullText+=event.text;scheduleRender();document.getElementById('chat-messages').scrollTop=999999;}
             else if(event.type==='done'){sawTerminal=true;if(renderTimer){clearTimeout(renderTimer);renderTimer=null;}render();}
-            else if(event.type==='plan_updated'){loadPlan();}
+            else if(event.type==='plan_updated'){loadPlan();refreshUndoButtons();}
             else if(event.type==='theme_updated'){if(event.theme)applyTheme(event.theme);}
             else if(event.type==='error'){sawTerminal=true;setAnalyzing(false);addMessage('coach','Sorry, something went wrong. Please try again.');}
           }
@@ -1511,11 +1513,11 @@ async function loadPlan(){
     const remaining=nonRunActDates.filter(d=>!claimed.has(d));const unclaimed=nonRunDays.filter(d=>!_nonRunCompleted.has(d.plan_date));remaining.forEach(()=>{if(unclaimed.length)_nonRunCompleted.add(unclaimed.shift().plan_date);});
     if(!days||!days.length){
       hasPlan=_planWeekOffset!==0?hasPlan:false;
-      ['plan-sync-btn','month-view-btn','delete-plan-btn'].forEach(id=>document.getElementById(id).style.display='none');
+      ['plan-sync-btn','month-view-btn','delete-plan-btn','plan-undo-btn','plan-redo-btn'].forEach(id=>document.getElementById(id).style.display='none');
       list.innerHTML=_planWeekOffset===0?`<div class="plan-placeholder">No training plan yet.<br><button class="create-plan-btn" onclick="openPlanModal()">+ Create Training Plan</button></div>`:`<div class="plan-placeholder">No workouts for this week.</div>`;
       return;
     }
-    if(isCurrentWeek){hasPlan=true;['plan-sync-btn','month-view-btn','delete-plan-btn'].forEach(id=>document.getElementById(id).style.display='');}
+    if(isCurrentWeek){hasPlan=true;['plan-sync-btn','month-view-btn','delete-plan-btn','plan-undo-btn','plan-redo-btn'].forEach(id=>document.getElementById(id).style.display='');}
     _planDays={};const dayMap={};
     days.forEach(d=>{_planDays[d.id]=d;const dow=d.day_of_week||DOW_ORDER[new Date(d.plan_date+'T00:00:00').getDay()===0?6:new Date(d.plan_date+'T00:00:00').getDay()-1];dayMap[dow]=d;});
     // CROSS days have no target_miles (nulled on write) — count any run logged that day on top
@@ -1586,6 +1588,7 @@ function planSyncDone(data){
   else if(failed)showToast(`${count} day${count!==1?'s':''} changed, ${failed} couldn't be saved`,'#8b4a42');
   else showToast(count>0?`Plan updated — ${count} day${count!==1?'s':''} changed`:'Plan already up to date','var(--accent-dark)');
   loadPlan();
+  refreshUndoButtons();
   if(btn){btn.textContent='Sync Plan';btn.disabled=false;}
 }
 
@@ -1604,6 +1607,48 @@ async function runPlanSync(){
     pollPlanJob(planSyncDone);
   }catch(e){planSyncDone({status:'error'});}
 }
+
+// Undo/redo restore a snapshot taken before each plan write. Synchronous, unlike
+// create/sync: it is a few row writes, so there is no job to poll.
+// Both buttons stay in place and grey out when there is nothing to apply, rather than
+// appearing and disappearing — a control that vanishes is harder to find than one that
+// is visibly unavailable, and the header would otherwise reflow on every plan change.
+function _setUndoEnabled(id, enabled){
+  const b=document.getElementById(id);if(!b)return;
+  b.disabled=!enabled;b.style.opacity=enabled?'':'0.4';b.style.cursor=enabled?'':'default';
+}
+
+async function refreshUndoButtons(){
+  try{
+    const d=await(await apiFetch(`${API}/plan/undo/status`)).json();
+    _setUndoEnabled('plan-undo-btn',d.undo>0);
+    _setUndoEnabled('plan-redo-btn',d.redo>0);
+  }catch(e){_setUndoEnabled('plan-undo-btn',false);_setUndoEnabled('plan-redo-btn',false);}
+}
+
+async function _planRestore(path,btn,label){
+  const el=document.getElementById(btn);el.disabled=true;
+  try{
+    const r=await(await apiFetch(`${API}${path}`,{method:'POST'})).json();
+    if(r.status==='nothing_to_undo'){showToast('Nothing to '+label,'#8b4a42');}
+    else if(r.status==='skipped'){showToast('No training plan to '+label,'#8b4a42');}
+    else if(r.status==='error'){showToast(r.error||'Could not '+label,'#8b4a42');}
+    else if(r.status==='fail'){showToast('Could not '+label+' — try again','#8b4a42');}
+    else if(r.status==='partial'){
+      const n=(r.restored||[]).length,f=(r.failed||[]).length;
+      showToast(`${n} day${n!==1?'s':''} restored, ${f} couldn't be`,'#8b4a42');
+    }
+    else{
+      const n=(r.restored||[]).length;
+      showToast(`${label==='undo'?'Undid':'Redid'} ${n} day${n!==1?'s':''}`,'var(--accent-dark)');
+    }
+    loadPlan();
+  }catch(e){showToast('Could not '+label+' — try again','#8b4a42');}
+  finally{el.disabled=false;refreshUndoButtons();}
+}
+
+function runPlanUndo(){return _planRestore('/plan/undo','plan-undo-btn','undo');}
+function runPlanRedo(){return _planRestore('/plan/redo','plan-redo-btn','redo');}
 
 function showPlanGenerating(){const list=document.getElementById('plan-list');list.innerHTML=`<div class="plan-generating"><div style="font-size:13px;color:var(--muted);margin-bottom:12px">Building your training plan...</div><div class="plan-progress-track"><div class="plan-progress-fill" id="plan-progress-fill"></div></div><div style="font-size:11px;color:var(--faint);margin-top:8px">Analyzing race goal, fitness data, and course details</div></div>`;let pct=0;_progressInterval=setInterval(()=>{pct=Math.min(pct+(90-pct)*0.015,90);const el=document.getElementById('plan-progress-fill');if(el)el.style.width=pct+'%';},800);}
 function hidePlanGenerating(){clearInterval(_progressInterval);_progressInterval=null;const el=document.getElementById('plan-progress-fill');if(el)el.style.width='100%';}
@@ -1709,7 +1754,7 @@ async function saveDayEdit(){
     const res=await apiFetch(`${API}/plan/day/${_currentDayId}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
     const data=await res.json().catch(()=>({}));
     if(!res.ok||(data.status&&data.status!=='success'))throw new Error(data.status||data.detail||`HTTP ${res.status}`);
-    Object.assign(_planDays[_currentDayId],body);closeDayModal();loadPlan();
+    Object.assign(_planDays[_currentDayId],body);closeDayModal();loadPlan();refreshUndoButtons();
   }
   catch(e){const err=document.getElementById('day-edit-error');err.textContent=e.message||'Failed to save. Please try again.';err.style.display='block';}
 }
@@ -1719,7 +1764,7 @@ function closeClearDayModal(){document.getElementById('clear-day-modal').style.d
 
 async function clearDayEdit(){
   closeClearDayModal();
-  try{const res=await apiFetch(`${API}/plan/day/${_currentDayId}`,{method:'DELETE'});if(!res.ok)throw new Error();Object.assign(_planDays[_currentDayId],{workout_type:'REST',target_miles:null,target_pace:null,notes:null});closeDayModal();loadPlan();}
+  try{const res=await apiFetch(`${API}/plan/day/${_currentDayId}`,{method:'DELETE'});if(!res.ok)throw new Error();Object.assign(_planDays[_currentDayId],{workout_type:'REST',target_miles:null,target_pace:null,notes:null});closeDayModal();loadPlan();refreshUndoButtons();}
   catch(e){const err=document.getElementById('day-edit-error');err.textContent='Failed. Please try again.';err.style.display='block';}
 }
 
@@ -2049,6 +2094,7 @@ function toggleSidebar(){
 // ── Init ──────────────────────────────────────────────────────
 loadActivity();loadHealthChart();loadMileageChart();loadMetricBadges();loadPlan();loadUserInfo();
 (async()=>{try{const s=await(await apiFetch(`${API}/garmin-sync/status`)).json();if(s.status==='running')pollSyncStatus();}catch(e){}})();
+refreshUndoButtons();
 // A plan job outlives the page: the POST only starts it, so a reload mid-job left
 // no progress bar and fired no toast even though the job finished and saved.
 // Terminal blobs live for PLAN_STATUS_TTL, so only "running" is worth reattaching to.

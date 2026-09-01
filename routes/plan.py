@@ -2,7 +2,15 @@ from datetime import date, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 
-from db.plan import clear_day, delete_plan, get_plan_days, get_plan_id, get_plan_intervals, patch_plan
+from db.plan import (
+    clear_day,
+    day_belongs_to,
+    delete_plan,
+    get_plan_days,
+    get_plan_id,
+    get_plan_intervals,
+    patch_plan,
+)
 from db.preferences import (
     get_preferences,
     set_avg_miles,
@@ -16,7 +24,16 @@ from db.race import get_race, set_goal_time, set_race_date, set_race_distance, s
 from models.planner import PatchDayRequest, PreferencesRequest, RaceRequest, SyncPlanRequest
 from services.auth import get_current_user
 from services.logging_config import get_logger
-from services.plan import acquire_plan_lock, get_plan_job_status, mark_plan_job_running, run_plan_job
+from services.plan import (
+    acquire_plan_lock,
+    get_plan_job_status,
+    get_undo_depths,
+    mark_plan_job_running,
+    record_day_undo,
+    redo_plan,
+    run_plan_job,
+    undo_plan,
+)
 from services.rate_limit import check_rate_limit
 
 logger = get_logger(__name__)
@@ -133,6 +150,25 @@ def new_plan(background_tasks: BackgroundTasks, user_id: str = Depends(get_curre
     return {"status": "started", "kind": "create"}
 
 
+@router.get("/plan/undo/status")
+def undo_status(user_id: str = Depends(get_current_user)):
+    """Drives whether the UI shows the buttons at all."""
+    return get_undo_depths(user_id)
+
+
+@router.post("/plan/undo")
+def undo(user_id: str = Depends(get_current_user)):
+    # Synchronous: this is a handful of row writes against a two-week window, nothing
+    # like the agent loop /plan/create runs. It still takes the plan lock so it cannot
+    # interleave with a sync.
+    return undo_plan(user_id)
+
+
+@router.post("/plan/redo")
+def redo(user_id: str = Depends(get_current_user)):
+    return redo_plan(user_id)
+
+
 @router.get("/plan/job/status")
 def plan_job_status(user_id: str = Depends(get_current_user)):
     return get_plan_job_status(user_id)
@@ -197,9 +233,25 @@ def sync_plan(
     return {"status": "started", "kind": "sync"}
 
 
+def _owned_day(user_id: str, day_id: str) -> str:
+    """These routes address a plan day by raw uuid, so without this any authenticated
+    user could edit or clear another user's day by supplying its id. Returns the
+    caller's plan_id, which the undo snapshot then reuses.
+
+    404 rather than 403: a caller who does not own the day should not learn it exists.
+    """
+    plan_id = get_plan_id(user_id)
+    if not plan_id or not day_belongs_to(plan_id, day_id):
+        raise HTTPException(status_code=404, detail="Day not found.")
+    return plan_id
+
+
 @router.patch("/plan/day/{day_id}")
 def patch_day(day_id: str, body: PatchDayRequest, user_id: str = Depends(get_current_user)):
+    # Outside the try: its 404 must reach the client as a 404, not be reworded as a 500.
+    plan_id = _owned_day(user_id, day_id)
     try:
+        record_day_undo(user_id, day_id, plan_id=plan_id)
         # exclude_unset keeps "field omitted" distinct from "field explicitly null" —
         # without it a cleared field looks identical to an untouched one and can never
         # be written back as empty.
@@ -210,7 +262,9 @@ def patch_day(day_id: str, body: PatchDayRequest, user_id: str = Depends(get_cur
 
 @router.delete("/plan/day/{day_id}")
 def delete_day(day_id: str, user_id: str = Depends(get_current_user)):
+    plan_id = _owned_day(user_id, day_id)
     try:
+        record_day_undo(user_id, day_id, plan_id=plan_id)
         return clear_day(day_id)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

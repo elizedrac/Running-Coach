@@ -8,7 +8,15 @@ from dotenv import load_dotenv
 from pydantic import ValidationError
 
 from db.activity_history import get_activities
-from db.plan import get_plan_days, get_plan_id, save_plan, update_plan_day
+from db.plan import (
+    get_day_date,
+    get_plan_days,
+    get_plan_id,
+    restore_days,
+    save_plan,
+    snapshot_days,
+    update_plan_day,
+)
 from db.preferences import get_preferences
 from db.race import get_race
 from db.redis import get_redis
@@ -32,6 +40,114 @@ PLAN_TOOL_REGISTRY = {
 
 PLAN_STATUS_TTL = 86400  # Status blob stays readable for a day after the job finishes
 PLAN_LOCK_TTL = 2400  # 40 min; must outlive the longest create_plan agent loop
+
+
+UNDO_DEPTH = 3
+UNDO_TTL = 86400  # a day; undo is for "that sync was wrong", not for plan archaeology
+
+
+def _undo_key(user_id: str) -> str:
+    return f"plan_undo:{user_id}"
+
+
+def _redo_key(user_id: str) -> str:
+    return f"plan_redo:{user_id}"
+
+
+def _push(key: str, entry: list) -> None:
+    r = get_redis()
+    r.lpush(key, json.dumps(entry, default=str))
+    r.ltrim(key, 0, UNDO_DEPTH - 1)
+    r.expire(key, UNDO_TTL)
+
+
+def _pop(key: str):
+    raw = get_redis().lpop(key)
+    return json.loads(raw) if raw else None
+
+
+def record_plan_undo(user_id: str, snapshot: list) -> None:
+    """Called before every plan write. Dropping the redo stack is deliberate: once a new
+    edit lands, the version redo was holding is no longer reachable from where the plan
+    now is, and replaying it would apply a change the user never asked for.
+
+    Best effort by design: undo is a convenience layered on top of the write, so a Redis
+    outage must cost the user their undo history, never their edit. Without this the
+    manual day routes — which needed no Redis at all before undo existed — would 500.
+    """
+    if not snapshot:
+        return
+    try:
+        _push(_undo_key(user_id), snapshot)
+        get_redis().delete(_redo_key(user_id))
+    except Exception:
+        logger.warning("undo_snapshot_failed", exc_info=True)
+
+
+def record_day_undo(user_id: str, day_id: str, plan_id=None) -> None:
+    """Snapshot hook for the manual edit routes, which write a single day straight
+    through patch_plan/clear_day rather than going via update_plan. Without it a
+    hand-edit is not undoable AND does not clear the redo stack, so a later Redo
+    silently overwrites it.
+
+    plan_id is passed in by callers that already resolved it for the ownership check,
+    to avoid a second lookup on every edit.
+    """
+    try:
+        plan_id = plan_id or get_plan_id(user_id)
+        day_date = get_day_date(day_id)
+        if plan_id and day_date:
+            record_plan_undo(user_id, snapshot_days(plan_id, [day_date]))
+    except Exception:
+        logger.warning("undo_snapshot_failed", extra={"day_id": day_id}, exc_info=True)
+
+
+def get_undo_depths(user_id: str) -> dict:
+    r = get_redis()
+    return {"undo": r.llen(_undo_key(user_id)), "redo": r.llen(_redo_key(user_id))}
+
+
+def _step(user_id: str, from_key: str, to_key: str) -> dict:
+    """Undo and redo are the same three moves with the stacks swapped: take the version
+    to restore, save the days as they stand right now onto the opposite stack, then
+    write the old version back. The save has to happen first — the write destroys it."""
+    plan_id = get_plan_id(user_id)
+    if not plan_id:
+        return {"status": "skipped", "reason": "no active plan"}
+    if not acquire_plan_lock(user_id):
+        return {"status": "error", "error": "A plan update is already running; wait for it to finish."}
+    try:
+        snapshot = _pop(from_key)
+        if snapshot is None:
+            return {"status": "nothing_to_undo"}
+        _push(to_key, snapshot_days(plan_id, [e["plan_date"] for e in snapshot]))
+        result = restore_days(plan_id, snapshot)
+        if result["status"] == "fail":
+            # Nothing was written, so the stacks must not move either: drop the entry
+            # just pushed and put the popped one back, or the user silently loses an
+            # undo level to an operation that changed nothing. A partial restore is
+            # left alone — the plan really did move, and the stacks should say so.
+            get_redis().lpop(to_key)
+            _push(from_key, snapshot)
+        logger.info(
+            "plan_restored",
+            extra={
+                "direction": "undo" if from_key.startswith("plan_undo") else "redo",
+                "restored": result["restored"],
+                "failed": len(result["failed"]),
+            },
+        )
+        return {**result, **get_undo_depths(user_id)}
+    finally:
+        _release_plan_lock(user_id)
+
+
+def undo_plan(user_id: str) -> dict:
+    return _step(user_id, _undo_key(user_id), _redo_key(user_id))
+
+
+def redo_plan(user_id: str) -> dict:
+    return _step(user_id, _redo_key(user_id), _undo_key(user_id))
 
 
 def acquire_plan_lock(user_id: str) -> bool:
@@ -169,6 +285,44 @@ def create_plan(user_id: str) -> dict:
     return {"status": "fail"}
 
 
+def _same(a, b) -> bool:
+    """Tolerant equality for values that survive a DB round trip. target_miles is a
+    double, so 7 out of Postgres and 7.0 out of the model are the same number."""
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)) and not isinstance(a, bool):
+        return abs(float(a) - float(b)) < 1e-9
+    return a == b
+
+
+def _drop_unchanged(changes: list, before: list) -> tuple[list, list]:
+    """Split changes into those that actually alter the day and those that do not.
+
+    A repeated sync re-emits the same values for an already-reconciled day, and an
+    UPDATE with identical values still succeeds, so every sync counted as applied. That
+    was cosmetic until undo existed; now each redundant write burns an undo level and
+    clears the redo stack, so two spurious syncs evict the user's real history.
+
+    Compared per key rather than wholesale: a change only carries the fields the model
+    chose to set, and a missing field means "leave it alone", not "set it to null".
+    """
+    prior = {e["plan_date"]: e for e in before}
+    keep, unchanged = [], []
+    for c in changes:
+        entry = prior.get(c["plan_date"])
+        if entry is None or entry.get("absent"):
+            keep.append(c)  # the day does not exist yet, so this creates it
+            continue
+        day = entry.get("day") or {}
+        fields_match = all(_same(v, day.get(k)) for k, v in c.items() if k not in ("plan_date", "intervals"))
+        intervals_match = True
+        if c.get("intervals") is not None:
+            existing = entry.get("intervals") or []
+            intervals_match = len(existing) == len(c["intervals"]) and all(
+                all(_same(v, old.get(k)) for k, v in new.items()) for new, old in zip(c["intervals"], existing)
+            )
+        (unchanged if fields_match and intervals_match else keep).append(c)
+    return keep, [c["plan_date"] for c in unchanged]
+
+
 def update_plan(
     user_id,
     intent,
@@ -228,9 +382,7 @@ def update_plan(
     # otherwise the model is told "today only" while the filter accepts more, or asked
     # for days the filter silently drops. The ceiling used to go unstated entirely, so
     # sync could be handed a week of forward days it was never allowed to write.
-    system_prompt = build_update_plan_system(
-        today.isoformat(), mode=mode, earliest=allowed_start, latest=allowed_end
-    )
+    system_prompt = build_update_plan_system(today.isoformat(), mode=mode, earliest=allowed_start, latest=allowed_end)
     response = call_llm(system_prompt=system_prompt, user_prompt=prompt, max_tokens=8192)
     response = response.strip()
     raw = extract_json(response)
@@ -255,6 +407,12 @@ def update_plan(
             (changes if allowed_start <= c["plan_date"] <= allowed_end else out_of_range).append(c)
         # Collapse duplicate entries for the same day (last wins) so counts and writes are per-day
         changes = list({c["plan_date"]: c for c in changes}.values())
+        # Snapshot before writing: this is the only record of what these days looked
+        # like, notes included, it is what the Undo button restores, and it doubles as
+        # the before-state the no-op filter compares against.
+        before = snapshot_days(plan_id, [c["plan_date"] for c in changes])
+        changes, unchanged = _drop_unchanged(changes, before)
+        record_plan_undo(user_id, [e for e in before if e["plan_date"] not in unchanged])
         db_result = update_plan_day(plan_id, changes)
         # The reconciliation audit trail: what the model decided, and what stuck.
         # Without this a wrong workout_type leaves no trace of how it was chosen.
@@ -262,7 +420,17 @@ def update_plan(
             "plan_updated",
             extra={
                 "mode": mode,
-                "changes": [{"date": c["plan_date"], "type": c.get("workout_type")} for c in changes],
+                "changes": [
+                    {
+                        "date": c["plan_date"],
+                        "type": c.get("workout_type"),
+                        # Which fields moved: without this a reconciliation that rewrote
+                        # miles, pace and notes is indistinguishable from a no-op.
+                        "fields": sorted(k for k in c if k != "plan_date"),
+                    }
+                    for c in changes
+                ],
+                "unchanged": unchanged,
                 "out_of_range": [c["plan_date"] for c in out_of_range],
                 "applied": len(db_result.get("applied", [])),
                 "failed": len(db_result.get("failed", [])),

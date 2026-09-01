@@ -481,6 +481,28 @@ Question arrives
 - `POST /garmin-sync/cancel` sets a Redis flag checked between days; cancelled syncs keep all days already fetched (upserts). Cache cleared per user via `clear_user_cache` after success/cancel
 - Cron path (`python services/garmin.py`) calls `garmin_sync()` directly — blocking, no Redis involvement
 
+### Plan writes are idempotent
+
+- **Changes matching the current row are dropped before writing** (`_drop_unchanged` in `services/plan.py`). A repeated sync re-emits the same values for an already-reconciled day, and an UPDATE with identical values still succeeds, so every sync counted as `applied: 1`. Two syncs 16 minutes apart both "changed" a day that was byte-for-byte identical between them.
+- Harmless until undo existed. Now each redundant write pushes an undo snapshot and clears the redo stack, so two spurious syncs evict the user's real undo history.
+- The `snapshot_days` call already made for undo doubles as the before-state, so the filter costs no extra reads.
+- Compared **per key**, not wholesale: a change carries only the fields the model chose to set, and a missing field means "leave it alone", not "set to null". `intervals` are compared too, so a reps-only edit is not mistaken for a no-op. Numeric comparison is tolerant, since `target_miles` is a double and 7 out of Postgres equals 7.0 out of the model.
+- A day with no row yet is always kept — there is nothing to compare against and the change creates it.
+- When everything is filtered out, `changes` is empty and the existing status logic returns `no_changes`, which the coach phrases as "already up to date".
+- `plan_updated` now logs the changed field names and an `unchanged` list. It previously logged only date and type, so a reconciliation that rewrote miles, pace and notes was indistinguishable from a no-op.
+
+### Plan undo / redo
+
+- **Every plan write snapshots first**, capturing each affected day's full row plus its `plan_intervals`. There are two entry points, not one: the LLM paths (chat edit, Sync Plan, weekly refresh) all funnel through `update_plan`, which calls `snapshot_days` before `update_plan_day`; the manual paths (`PATCH`/`DELETE /plan/day/{id}`, the Edit and clear buttons) write straight through `patch_plan`/`clear_day` and need their own hook, `record_day_undo`. Missing the manual one is not just a gap in coverage — a hand-edit that does not clear the redo stack means a later Redo silently overwrites it.
+- `record_day_undo` translates the day id those routes carry into the date the snapshot is keyed by, via `get_day_date`.
+- **Two Redis lists per user**, `plan_undo:{user_id}` and `plan_redo:{user_id}`, `LPUSH` + `LTRIM 0 2` for a depth of 3, 24h TTL.
+- **A write pushes to undo and deletes redo.** Standard editor semantics: once a new edit lands, the version redo was holding is unreachable from where the plan now is, and replaying it would apply a change the user never asked for.
+- **Undo and redo are the same three moves with the stacks swapped**: pop the version to restore, snapshot the days as they stand *now* onto the opposite stack, then write the old version back. The snapshot has to happen before the write, which destroys it.
+- Both take the plan lock, so a restore cannot interleave with a sync, and both run synchronously — a handful of row writes over a two-week window, nothing like the `/plan/create` agent loop.
+- `id` and `day_id` are stripped from snapshotted interval rows: reinserting an interval's original uuid collides. A date with no row is stored as `absent`, so undoing a write that *created* a day deletes it rather than leaving an invented one behind.
+- `GET /plan/undo/status` returns both depths; the UI hides the buttons at zero.
+- This supersedes the `Was:` note breadcrumb for reverts, which only ever recorded workout type, miles and pace — never notes — so an undo of a note had nothing to restore. The `Was:` mechanism is still in place and not yet removed.
+
 ### Plan update: result statuses, parsing, lock recovery
 
 - **`update_plan` returns one of five statuses**, each with its own coach wording, because a single catch-all made every non-success look identical to the user ("something went wrong on my end"):

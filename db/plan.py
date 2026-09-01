@@ -50,6 +50,30 @@ def get_day_id(plan_id, day):
     return results[0]["id"] if results else None
 
 
+def get_day_date(day_id: str):
+    """Reverse of get_day_id. The manual edit routes address a day by id, but the undo
+    snapshot is keyed by date, so one of them has to translate."""
+    client = get_supabase_client()
+    try:
+        response = client.table("plan_days").select("plan_date").eq("id", day_id).execute()
+        return response.data[0]["plan_date"] if response.data else None
+    except Exception:
+        return None
+
+
+def day_belongs_to(plan_id, day_id: str) -> bool:
+    """The day routes are addressed by raw uuid, so this is the only thing standing
+    between a caller and another user's plan. Fails closed: a DB error returns False
+    rather than letting the write through unchecked."""
+    client = get_supabase_client()
+    try:
+        response = client.table("plan_days").select("id").eq("id", day_id).eq("plan_id", plan_id).execute()
+        return bool(response.data)
+    except Exception:
+        logger.error("day_ownership_check_failed", extra={"day_id": day_id}, exc_info=True)
+        return False
+
+
 def get_plan_intervals(day_id):
     client = get_supabase_client()
     try:
@@ -130,6 +154,67 @@ def delete_plan(user_id) -> dict:
         return {"status": "success"}
     except Exception:
         return {"status": "fail"}
+
+
+# Columns the snapshot restores. `id` and `day_id` are deliberately excluded: they are
+# rewritten on restore, and reinserting an interval's original uuid collides.
+_DAY_FIELDS = ("plan_date", "week_number", "day_of_week", "workout_type", "target_miles", "target_pace", "notes")
+_INTERVAL_FIELDS = ("interval_num", "interval_type", "distance", "target_pace", "duration", "rest_duration", "notes")
+
+
+def snapshot_days(plan_id, dates: list) -> list:
+    """Capture each day exactly as it stands, for undo. Taken before a write, so it is
+    the only record of what a day's notes said — the `Was:` line covers workout type,
+    miles and pace and nothing else.
+
+    A date with no row yet is recorded as absent, so undoing a write that created the
+    day deletes it again rather than leaving an invented one behind.
+    """
+    snapshot = []
+    for day_date in sorted(set(dates)):
+        rows = get_plan_days(plan_id, start_date=day_date, end_date=day_date)
+        if not rows:
+            snapshot.append({"plan_date": day_date, "absent": True})
+            continue
+        row = rows[0]
+        snapshot.append(
+            {
+                "plan_date": day_date,
+                "absent": False,
+                "day": {k: row.get(k) for k in _DAY_FIELDS},
+                "intervals": [{k: i.get(k) for k in _INTERVAL_FIELDS} for i in get_plan_intervals(row["id"])],
+            }
+        )
+    return snapshot
+
+
+def restore_days(plan_id, snapshot: list) -> dict:
+    """Put a snapshot back. Mirrors update_plan_day's per-day resilience: one day that
+    fails to restore must not abort the rest, or an undo leaves the plan half-reverted.
+    """
+    client = get_supabase_client()
+    restored, failed = [], []
+    for entry in snapshot:
+        day_date = entry["plan_date"]
+        try:
+            day_id = get_day_id(plan_id, day_date)
+            if entry.get("absent"):
+                # The write created this day; undoing it means removing it. Intervals
+                # cascade off plan_days, so they go with it.
+                if day_id:
+                    client.table("plan_days").delete().eq("id", day_id).execute()
+                restored.append(day_date)
+                continue
+            if day_id:
+                client.table("plan_days").update(entry["day"]).eq("id", day_id).execute()
+            else:
+                day_id = save_plan_day(plan_id, [entry["day"]])[0]["id"]
+            replace_plan_intervals(day_id, entry.get("intervals") or [])
+            restored.append(day_date)
+        except Exception as e:
+            failed.append({"plan_date": day_date, "error": str(e)})
+    status = "partial" if restored and failed else ("fail" if failed else "success")
+    return {"status": status, "restored": restored, "failed": failed}
 
 
 def update_plan_day(plan_id: int, changes: list) -> dict:

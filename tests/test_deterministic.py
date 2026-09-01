@@ -1,5 +1,6 @@
 # Tests for all deterministic logic: plan constraints, injury severity mapping, REGISTRY validation, etc.
 import asyncio
+from contextlib import contextmanager
 from datetime import date as dt_date
 from datetime import datetime, timedelta
 from types import SimpleNamespace
@@ -2253,6 +2254,364 @@ def test_prompt_is_told_the_ceiling_not_just_the_floor():
 def test_chat_window_still_reaches_back_seven_days():
     """Chat is the deliberate escape hatch for fixing an earlier day, and is unchanged."""
     assert _writable_window("2026-08-26", "chat")["earliest"] == "2026-08-19"
+
+
+# ── plan undo / redo ──────────────────────────────────────────────────────────
+
+
+def _undo_stacks(user_id="u1"):
+    return plan_service.get_undo_depths(user_id)
+
+
+def test_a_write_pushes_undo_and_drops_redo():
+    """Standard editor semantics: once a new edit lands, whatever redo was holding is
+    no longer reachable from where the plan now is, and replaying it would apply a
+    change the user never asked for."""
+    plan_service.record_plan_undo("u1", [{"plan_date": "2026-09-01", "absent": True}])
+    plan_service._push(plan_service._redo_key("u1"), [{"plan_date": "2026-09-02", "absent": True}])
+    assert _undo_stacks() == {"undo": 1, "redo": 1}
+
+    plan_service.record_plan_undo("u1", [{"plan_date": "2026-09-03", "absent": True}])
+
+    assert _undo_stacks() == {"undo": 2, "redo": 0}
+
+
+def test_undo_stack_is_capped_at_three():
+    """LTRIM keeps the stack bounded; a plan sync touches many days and the snapshots
+    carry full interval rows, so an unbounded list would grow without limit."""
+    for i in range(6):
+        plan_service.record_plan_undo("u1", [{"plan_date": f"2026-09-0{i + 1}", "absent": True}])
+    assert _undo_stacks()["undo"] == plan_service.UNDO_DEPTH == 3
+
+
+@contextmanager
+def _fake_plan(state: dict):
+    """Stand in for the two DB calls _step orchestrates, backed by a dict so a test can
+    watch the plan actually move. snapshot reads it, restore writes it."""
+
+    def snapshot(plan_id, dates):
+        return [{"plan_date": d, "absent": False, "day": dict(state[d]), "intervals": []} for d in dates]
+
+    def restore(plan_id, snapshot_entries):
+        for entry in snapshot_entries:
+            state[entry["plan_date"]] = dict(entry["day"])
+        return {"status": "success", "restored": [e["plan_date"] for e in snapshot_entries], "failed": []}
+
+    with (
+        patch("services.plan.get_plan_id", return_value="plan-uuid"),
+        patch("services.plan.snapshot_days", side_effect=snapshot),
+        patch("services.plan.restore_days", side_effect=restore),
+    ):
+        yield state
+
+
+def test_undo_puts_the_previous_version_back():
+    """The version being overwritten has to reach the opposite stack before the write,
+    or redo has nothing to put back."""
+    state = {"2026-09-01": {"workout_type": "TEMPO"}}
+    plan_service.record_plan_undo(
+        "u1", [{"plan_date": "2026-09-01", "absent": False, "day": {"workout_type": "EASY"}, "intervals": []}]
+    )
+
+    with _fake_plan(state):
+        result = plan_service.undo_plan("u1")
+
+    assert result["status"] == "success"
+    assert state["2026-09-01"]["workout_type"] == "EASY"
+    assert _undo_stacks() == {"undo": 0, "redo": 1}
+
+
+def test_undo_then_redo_returns_to_where_you_started():
+    """The round trip is the contract: undo walks the day back, redo walks it forward,
+    and the stacks swap each time."""
+    state = {"2026-09-01": {"workout_type": "TEMPO"}}
+    plan_service.record_plan_undo(
+        "u1", [{"plan_date": "2026-09-01", "absent": False, "day": {"workout_type": "EASY"}, "intervals": []}]
+    )
+
+    with _fake_plan(state):
+        plan_service.undo_plan("u1")
+        assert state["2026-09-01"]["workout_type"] == "EASY"
+
+        plan_service.redo_plan("u1")
+
+    assert state["2026-09-01"]["workout_type"] == "TEMPO"
+    assert _undo_stacks() == {"undo": 1, "redo": 0}
+
+
+def test_a_no_op_write_does_not_consume_an_undo_slot():
+    """update_plan snapshots whatever dates it is about to touch. When the model returns
+    no changes there are none, and burning an undo level (and clearing redo) for a write
+    that never happened would quietly discard the user's real undo history."""
+    plan_service.record_plan_undo("u1", [{"plan_date": "2026-09-01", "absent": True}])
+    plan_service._push(plan_service._redo_key("u1"), [{"plan_date": "2026-09-02", "absent": True}])
+
+    plan_service.record_plan_undo("u1", [])
+
+    assert _undo_stacks() == {"undo": 1, "redo": 1}
+
+
+def test_undo_releases_the_lock():
+    """Undo takes the plan lock so it cannot interleave with a sync. If it leaked, the
+    next plan change would be refused for the full 40 min TTL."""
+    plan_service.record_plan_undo("u1", [{"plan_date": "2026-09-01", "absent": True}])
+    with (
+        patch("services.plan.get_plan_id", return_value="plan-uuid"),
+        patch("services.plan.snapshot_days", return_value=[]),
+        patch("services.plan.restore_days", return_value={"status": "success", "restored": [], "failed": []}),
+    ):
+        plan_service.undo_plan("u1")
+    assert plan_service.acquire_plan_lock("u1") is True
+
+
+def test_undo_with_an_empty_stack_is_not_an_error():
+    with patch("services.plan.get_plan_id", return_value="plan-uuid"):
+        assert plan_service.undo_plan("u1")["status"] == "nothing_to_undo"
+
+
+@patch(
+    "db.plan.get_plan_intervals",
+    return_value=[{"id": "i1", "day_id": "d1", "interval_num": 1, "interval_type": "WORK"}],
+)
+@patch("db.plan.get_plan_days")
+def test_snapshot_drops_ids_and_marks_missing_days_absent(mock_days, mock_intervals):
+    """Restoring an interval row with its original uuid collides on insert, so `id` and
+    `day_id` are stripped. A date with no row is recorded absent, so undoing a write
+    that created the day deletes it rather than leaving an invented one behind."""
+    from db.plan import snapshot_days as snap
+
+    mock_days.side_effect = [[{"id": "d1", "plan_date": "2026-09-01", "workout_type": "LONG"}], []]
+    result = snap("plan-uuid", ["2026-09-01", "2026-09-02"])
+
+    assert "id" not in result[0]["intervals"][0] and "day_id" not in result[0]["intervals"][0]
+    assert result[0]["day"]["workout_type"] == "LONG"
+    assert result[1]["absent"] is True
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_day_id", return_value="day-uuid")
+def test_restore_deletes_a_day_the_write_had_created(mock_day_id, mock_client, mock_replace):
+    """Undoing a write that created a day must remove it, not leave an invented one
+    behind with whatever the write put there."""
+    from db.plan import restore_days
+
+    chain = mock_client.return_value
+    result = restore_days("plan-uuid", [{"plan_date": "2026-09-01", "absent": True}])
+
+    assert result["status"] == "success"
+    assert result["restored"] == ["2026-09-01"]
+    chain.table.return_value.delete.return_value.eq.assert_called_once_with("id", "day-uuid")
+
+
+@patch("db.plan.replace_plan_intervals", return_value={"status": "success"})
+@patch("db.plan.get_supabase_client")
+@patch("db.plan.get_day_id", side_effect=["day-1", "day-2"])
+def test_one_day_failing_to_restore_does_not_abort_the_rest(mock_day_id, mock_client, mock_replace):
+    """Same resilience update_plan_day has: a half-reverted plan is worse than a
+    reported partial, because the user cannot tell which days came back."""
+    from db.plan import restore_days
+
+    chain = mock_client.return_value
+    chain.table.return_value.update.return_value.eq.return_value.execute.side_effect = [
+        Exception("row locked"),
+        MagicMock(),
+    ]
+    snapshot = [
+        {"plan_date": "2026-09-01", "absent": False, "day": {"workout_type": "EASY"}, "intervals": []},
+        {"plan_date": "2026-09-02", "absent": False, "day": {"workout_type": "LONG"}, "intervals": []},
+    ]
+
+    result = restore_days("plan-uuid", snapshot)
+
+    assert result["status"] == "partial"
+    assert result["restored"] == ["2026-09-02"]
+    assert result["failed"][0]["plan_date"] == "2026-09-01"
+
+
+def test_a_failed_restore_puts_the_stacks_back():
+    """Nothing was written, so the stacks must not move either. Otherwise a restore that
+    failed outright still costs the user an undo level and leaves redo holding a
+    snapshot identical to what is already on screen."""
+    entry = [{"plan_date": "2026-09-01", "absent": False, "day": {"workout_type": "EASY"}, "intervals": []}]
+    plan_service.record_plan_undo("u1", entry)
+
+    with (
+        patch("services.plan.get_plan_id", return_value="plan-uuid"),
+        patch("services.plan.snapshot_days", return_value=entry),
+        patch(
+            "services.plan.restore_days",
+            return_value={"status": "fail", "restored": [], "failed": [{"plan_date": "2026-09-01"}]},
+        ),
+    ):
+        result = plan_service.undo_plan("u1")
+
+    assert result["status"] == "fail"
+    assert _undo_stacks() == {"undo": 1, "redo": 0}
+
+
+def test_a_partial_restore_leaves_the_stacks_moved():
+    """The plan really did change, so the stacks should say so — rolling back here would
+    describe a state the plan is no longer in."""
+    entry = [{"plan_date": "2026-09-01", "absent": False, "day": {"workout_type": "EASY"}, "intervals": []}]
+    plan_service.record_plan_undo("u1", entry)
+
+    with (
+        patch("services.plan.get_plan_id", return_value="plan-uuid"),
+        patch("services.plan.snapshot_days", return_value=entry),
+        patch(
+            "services.plan.restore_days",
+            return_value={"status": "partial", "restored": ["2026-09-01"], "failed": [{"plan_date": "2026-09-02"}]},
+        ),
+    ):
+        plan_service.undo_plan("u1")
+
+    assert _undo_stacks() == {"undo": 0, "redo": 1}
+
+
+def test_a_redis_outage_does_not_block_the_edit():
+    """Undo is a convenience layered on the write. The manual day routes needed no Redis
+    at all before undo existed, and must not start 500ing when it is unavailable."""
+    with patch("services.plan._push", side_effect=ConnectionError("redis down")):
+        plan_service.record_plan_undo("u1", [{"plan_date": "2026-09-01", "absent": True}])
+
+    with (
+        patch("services.plan.get_plan_id", return_value="plan-uuid"),
+        patch("services.plan.get_day_date", side_effect=ConnectionError("redis down")),
+    ):
+        plan_service.record_day_undo("u1", "day-uuid")  # must not raise
+
+
+def test_a_manual_day_edit_also_snapshots_and_clears_redo():
+    """The Edit and clear buttons write straight through patch_plan/clear_day, bypassing
+    update_plan. Without their own snapshot a hand-edit was neither undoable nor able to
+    invalidate redo, so a later Redo silently overwrote it."""
+    plan_service._push(plan_service._redo_key("u1"), [{"plan_date": "2026-09-02", "absent": True}])
+
+    with (
+        patch("services.plan.get_plan_id", return_value="plan-uuid"),
+        patch("services.plan.get_day_date", return_value="2026-09-01"),
+        patch("services.plan.snapshot_days", return_value=[{"plan_date": "2026-09-01", "absent": False}]),
+    ):
+        plan_service.record_day_undo("u1", "day-uuid")
+
+    assert plan_service.get_undo_depths("u1") == {"undo": 1, "redo": 0}
+
+
+# ── no-op change filter ───────────────────────────────────────────────────────
+
+
+def _before(date_s, day, intervals=None):
+    return [{"plan_date": date_s, "absent": False, "day": day, "intervals": intervals or []}]
+
+
+def test_a_change_matching_the_current_row_is_dropped():
+    """Two syncs of an already-reconciled day wrote identical values both times, and an
+    UPDATE with identical values still succeeds, so every sync counted as applied. With
+    undo live each redundant write burns a level and clears redo."""
+    from services.plan import _drop_unchanged
+
+    before = _before("2026-09-01", {"workout_type": "INTERVAL", "target_miles": 7, "target_pace": "6:22"})
+    change = {"plan_date": "2026-09-01", "workout_type": "INTERVAL", "target_miles": 7.0, "target_pace": "6:22"}
+
+    keep, unchanged = _drop_unchanged([change], before)
+
+    assert keep == []
+    assert unchanged == ["2026-09-01"]
+
+
+def test_a_real_change_survives_the_filter():
+    from services.plan import _drop_unchanged
+
+    before = _before("2026-09-01", {"workout_type": "INTERVAL", "target_miles": 7, "target_pace": "6:22"})
+    change = {"plan_date": "2026-09-01", "workout_type": "INTERVAL", "target_miles": 9.0, "target_pace": "6:22"}
+
+    keep, unchanged = _drop_unchanged([change], before)
+
+    assert len(keep) == 1 and unchanged == []
+
+
+def test_only_the_fields_the_model_set_are_compared():
+    """A change carries just the fields the model chose to set; a missing field means
+    leave it alone, not set it to null. Comparing wholesale would call every partial
+    edit a change."""
+    from services.plan import _drop_unchanged
+
+    before = _before("2026-09-01", {"workout_type": "EASY", "target_miles": 5, "notes": "keep me"})
+    keep, unchanged = _drop_unchanged([{"plan_date": "2026-09-01", "workout_type": "EASY"}], before)
+
+    assert unchanged == ["2026-09-01"]
+    assert keep == []
+
+
+def test_a_reps_only_edit_is_not_mistaken_for_a_no_op():
+    """Day fields identical, rep breakdown different — dropping this would silently
+    discard a real interval edit."""
+    from services.plan import _drop_unchanged
+
+    before = _before(
+        "2026-09-01",
+        {"workout_type": "INTERVAL"},
+        [{"interval_num": 1, "interval_type": "WORK", "target_pace": "6:22"}],
+    )
+    change = {
+        "plan_date": "2026-09-01",
+        "workout_type": "INTERVAL",
+        "intervals": [{"interval_num": 1, "interval_type": "WORK", "target_pace": "5:52"}],
+    }
+
+    keep, unchanged = _drop_unchanged([change], before)
+
+    assert len(keep) == 1 and unchanged == []
+
+
+def test_a_change_for_a_day_that_does_not_exist_yet_is_kept():
+    """Nothing to compare against — this one creates the day."""
+    from services.plan import _drop_unchanged
+
+    keep, unchanged = _drop_unchanged(
+        [{"plan_date": "2026-09-09", "workout_type": "EASY"}], [{"plan_date": "2026-09-09", "absent": True}]
+    )
+
+    assert len(keep) == 1 and unchanged == []
+
+
+# ── day ownership ─────────────────────────────────────────────────────────────
+
+
+def test_editing_a_day_outside_your_plan_is_not_found():
+    """The day routes take a raw uuid, so without this check any authenticated user
+    could edit another user's day by supplying its id. 404, not 403: a caller who does
+    not own the day should not learn it exists."""
+    from routes.plan import _owned_day
+
+    with (
+        patch("routes.plan.get_plan_id", return_value="my-plan"),
+        patch("routes.plan.day_belongs_to", return_value=False),
+        pytest.raises(HTTPException) as exc,
+    ):
+        _owned_day("u1", "someone-elses-day")
+
+    assert exc.value.status_code == 404
+
+
+def test_ownership_check_fails_closed_when_the_lookup_errors():
+    """A DB error must not become an open door."""
+    from db.plan import day_belongs_to
+
+    with patch("db.plan.get_supabase_client", side_effect=Exception("db down")):
+        assert day_belongs_to("my-plan", "day-uuid") is False
+
+
+def test_a_day_in_your_own_plan_passes_and_returns_the_plan_id():
+    """The plan_id is handed back so the undo snapshot does not repeat the lookup."""
+    from routes.plan import _owned_day
+
+    with (
+        patch("routes.plan.get_plan_id", return_value="my-plan"),
+        patch("routes.plan.day_belongs_to", return_value=True),
+    ):
+        assert _owned_day("u1", "my-day") == "my-plan"
 
 
 # ── orphaned job locks ────────────────────────────────────────────────────────
