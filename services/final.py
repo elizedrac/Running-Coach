@@ -10,6 +10,31 @@ from services.prompts import BASE_COACH, HEALTH_METRICS_KNOWLEDGE, TOOL_SNIPPETS
 RACE_PREP_KNOWLEDGE = (Path(__file__).parent.parent / "knowledge" / "race_prep.md").read_text()
 
 
+def _planned_total(days) -> str | None:
+    """Weekly mileage, summed here rather than left to the model. Asked to total a week
+    it had just listed correctly, it reported 34 for a week that added to 41 and coached
+    off that number for the rest of the conversation.
+
+    Planned targets only. A part-done week has two defensible totals (scheduled vs
+    logged-so-far plus remaining) and blending them silently is the failure this exists
+    to stop, so the label says which one this is.
+    """
+    if not isinstance(days, list):
+        return None
+    rows = []
+    for entry in days:
+        # Two get_plan calls in one turn arrive nested — see the tool_results merge in coach.py
+        if isinstance(entry, list):
+            rows.extend(entry)
+        else:
+            rows.append(entry)
+    rows = [r for r in rows if isinstance(r, dict)]
+    if not rows:
+        return None
+    total = sum(r.get("target_miles") or 0 for r in rows)
+    return f"{total:.1f} mi scheduled across the {len(rows)} returned days (planned targets only, not what was actually run)"
+
+
 def final_output(
     user_query: str,
     planner_decision: PlannerOutput,
@@ -47,6 +72,9 @@ def final_output(
             if tool.name == "get_plan":
                 plan_details = get_current_plan(user_id)
                 knowledge += f"\n\n[plan/race_meta]\n{plan_details}"
+                planned_total = _planned_total(result)
+                if planned_total:
+                    knowledge += f"\n\n[plan/planned_total]\n{planned_total}"
 
             if tool.name == "race_prep_info":
                 knowledge += f"\n\n[race_prep_knowledge]\n{RACE_PREP_KNOWLEDGE}"

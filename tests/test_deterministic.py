@@ -36,6 +36,7 @@ from services.cache import clear_user_cache, get_cached, set_cached
 from services.coach import orchestrate
 from services.course_details import _compute_similarity, find_relevant_chunks
 from services.end import detect_end, is_end_message
+from services.final import _planned_total
 from services.guardrails import input_check
 from services.llm import extract_json
 from services.memory import compress_history
@@ -3100,3 +3101,48 @@ def test_patch_day_route_forwards_explicit_nulls(mock_owned, mock_undo, mock_pat
     forwarded = mock_patch.call_args[0][1]
     assert forwarded["notes"] is None
     assert forwarded["workout_type"] == "EASY"
+
+
+# ── planned weekly total ──────────────────────────────────────────────────────
+
+
+def test_planned_total_sums_target_miles():
+    """The bug this exists for: the model listed 7 + 5.6 + 7 + 7.4 + 14 correctly and
+    then reported the total as 34."""
+    days = [
+        {"day_of_week": "MON", "workout_type": "REST", "target_miles": None},
+        {"day_of_week": "TUE", "workout_type": "INTERVAL", "target_miles": 7},
+        {"day_of_week": "WED", "workout_type": "EASY", "target_miles": 5.6},
+        {"day_of_week": "THU", "workout_type": "TEMPO", "target_miles": 7},
+        {"day_of_week": "FRI", "workout_type": "AEROBIC", "target_miles": 7.4},
+        {"day_of_week": "SAT", "workout_type": "REST", "target_miles": None},
+        {"day_of_week": "SUN", "workout_type": "LONG", "target_miles": 14},
+    ]
+    assert _planned_total(days).startswith("41.0 mi scheduled across the 7 returned days")
+
+
+def test_planned_total_treats_null_rest_days_as_zero_not_missing():
+    """REST rows carry target_miles=None. Summing them naively raises, and skipping the
+    rows entirely would misreport how many days the total covers."""
+    days = [
+        {"workout_type": "REST", "target_miles": None},
+        {"workout_type": "EASY", "target_miles": 4.0},
+    ]
+    result = _planned_total(days)
+    assert result.startswith("4.0 mi scheduled across the 2 returned days")
+
+
+def test_planned_total_returns_none_when_there_are_no_days():
+    """No plan rows means no total to state — the coach must stay silent rather than
+    tell the user they have 0.0 miles scheduled."""
+    assert _planned_total([]) is None
+    assert _planned_total("Error running get_plan: boom") is None
+
+
+def test_planned_total_flattens_repeated_get_plan_calls():
+    """Two get_plan calls in one turn are merged into a list of lists by coach.py."""
+    days = [
+        [{"workout_type": "EASY", "target_miles": 5.0}],
+        [{"workout_type": "LONG", "target_miles": 12.0}],
+    ]
+    assert _planned_total(days).startswith("17.0 mi scheduled across the 2 returned days")
