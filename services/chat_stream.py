@@ -35,6 +35,10 @@ def _stream_key(user_id: str, session_id: str) -> str:
     return f"chatstream:{user_id}:{session_id}"
 
 
+def _display_key(user_id: str, session_id: str) -> str:
+    return f"display:{user_id}:{session_id}"
+
+
 def _lock_key(user_id: str, session_id: str) -> str:
     return f"chatlock:{user_id}:{session_id}"
 
@@ -50,6 +54,40 @@ def _load_history(user_id: str, session_id: str) -> History:
 
 def _save_history(user_id: str, session_id: str, hist: History) -> None:
     get_redis().set(_history_key(user_id, session_id), json.dumps(dataclasses.asdict(hist)), ex=SESSION_TTL)
+
+
+# Kept apart from History on purpose. History is loaded and rewritten on every
+# turn to build the model's context, so the transcript must not ride along with
+# it; and History is a poor transcript anyway, since it abridges replies over
+# 900 chars and keeps only the last turn every fifth turn. A list lets a turn
+# append without reading the whole conversation back first.
+DISPLAY_MAXLEN = 100  # messages, so 50 turns
+
+
+def append_display(user_id: str, session_id: str, user_query: str, reply: str) -> None:
+    """Record one turn for the UI, full text, no abridging.
+
+    An empty reply appends the question alone: a job that died before producing
+    anything should still leave the user's own message on screen after a reload,
+    and a blank assistant bubble would look like the coach answered with silence.
+    """
+    key = _display_key(user_id, session_id)
+    messages = [json.dumps({"role": "user", "content": user_query})]
+    if reply:
+        messages.append(json.dumps({"role": "assistant", "content": reply}))
+    pipe = get_redis().pipeline()
+    pipe.rpush(key, *messages)
+    pipe.ltrim(key, -DISPLAY_MAXLEN, -1)
+    pipe.expire(key, SESSION_TTL)  # same lifetime as the history it mirrors
+    pipe.execute()
+
+
+def load_display(user_id: str, session_id: str) -> list[dict]:
+    return [json.loads(_decode(v)) for v in get_redis().lrange(_display_key(user_id, session_id), 0, -1)]
+
+
+def clear_display(user_id: str, session_id: str) -> None:
+    get_redis().delete(_display_key(user_id, session_id))
 
 
 def acquire_chat_lock(user_id: str, session_id: str) -> bool:
@@ -96,6 +134,7 @@ def run_chat_job(
     # Background task: runs outside the request, so it needs its own log scope.
     init_log_context(user_id=user_id, session_id=session_id, job="chat")
     started = time.monotonic()
+    reply_chunks: list[str] = []
     logger.info("chat_job_start", extra={"query_chars": len(user_query)})
     try:
         r.delete(_cancel_key(user_id, session_id))  # stale flag from a previous answer
@@ -122,8 +161,14 @@ def run_chat_job(
         ):
             if event_type == "done":
                 _save_history(user_id, session_id, data)
+                # The chunks are exactly what the user watched arrive, so they
+                # are the honest transcript. History's copy is abridged.
+                append_display(user_id, session_id, user_query, "".join(reply_chunks))
                 _xadd(r, key, "done")
-            elif event_type in ("chunk", "status"):
+            elif event_type == "chunk":
+                reply_chunks.append(data)
+                _xadd(r, key, event_type, data)
+            elif event_type == "status":
                 _xadd(r, key, event_type, data)
             elif event_type == "plan_updated":
                 _xadd(r, key, "plan_updated")
@@ -138,6 +183,13 @@ def run_chat_job(
             extra={"duration_ms": round((time.monotonic() - started) * 1000)},
             exc_info=True,
         )
+        # The turn never reached "done", so nothing recorded it. Keep the
+        # question (and any text that did arrive) or a reload erases an exchange
+        # the user watched happen.
+        try:
+            append_display(user_id, session_id, user_query, "".join(reply_chunks))
+        except Exception:
+            logger.error("chat_job_display_append_failed", exc_info=True)
         try:
             _xadd(r, key, "error", str(e))
         except Exception:

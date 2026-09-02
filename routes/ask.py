@@ -13,7 +13,9 @@ from services.chat_stream import (
     _load_history,
     _save_history,  # noqa: F401 — re-exported for tests
     acquire_chat_lock,
+    clear_display,
     has_active_stream,
+    load_display,
     read_chat_stream,
     request_chat_cancel,
     run_chat_job,
@@ -65,14 +67,21 @@ def ask_stop(session_id: str, user_id: str = Depends(get_current_user)):
 
 @router.get("/session/{session_id}")
 def get_session(session_id: str, user_id: str = Depends(get_current_user)):
-    # Recent verbatim turns only — older turns live compressed in History.summary.
+    # The display transcript is the full text of every turn. History.recent is the
+    # model's context: replies abridged, and all but the last turn dropped every
+    # fifth turn, which made a reload look like the conversation had been erased.
+    # Sessions that predate the transcript have an empty list, so fall back to
+    # History rather than showing them nothing.
     # generating=True means a background answer is in flight; client should attach.
-    hist = _load_history(user_id, session_id)
-    return {"turns": hist.recent, "generating": has_active_stream(user_id, session_id)}
+    turns = load_display(user_id, session_id) or _load_history(user_id, session_id).recent
+    return {"turns": turns, "generating": has_active_stream(user_id, session_id)}
 
 
 @router.delete("/session/{session_id}")
 def clear_session(session_id: str, user_id: str = Depends(get_current_user)):
     r = get_redis()
     r.delete(_history_key(user_id, session_id))
+    # Both, or "new chat" clears the model's memory but leaves the old
+    # conversation on screen after the next reload.
+    clear_display(user_id, session_id)
     return {"status": "cleared"}

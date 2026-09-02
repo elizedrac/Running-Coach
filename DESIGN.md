@@ -43,6 +43,7 @@ A personal AI running coach that ingests Garmin health and activity data, stores
 | Cache / sessions / rate limits | Redis (redis:7-alpine container) | Query cache, chat history, rate limiting, sync job status/locks |
 | Auth | Supabase Auth | Email/password login; JWT validated server-side via `get_user()` |
 | Hosting (app) | AWS EC2 | Docker + nginx reverse proxy |
+| Logs | Vector → Axiom | Sidecar container tails the Docker socket, parses the app's JSON lines into fields, ships over outbound HTTPS (`vector.yaml`) |
 | Hosting (DB) | Supabase cloud | Already cloud-hosted, no migration needed |
 | Weather | WeatherAPI.com | Free tier, API key required, current day + 12-hour forecast |
 | Web search | Anthropic web search tool | Built-in, no extra API key |
@@ -96,7 +97,7 @@ runcoach/
 │   ├── race_info.py               # get_race_info() — time-sensitive race logistics (registration/race_day); fuzzy cache lookup (word overlap → Voyage embedding cosine sim) via db/search_cache.py before falling back to web_search + LLM
 │   ├── weather.py                 # WeatherAPI wrapper (current day + 12-hour forecast)
 │   ├── cache.py                   # Redis-backed range-aware cache (get_cached, set_cached, clear_user_cache), 1h TTL; fails open if Redis is down
-│   ├── chat_stream.py             # Decoupled chat generation: run_chat_job (background, XADDs orchestrate events to Redis Stream) + read_chat_stream (resumable reader) + per-session lock/cancel + history load/save
+│   ├── chat_stream.py             # Decoupled chat generation: run_chat_job (background, XADDs orchestrate events to Redis Stream) + read_chat_stream (resumable reader) + per-session lock/cancel + history load/save + display transcript (append_display/load_display)
 │   ├── rate_limit.py              # check_rate_limit() — per-user fixed-window Redis counters; USER_IDS env exempt
 │   ├── auth.py                    # get_current_user() FastAPI dependency — validates Bearer JWT via Supabase, returns user_id
 │   ├── pacing.py                  # pacing_calculator() — Riegel equivalent marathon pace → Daniels-style zones + GPS-adjusted pace + VO2-derived easy pace
@@ -914,7 +915,9 @@ models/
 ## Memory & Compression ✓
 
 - `History` dataclass (`models/planner.py`): `summary: str`, `recent: list[dict]`, `turn_count: int`
-- **Session ownership**: history is passed to `orchestrate()` as a parameter and returned after each turn. `routes/ask.py` stores it in Redis keyed `session:{user_id}:{session_id}` (24h TTL) — `user_id` always from the validated JWT, so cross-user reads are impossible; `session_id` is a frontend UUID persisted in localStorage (`rc_sid`), so the conversation survives page reloads. "Clear chat" deletes the key (authenticated) and rotates the UUID. Note: the coach's memory survives reloads but the rendered chat bubbles do not (messages aren't persisted client-side).
+- **Session ownership**: history is passed to `orchestrate()` as a parameter and returned after each turn. `routes/ask.py` stores it in Redis keyed `session:{user_id}:{session_id}` (24h TTL) — `user_id` always from the validated JWT, so cross-user reads are impossible; `session_id` is a frontend UUID persisted in localStorage (`rc_sid`), so the conversation survives page reloads. "Clear chat" deletes both keys (authenticated) and rotates the UUID.
+- **Display transcript**: a second Redis key, `display:{user_id}:{session_id}` (list, `RPUSH` + `LTRIM` to the last 100 messages, same 24h TTL), holds the full text of every completed turn. `History` is the model's context, not a transcript: it abridges replies over 900 chars and drops all but the last turn every 5th turn, so rendering it as chat bubbles made a reload look like the conversation had been erased. `run_chat_job` accumulates the streamed chunks and appends them on `done`; `GET /session/{id}` returns this list, falling back to `History.recent` when it is empty so sessions that predate it are unaffected. Kept in a separate key because `History` is read and rewritten every turn to build the prompt, and the transcript must not ride along with it.
+- **Not recorded**: the goodbye path (`routes/ask.py`, `detect_end`) returns synchronously without starting a job, and a job that raises before `done` never appends, so neither exchange survives a reload — the user's own question included.
 - **Planner context**: last 2 turns from `recent` + `summary` injected into planner user prompt
 - **Final LLM context**: last 2 turns + `summary` injected into final user prompt alongside today's date
 - **Compression**: fires every 5 turns. Haiku call via `services/memory.py::compress_history()` (max 400 tokens, `cache_system=True`). After compression: `summary` updated, `recent` trimmed to last 1 turn as overlap.

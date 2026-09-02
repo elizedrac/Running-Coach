@@ -4,6 +4,10 @@
 sources:
   docker:
     type: docker_logs
+    # Prefix match, so runcoach and runcoach-redis are in. Without it every
+    # throwaway `docker run` on the host lands in the dataset too.
+    include_containers:
+      - runcoach
     # Without this Vector ships its own log lines, which produce more log
     # lines, forever.
     exclude_containers:
@@ -26,6 +30,25 @@ transforms:
           "[redacted]"
         )
       }
+
+      # The app logs one JSON object per line (services/logging_config.py).
+      # Lift those keys to the top level so Axiom can group by event, status or
+      # user_id instead of storing the whole line as one text blob. Lines that
+      # are not JSON, like uvicorn's banner, fall through untouched.
+      # Keep .message as well: Axiom's Stream view renders it as the line text,
+      # so dropping it makes parsed lines look blank next to unparsed ones.
+      parsed, err = parse_json(.message)
+      if err == null && is_object(parsed) {
+        . = merge(., object!(parsed))
+        # Fall back rather than string!(): a JSON line from anything but this
+        # app may have no .event, and that errors the whole program.
+        .message = string(.event) ?? .message
+      }
+
+      # Docker's compose labels repeat the config hash and image sha on every
+      # single event. Pure noise, and they bloat the payload.
+      del(.label)
+      del(.container_created_at)
 
 sinks:
   axiom:

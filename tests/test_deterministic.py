@@ -27,7 +27,7 @@ from db.plan import (
 from db.preferences import get_preferences, set_notes, update_preferences
 from db.redis import get_redis
 from models.planner import History, PatchDayRequest
-from routes.ask import _history_key, _load_history, _save_history, get_session
+from routes.ask import _history_key, _load_history, _save_history, clear_session, get_session
 from services import chat_stream
 from services import garmin as garmin_service
 from services import plan as plan_service
@@ -1986,6 +1986,87 @@ def test_get_session_empty_for_unknown_session():
     assert get_session("never-seen", "userA") == {"turns": [], "generating": False}
 
 
+# ── display transcript tests (what the UI renders after a reload) ────────────
+
+
+def test_display_transcript_roundtrip():
+    chat_stream.append_display("userA", "s-disp", "how far tuesday", "8 miles easy")
+    assert chat_stream.load_display("userA", "s-disp") == [
+        {"role": "user", "content": "how far tuesday"},
+        {"role": "assistant", "content": "8 miles easy"},
+    ]
+
+
+def test_display_transcript_keeps_full_reply():
+    # History abridges anything over 900 chars into head + [...] + tail. The
+    # transcript is read by a human, so it must keep the whole thing.
+    reply = "x" * 2000
+    chat_stream.append_display("userA", "s-full", "why", reply)
+    assert chat_stream.load_display("userA", "s-full")[1]["content"] == reply
+
+
+def test_display_transcript_survives_history_compression():
+    # History keeps only the last turn every fifth turn. The transcript keeps all
+    # of them, which is the whole point of storing it separately.
+    for i in range(5):
+        chat_stream.append_display("userA", "s-comp", f"q{i}", f"a{i}")
+    turns = chat_stream.load_display("userA", "s-comp")
+    assert len(turns) == 10
+    assert turns[0]["content"] == "q0"
+
+
+def test_display_transcript_capped_at_maxlen():
+    for i in range(chat_stream.DISPLAY_MAXLEN):  # two messages each, so twice the cap
+        chat_stream.append_display("userA", "s-cap", f"q{i}", f"a{i}")
+    turns = chat_stream.load_display("userA", "s-cap")
+    assert len(turns) == chat_stream.DISPLAY_MAXLEN
+    assert turns[-1]["content"] == f"a{chat_stream.DISPLAY_MAXLEN - 1}"  # newest kept
+    assert turns[0]["content"] == f"q{chat_stream.DISPLAY_MAXLEN // 2}"  # oldest dropped
+
+
+def test_display_transcript_question_alone_when_reply_empty():
+    # A blank assistant bubble would read as the coach answering with silence.
+    chat_stream.append_display("userA", "s-noreply", "why is my pace slow", "")
+    assert chat_stream.load_display("userA", "s-noreply") == [{"role": "user", "content": "why is my pace slow"}]
+
+
+def test_display_transcript_scoped_per_user():
+    chat_stream.append_display("userA", "shared-sid", "private", "reply")
+    assert chat_stream.load_display("userB", "shared-sid") == []
+
+
+def test_display_transcript_expires_with_history():
+    # No TTL would leak one key per conversation forever.
+    chat_stream.append_display("userA", "s-ttl", "q", "a")
+    assert 0 < get_redis().ttl(chat_stream._display_key("userA", "s-ttl")) <= chat_stream.SESSION_TTL
+
+
+def test_get_session_prefers_display_transcript():
+    # Same session, both keys present: the UI must get the full text, not the
+    # model's abridged context.
+    _save_history("userA", "s-pref", History(recent=[{"role": "user", "content": "abridged"}], turn_count=5))
+    chat_stream.append_display("userA", "s-pref", "full question", "full answer")
+    assert get_session("s-pref", "userA")["turns"] == [
+        {"role": "user", "content": "full question"},
+        {"role": "assistant", "content": "full answer"},
+    ]
+
+
+def test_get_session_falls_back_to_history_without_transcript():
+    # Conversations already in Redis when this shipped have no transcript, and
+    # must not come back empty.
+    turns = [{"role": "user", "content": "older session"}]
+    _save_history("userA", "s-legacy", History(recent=turns, turn_count=1))
+    assert get_session("s-legacy", "userA")["turns"] == turns
+
+
+def test_clear_session_clears_transcript():
+    # Missing this leaves the old conversation on screen after "new chat".
+    chat_stream.append_display("userA", "s-clear", "q", "a")
+    clear_session("s-clear", "userA")
+    assert chat_stream.load_display("userA", "s-clear") == []
+
+
 # ── chat stream tests (phase 4: decoupled generation) ────────────────────────
 
 
@@ -2021,6 +2102,42 @@ def test_run_chat_job_writes_stream_and_saves_history(monkeypatch):
     assert chat_stream.acquire_chat_lock("u1", "s-job")
 
 
+def test_run_chat_job_records_display_transcript(monkeypatch):
+    def fake_orchestrate(query, user_id, hist, **kwargs):
+        yield ("status", "thinking...")  # status text must not land in the reply
+        yield ("chunk", "hello ")
+        yield ("chunk", "world")
+        yield ("done", hist)
+
+    monkeypatch.setattr(chat_stream, "orchestrate", fake_orchestrate)
+    chat_stream.acquire_chat_lock("u1", "s-tr")
+    chat_stream.run_chat_job("hi coach", "u1", "s-tr")
+
+    assert chat_stream.load_display("u1", "s-tr") == [
+        {"role": "user", "content": "hi coach"},
+        {"role": "assistant", "content": "hello world"},
+    ]
+
+
+def test_run_chat_job_transcript_keeps_what_history_abridges(monkeypatch):
+    # The point of the transcript: History stores a head + tail summary of any
+    # reply over 900 chars, and the UI must still show the whole thing.
+    long_reply = "y" * 2000
+
+    def fake_orchestrate(query, user_id, hist, **kwargs):
+        yield ("chunk", long_reply)
+        hist.recent.append({"role": "user", "content": query})
+        hist.recent.append({"role": "assistant", "content": long_reply[:650] + "\n[...]\n" + long_reply[-200:]})
+        yield ("done", hist)
+
+    monkeypatch.setattr(chat_stream, "orchestrate", fake_orchestrate)
+    chat_stream.acquire_chat_lock("u1", "s-long")
+    chat_stream.run_chat_job("why", "u1", "s-long")
+
+    assert "[...]" in chat_stream._load_history("u1", "s-long").recent[-1]["content"]
+    assert chat_stream.load_display("u1", "s-long")[-1]["content"] == long_reply
+
+
 def test_run_chat_job_error_writes_error_event(monkeypatch):
     def boom(*a, **k):
         raise RuntimeError("llm exploded")
@@ -2032,6 +2149,23 @@ def test_run_chat_job_error_writes_error_event(monkeypatch):
     assert events[-1][1] == "error"
     assert "llm exploded" in events[-1][2]
     assert chat_stream.acquire_chat_lock("u1", "s-err")  # lock released
+    # A crash must not erase the question the user watched themselves send
+    assert chat_stream.load_display("u1", "s-err") == [{"role": "user", "content": "hi"}]
+
+
+def test_run_chat_job_error_keeps_partial_reply(monkeypatch):
+    def half_then_boom(query, user_id, hist, **kwargs):
+        yield ("chunk", "your easy run should be ")
+        raise RuntimeError("llm exploded")
+
+    monkeypatch.setattr(chat_stream, "orchestrate", half_then_boom)
+    chat_stream.acquire_chat_lock("u1", "s-partial")
+    chat_stream.run_chat_job("how far", "u1", "s-partial")
+
+    assert chat_stream.load_display("u1", "s-partial") == [
+        {"role": "user", "content": "how far"},
+        {"role": "assistant", "content": "your easy run should be "},
+    ]
 
 
 def test_read_chat_stream_resumes_after_id(monkeypatch):
