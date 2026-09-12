@@ -567,6 +567,11 @@ PLAN_CREATOR_TOOLS = [
     {
         "name": "save_training_plan",
         "description": "Save the complete generated training plan. Call this as your final action after gathering all context. Include every calendar day from plan start through race date.",
+        # Without this the API buffers the whole days array and delivers it in one burst
+        # at the end: a 193-day plan spent 3.5 min generating with nothing on the wire,
+        # then landed in a second, so _drain_plan_stream's progress read 0 the whole way.
+        # Only affects delivery — the accumulated tool input is parsed identically.
+        "eager_input_streaming": True,
         "input_schema": {
             "type": "object",
             "properties": {

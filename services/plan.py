@@ -1,6 +1,7 @@
 # Training plan creation, update, injury logic.
 import json
 import os
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 
@@ -40,6 +41,8 @@ PLAN_TOOL_REGISTRY = {
 
 PLAN_STATUS_TTL = 86400  # Status blob stays readable for a day after the job finishes
 PLAN_LOCK_TTL = 2400  # 40 min; must outlive the longest create_plan agent loop
+
+PHASE_LOG_INTERVAL = 10  # seconds between create_plan_phase lines while days stream in
 
 
 UNDO_DEPTH = 3
@@ -224,6 +227,52 @@ def run_locked_plan_update(user_id: str, **kwargs) -> dict:
         _release_plan_lock(user_id)
 
 
+def _drain_plan_stream(stream, iteration: int, phase: str, days_total: int):
+    """Consume the stream event by event so the log can say where a create actually is.
+
+    get_final_message() blocks until the whole plan lands, which on a 28-week race is
+    minutes of silence — a job that dies in there is indistinguishable in the logs from
+    one that never started. The tool input arrives as input_json_delta chunks, so the
+    days can be counted as they are written rather than after the fact.
+
+    Log only: the status blob and the UI progress bar are deliberately left alone.
+    """
+    chunks: list[str] = []
+    last_log = 0.0
+    writing = False
+
+    def _log(named_phase: str) -> None:
+        # One "plan_date" key per day object, counted on the joined buffer rather than
+        # per chunk: a delta can split the key across two events, and a per-chunk count
+        # silently loses every day that lands on a boundary. Counting here rather than
+        # parsing, because partial JSON is invalid until the block closes.
+        logger.info(
+            "create_plan_phase",
+            extra={
+                "phase": named_phase,
+                "iteration": iteration,
+                "days_done": "".join(chunks).count('"plan_date"'),
+                "days_total": days_total,
+            },
+        )
+
+    logger.info("create_plan_phase", extra={"phase": phase, "iteration": iteration, "days_total": days_total})
+    for event in stream:
+        if event.type == "content_block_start" and getattr(event.content_block, "name", None) == "save_training_plan":
+            writing, last_log = True, time.monotonic()
+            _log("writing")
+        elif writing and event.type == "content_block_delta" and event.delta.type == "input_json_delta":
+            chunks.append(event.delta.partial_json)
+            if time.monotonic() - last_log >= PHASE_LOG_INTERVAL:
+                last_log = time.monotonic()
+                _log("writing")
+    if writing:
+        # A plan that streams in under PHASE_LOG_INTERVAL would otherwise only ever log
+        # days_done=0, which reads like a job that wrote nothing.
+        _log("written")
+    return stream.get_final_message()
+
+
 def create_plan(user_id: str) -> dict:
     race = get_race(user_id)
     prefs = get_preferences(user_id)
@@ -241,7 +290,12 @@ def create_plan(user_id: str) -> dict:
         }
     ]
 
+    # Every calendar day from today through race day, which is what save_training_plan
+    # is asked for. Only used to give the streamed day count a denominator.
+    days_total = (date.fromisoformat(race["race_date"][:10]) - date.today()).days + 1
+
     validated = False
+    phase = "thinking"
     for i in range(10):
         with client.messages.stream(
             model="claude-opus-4-7",
@@ -250,7 +304,7 @@ def create_plan(user_id: str) -> dict:
             messages=messages,
             max_tokens=32768,
         ) as stream:
-            response = stream.get_final_message()
+            response = _drain_plan_stream(stream, i, phase, days_total)
 
         messages.append({"role": "assistant", "content": response.content})
 
@@ -280,7 +334,12 @@ def create_plan(user_id: str) -> dict:
             violations = [] if validated else challenger(days, user_id, race.get("race_type", ""))
             if violations:
                 validated = True
-                logger.info("create_plan_violations", extra={"iteration": i, "violations": violations})
+                # Next pass is a rewrite, not a fresh think — say so in the phase line.
+                phase = "revising"
+                logger.info(
+                    "create_plan_violations",
+                    extra={"iteration": i, "violations": violations, "violation_count": len(violations)},
+                )
                 tool_results.append(
                     {
                         "type": "tool_result",

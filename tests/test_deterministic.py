@@ -1,5 +1,6 @@
 # Tests for all deterministic logic: plan constraints, injury severity mapping, REGISTRY validation, etc.
 import asyncio
+import json
 from contextlib import contextmanager
 from datetime import date as dt_date
 from datetime import datetime, timedelta
@@ -3146,3 +3147,141 @@ def test_planned_total_flattens_repeated_get_plan_calls():
         [{"workout_type": "LONG", "target_miles": 12.0}],
     ]
     assert _planned_total(days).startswith("17.0 mi scheduled across the 2 returned days")
+
+
+# ── Orphaned job status on boot ───────────────────────────────
+
+
+def test_boot_rewrites_stale_running_plan_status_to_error():
+    """A plan job dies with the process, but its status blob outlives the lock by
+    23+ hours. Left alone it tells a reattaching page to keep polling a job that no
+    longer exists."""
+    from main import clear_orphaned_job_locks
+
+    r = get_redis()
+    r.set("plan_job_status:stranded", json.dumps({"status": "running", "kind": "create"}))
+    clear_orphaned_job_locks()
+    blob = plan_service.get_plan_job_status("stranded")
+    assert blob["status"] == "error"
+    assert blob["kind"] == "create"  # planCreateDone vs planSyncDone is selected by this
+
+
+def test_boot_deletes_stale_running_garmin_status():
+    """pollSyncStatus stops cleanly on "idle", so the sync blob is dropped rather
+    than rewritten — an error would fire a failure toast nobody asked for."""
+    from main import clear_orphaned_job_locks
+
+    r = get_redis()
+    r.set("garmin_sync_status:stranded", json.dumps({"status": "running", "days_done": 3, "days_total": 10}))
+    clear_orphaned_job_locks()
+    assert garmin_service.get_sync_status("stranded") == {"status": "idle"}
+
+
+def test_boot_leaves_terminal_status_blobs_alone():
+    """Only "running" is stale by definition. A finished job's result is what the
+    reattach reads to show its toast, so rewriting it would lose the outcome."""
+    from main import clear_orphaned_job_locks
+
+    r = get_redis()
+    done = {"status": "success", "kind": "create"}
+    synced = {"status": "success", "days_synced": 5}
+    r.set("plan_job_status:finished", json.dumps(done))
+    r.set("garmin_sync_status:finished", json.dumps(synced))
+    clear_orphaned_job_locks()
+    assert plan_service.get_plan_job_status("finished") == done
+    assert garmin_service.get_sync_status("finished") == synced
+
+
+def test_boot_status_cleanup_survives_an_empty_redis():
+    """No keys at all is the normal boot. It must not raise or log a false alarm."""
+    from main import clear_orphaned_job_locks
+
+    clear_orphaned_job_locks()
+    assert plan_service.get_plan_job_status("nobody") == {"status": "idle"}
+
+
+# ── create_plan stream draining ───────────────────────────────
+
+
+class _FakeStream:
+    """Stands in for anthropic's MessageStream: iterable of events, with the accumulated
+    message available afterwards. The real one accumulates during iteration, so draining
+    it first and calling get_final_message() second is the same contract."""
+
+    def __init__(self, events, final="FINAL"):
+        self._events = events
+        self._final = final
+        self.consumed = 0
+
+    def __iter__(self):
+        for event in self._events:
+            self.consumed += 1
+            yield event
+
+    def get_final_message(self):
+        return self._final
+
+
+def _block_start(name):
+    return SimpleNamespace(type="content_block_start", content_block=SimpleNamespace(name=name))
+
+
+def _json_delta(chunk):
+    return SimpleNamespace(
+        type="content_block_delta",
+        delta=SimpleNamespace(type="input_json_delta", partial_json=chunk),
+    )
+
+
+def _phase_records(caplog):
+    return [r for r in caplog.records if r.getMessage() == "create_plan_phase"]
+
+
+def test_drain_plan_stream_returns_the_final_message():
+    """The whole point of the loop is unchanged: create_plan still gets the same message
+    it got from get_final_message(). Draining for logs must not cost it the response."""
+    stream = _FakeStream([_block_start("save_training_plan"), _json_delta('{"days":[]}')], final="THE MESSAGE")
+    assert plan_service._drain_plan_stream(stream, 0, "thinking", 100) == "THE MESSAGE"
+    assert stream.consumed == 2  # every event was read, not just the first
+
+
+def test_drain_plan_stream_counts_days_split_across_chunks(caplog):
+    """Streamed JSON splits wherever the network happens to break it, including through
+    the middle of "plan_date". Counting per chunk loses every day on a boundary."""
+    caplog.set_level("INFO")
+    events = [
+        _block_start("save_training_plan"),
+        _json_delta('{"days":[{"plan_date":"2026-09-08"},{"plan_'),
+        _json_delta('date":"2026-09-09"},{"plan_date":"2026-09-10"}]}'),
+    ]
+    plan_service._drain_plan_stream(_FakeStream(events), 0, "thinking", 3)
+    final = _phase_records(caplog)[-1]
+    assert final.phase == "written"
+    assert final.days_done == 3  # not 2 — the middle day straddles the chunk boundary
+
+
+def test_drain_plan_stream_reports_a_total_on_a_fast_write(caplog):
+    """Under PHASE_LOG_INTERVAL nothing re-logs, so without a closing line the only
+    record would say days_done=0 and read like a job that wrote nothing."""
+    caplog.set_level("INFO")
+    events = [_block_start("save_training_plan"), _json_delta('[{"plan_date":"2026-09-08"}]')]
+    plan_service._drain_plan_stream(_FakeStream(events), 0, "thinking", 1)
+    assert [r.days_done for r in _phase_records(caplog) if r.phase == "written"] == [1]
+
+
+def test_drain_plan_stream_ignores_other_tools(caplog):
+    """pacing_calculator and query_data stream their inputs too. Only the save block is
+    the plan, so nothing before it should start the count or emit a written line."""
+    caplog.set_level("INFO")
+    events = [_block_start("pacing_calculator"), _json_delta('{"goal_time":"01:40:00"}')]
+    plan_service._drain_plan_stream(_FakeStream(events), 0, "thinking", 50)
+    assert [r.phase for r in _phase_records(caplog)] == ["thinking"]
+
+
+def test_drain_plan_stream_labels_the_opening_phase(caplog):
+    """The phase carries through from create_plan, so a challenger rewrite is
+    distinguishable in the logs from a first attempt."""
+    caplog.set_level("INFO")
+    plan_service._drain_plan_stream(_FakeStream([]), 2, "revising", 199)
+    opening = _phase_records(caplog)[0]
+    assert (opening.phase, opening.iteration, opening.days_total) == ("revising", 2, 199)

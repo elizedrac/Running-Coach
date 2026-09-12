@@ -1,4 +1,5 @@
 # FastAPI app entry point (Phase 4). Registers routes/.
+import json
 import os
 import time
 import uuid
@@ -43,6 +44,52 @@ def clear_orphaned_job_locks():
         redis.delete(key)
     if cleared:
         logger.warning("cleared_orphaned_locks", extra={"count": len(cleared)})
+    _resolve_orphaned_job_status(redis)
+
+
+def _resolve_orphaned_job_status(redis) -> None:
+    """A job's status blob outlives its lock: the lock expires in 40 min, the blob in
+    a day. Clearing only the lock still left `{"status": "running"}` readable for 24 h,
+    so a page that reattached to it polled a job that had died with the old process
+    and span until the tab was closed.
+
+    The two blobs are resolved differently because their pollers read a missing key
+    differently. pollSyncStatus treats "idle" as finished and stops cleanly, so the
+    garmin blob is just deleted. pollPlanJob passes whatever it reads straight to
+    planCreateDone/planSyncDone, which word their toast off the status, so the plan
+    blob is rewritten to an error instead of dropping to a silent "idle". `kind` is
+    preserved because those two handlers are selected by it.
+
+    Per key rather than all-or-nothing: this runs inside `lifespan`, so an unparseable
+    value under either prefix would otherwise stop the app booting at all. A blob we
+    cannot read is not worth refusing to start over.
+    """
+    stale = 0
+    for key in redis.scan_iter("garmin_sync_status:*"):
+        try:
+            raw = redis.get(key)
+            if raw and json.loads(raw).get("status") == "running":
+                redis.delete(key)
+                stale += 1
+        except Exception:
+            logger.warning("orphaned_status_unreadable", extra={"key": str(key)}, exc_info=True)
+    for key in redis.scan_iter("plan_job_status:*"):
+        try:
+            raw = redis.get(key)
+            if not raw:
+                continue
+            blob = json.loads(raw)
+            if blob.get("status") != "running":
+                continue
+            blob.update({"status": "error", "error": "Interrupted by a server restart. Please try again."})
+            # keepttl: the blob is already counting down from when the job started, and
+            # a fresh 24 h would leave the "didn't finish" notice up a day past its time.
+            redis.set(key, json.dumps(blob), keepttl=True)
+            stale += 1
+        except Exception:
+            logger.warning("orphaned_status_unreadable", extra={"key": str(key)}, exc_info=True)
+    if stale:
+        logger.warning("resolved_orphaned_job_status", extra={"count": stale})
 
 
 @asynccontextmanager

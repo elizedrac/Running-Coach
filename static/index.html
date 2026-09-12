@@ -1496,6 +1496,22 @@ async function cancelSync(){
 }
 
 // ── Training Plan ─────────────────────────────────────────────
+const CREATE_PLAN_CTA=`<button class="create-plan-btn" onclick="openPlanModal()">+ Create Training Plan</button>`;
+// An empty plan week is ambiguous: the athlete never created one, or their last
+// create died with the server and left nothing behind. Only the job status blob can
+// tell those apart. Read on every render rather than fired once as a toast, so a
+// reload keeps explaining itself instead of silently showing a blank plan.
+async function emptyPlanPlaceholder(){
+  try{
+    const s=await(await apiFetch(`${API}/plan/job/status`)).json();
+    const failed=s.status==='error'||String(s.status||'').startsWith('fail');
+    // The blob carries str(e) from run_plan_job, which is a raw exception. Say that
+    // it failed, not what threw.
+    if(s.kind==='create'&&failed)
+      return `<div class="plan-placeholder">Your last plan attempt didn't finish.<br>Nothing was saved, so it's safe to try again.<br>${CREATE_PLAN_CTA}</div>`;
+  }catch(e){}
+  return `<div class="plan-placeholder">No training plan yet.<br>${CREATE_PLAN_CTA}</div>`;
+}
 async function loadPlan(){
   // A create is in flight; its progress bar owns #plan-list until the job lands.
   if(_progressInterval)return;
@@ -1524,7 +1540,10 @@ async function loadPlan(){
     if(!days||!days.length){
       hasPlan=_planWeekOffset!==0?hasPlan:false;
       ['plan-sync-btn','month-view-btn','delete-plan-btn','plan-history-row'].forEach(id=>document.getElementById(id).style.display='none');
-      list.innerHTML=_planWeekOffset===0?`<div class="plan-placeholder">No training plan yet.<br><button class="create-plan-btn" onclick="openPlanModal()">+ Create Training Plan</button></div>`:`<div class="plan-placeholder">No workouts for this week.</div>`;
+      if(_planWeekOffset!==0){list.innerHTML=`<div class="plan-placeholder">No workouts for this week.</div>`;return;}
+      const html=await emptyPlanPlaceholder();
+      if(_progressInterval)return;  // a create began while the status read was in flight
+      list.innerHTML=html;
       return;
     }
     if(isCurrentWeek){hasPlan=true;['plan-sync-btn','month-view-btn','delete-plan-btn'].forEach(id=>document.getElementById(id).style.display='');document.getElementById('plan-history-row').style.display='flex';}
