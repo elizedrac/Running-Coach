@@ -51,6 +51,12 @@ def final_output(
 
     if planner_decision.path == "tools":
         knowledge = ""
+        # Tracked separately rather than by testing `knowledge` itself: get_plan and
+        # race_prep_info append to the same string, so a tool list naming either before
+        # query_data made `knowledge` truthy and silently dropped the health block.
+        # "should I run today" calls get_plan alongside query_data, so whether the coach
+        # got HRV and sleep reference ranges came down to planner tool order.
+        health_added = False
         tools = planner_decision.tools
         for tool in tools:
             snippet = TOOL_SNIPPETS.get(tool.name, "").replace("{min_date}", min_date)
@@ -66,8 +72,9 @@ def final_output(
                 if result:
                     user_prompt += f"\nData: {result}"
 
-            if (tool.name == "query_data" or tool.name == "trend_analysis") and not knowledge:
-                knowledge = f"\n\n[health_data_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
+            if (tool.name == "query_data" or tool.name == "trend_analysis") and not health_added:
+                knowledge += f"\n\n[health_data_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
+                health_added = True
 
             if tool.name == "get_plan":
                 plan_details = get_current_plan(user_id)
