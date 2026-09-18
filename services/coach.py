@@ -53,7 +53,6 @@ TOOL_REGISTRY = {
     "get_weather": get_weather,
     "garmin_sync": garmin_sync,
     "query_data": _query_data,
-    "trend_analysis": _query_data,
     "pacing_calculator": pacing_calculator,
     "get_course_details": get_course_details,
     "get_race_info": get_race_info,

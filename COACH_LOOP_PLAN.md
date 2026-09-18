@@ -39,9 +39,10 @@ orchestrate
 Two properties worth stating plainly, because they are what make this safe:
 
 1. **No write ever executes inside the loop.** Write tools are in the schema array so the
-   model can declare them with validated args, but the dispatcher records them and refuses
-   to run them. Every lock, every ordering rule and the per-day validation stay exactly
-   where they are today.
+   model can declare them with args it chose after reading, but the dispatcher records them
+   and refuses to run them. Every lock, every ordering rule and the per-day validation stay
+   exactly where they are today. (Args are recorded, not trusted: the API does not enforce
+   `input_schema`, so validation happens at dispatch.)
 2. **`final_output` keeps building the same prompt.** Its inputs change shape (tool results
    become a list, below) but every snippet and knowledge block stays exactly where it is.
    This is the big simplification over the previous plan: `TOOL_SNIPPETS` stay in the user
@@ -50,16 +51,24 @@ Two properties worth stating plainly, because they are what make this safe:
 
 ## Tool inventory
 
-| Class | Tools | Where they run |
-|---|---|---|
-| Read | `get_plan`, `query_data`, `get_race`, `get_preferences`, `get_weather`, `pacing_calculator`, `get_course_details`, `get_race_info` | Inside the loop |
-| Write | `update_plan`, `update_preferences`, `update_settings` | Declared in the loop, executed after |
-| Special | `garmin_sync` | Declared in the loop, executed after, keeps its existing lock/progress/cancel path |
-| Pseudo | `race_prep_info` | Not a tool. It is `lambda user_id, **kwargs: None` (`coach.py:65`) and exists only to flag `final.py:86` to inject `RACE_PREP_KNOWLEDGE`. Keep it as a declarable no-op so that flag still fires, but **return a short string instead of `None`**: nothing reads the result today, whereas the loop hands it straight back to the model, and a literal `null` reads as a failed call it should retry. |
+The split is not read vs write. It is whether the result feeds the loop's own reasoning or
+is handled after the loop ends.
 
-`trend_analysis` is in `TOOL_REGISTRY` as an alias for `_query_data` but has never been in
-`TOOL_METADATA`, so the planner cannot emit it and the check for it at `final.py:75` is
-already dead. Leave it out of `COACH_TOOLS`.
+| Class | Tools | Behaviour |
+|---|---|---|
+| Runs in the loop | `get_plan`, `query_data`, `get_race`, `get_preferences`, `get_weather`, `pacing_calculator`, `get_course_details`, `get_race_info` | Executed immediately, result goes back to the model, which decides what to do next |
+| Declared in the loop, handled after | `update_plan`, `update_preferences`, `update_settings`, `garmin_sync`, `race_prep_info` | The dispatcher records the declaration, returns a short string saying so, and runs nothing. The model keeps going without waiting on an effect it will never see. |
+
+Within the second group:
+
+- The three writes execute after the loop exits, with every lock, ordering rule and
+  per-day validation exactly where they are today.
+- `garmin_sync` also keeps its existing lock, progress and cancel path.
+- `race_prep_info` executes nothing at all, ever. It is `lambda user_id, **kwargs: None`
+  (`coach.py:65`) whose only job is to flag `final.py:86` to inject `RACE_PREP_KNOWLEDGE`
+  into the answer prompt. It sits here rather than with the read tools because its result is
+  for `final_output`, not for the loop. Its description should say that plainly, so the
+  model does not call it expecting data back.
 
 `get_course_details` and `get_race_info` both write a cache row on a miss
 (`course_chunks.json` and `search_cache`). That is a side effect, but not a user-visible
@@ -189,10 +198,10 @@ not to guess, and should absorb the arg discipline currently sitting in the Args
 
 ### New
 
-**`COACH_TOOLS`** — 8 read schemas, 3 write schemas, `garmin_sync`, and `race_prep_info` as
-a no-arg no-op. Write schemas need the same arg contracts `build_planner_system` carries
-today, notably `update_plan`'s `intent` string and the undo/revert rule about reading the
-day's `Was:` note before asking the user.
+**`COACH_TOOLS`** — the 8 that run in the loop, plus the 5 that are declared and handled
+after (see the inventory). The deferred schemas need the same arg contracts
+`build_planner_system` carries today, notably `update_plan`'s `intent` string and the
+undo/revert rule about reading the day's `Was:` note before asking the user.
 
 **`COACH_LOOP_SYSTEM`** — a builder, not a constant, since it needs today's date. Contents:
 the date table and interpretation rules, the tool-order rules above, the short-affirmation

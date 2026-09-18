@@ -72,7 +72,7 @@ def final_output(
                 if result:
                     user_prompt += f"\nData: {result}"
 
-            if (tool.name == "query_data" or tool.name == "trend_analysis") and not health_added:
+            if tool.name == "query_data" and not health_added:
                 knowledge += f"\n\n[health_data_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
                 health_added = True
 
