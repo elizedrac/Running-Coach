@@ -27,14 +27,37 @@ back, and only then decides what to write.
 ```
 orchestrate
 │
-├── LOOP  (replaces the planner)
-│   ├── model calls READ tools, accumulating tool_results across turns
+├── coach_loop()  (replaces planner())
+│   ├── model names READ tools, orchestrate's dispatcher runs them, results go back
 │   └── exits by declaring the WRITE tools it wants, or by having nothing to write
 │
 ├── execute writes deterministically      ← ordering, locks, validation unchanged
 │
-└── final_output(tool_results + write results)  → streams the answer
+└── final_output(calls + write results)  → streams the answer
 ```
+
+The loop lives in its own module, `services/coach_loop.py`, mirroring `services/planner.py`.
+One module in, one module out: the flag becomes a one-line branch in `orchestrate` instead
+of two interleaved code paths, step 3's deletion is a file removal rather than surgery, and
+the loop can be tested against a mocked client without dragging in the generator contract or
+the write phase. `coach.py` is already carrying the registry, `call_tool` and `orchestrate`;
+it does not also need this.
+
+Unlike `planner()` and `create_plan()`, which are both plain functions, `coach_loop` is a
+generator, so `orchestrate` can drive it with one line:
+
+```python
+result = yield from coach_loop(...)
+```
+
+Status events pass straight through to the browser and the return value comes back from the
+same call. Same `yield from` shape `final.py:98` already uses on `stream_llm`.
+
+This is a UX choice, not a necessity. The loop costs roughly one extra model call over the
+planner, and today's planner call is already silent, so nothing here is newly slow. It is
+worth doing because "checking your plan..." beats a blank screen. Emit a friendly phrase per
+tool, never the raw tool name: `BASE_COACH` already forbids exposing internal names to the
+user, and a status line is user-facing.
 
 Two properties worth stating plainly, because they are what make this safe:
 
@@ -225,9 +248,10 @@ validation in `update_plan_day` untouched — it is the backstop, not the gate.
 
 | File | Change |
 |---|---|
+| `services/coach_loop.py` | **New.** The loop itself: builds the messages, calls the model with `COACH_TOOLS`, dispatches reads through `call_tool`, records declared writes, and returns the calls it made plus the writes it wants. Emits `status` per tool. |
 | `services/coach.py` | `orchestrate` rewritten around the loop. The write-execution block, `garmin_sync` special case, and `get_plan_id` resolution all survive as the post-loop phase. Keep the no-dates short-circuit (`coach.py:197-203`) exactly as it is: `garmin_sync` declared without a date range sends its fixed "which dates would you like me to pull?" message and returns without calling `final_output`. Deterministic, already well worded, and it saves a call. |
 | `services/prompts.py` | Add `COACH_TOOLS` + `build_coach_loop_system`. `build_planner_system` and `TOOL_METADATA` stay until the flag comes out (Rollout step 3). |
-| `services/llm.py` | One new helper: a retrying `create` with `tools=`. Reuse `_backoff` (it re-raises on the final attempt, so a `range(MAX_RETRIES)` wrapper cannot fall through to `None`). Put `cache_control: {"type": "ephemeral"}` on the **last tool schema**, not the system block as `call_llm` does at `:49` — everything up to and including the marked block is cached, and system + schemas is the part that never changes while tool results grow behind it. This matters far more here than on the single-shot planner, since the loop resends the whole prefix every turn. |
+| `services/llm.py` | One new helper: a retrying `create` with `tools=`. Reuse `_backoff` (it re-raises on the final attempt, so a `range(MAX_RETRIES)` wrapper cannot fall through to `None`). Keep `cache_control: {"type": "ephemeral"}` on the system block, as `call_llm` does at `:49` and `create_plan` does at `plan.py:305`. The cache prefix runs tools, then system, then messages, so marking system already covers the tools array; the growing tool results sit behind it. This matters far more here than on the single-shot planner, since the loop resends the whole prefix every turn. |
 | `services/planner.py` | Untouched until step 3, then deleted. |
 | `services/final.py` | Takes `calls` (a list of `(name, result)`) instead of `planner_decision` + `tool_results`. One block per call, `_planned_total` scoped to one call, `race_meta` guarded against a double fetch. Prompt content otherwise identical. |
 | `tests/` | New `test_coach_loop.py`; existing `orchestrate` tests rewritten, since the mocked boundary moves from `planner` to the loop's client. |
@@ -239,6 +263,11 @@ untouched, provided the loop keeps yielding the existing event tuples (`status`,
 event before each tool call keeps a slow turn well inside the orphan guard.
 
 ## Mechanics to get right
+
+- **Copy `create_plan` (`plan.py:276`).** It is a working tool loop in this repo already:
+  `for i in range(10)`, break when `stop_reason != "tool_use"`, append the assistant's
+  content and then a single user message holding every `tool_result` block, and dispatch
+  independent calls through a `ThreadPoolExecutor`. Same skeleton, different registry.
 
 - **History goes in the same way it does today.** The loop's first user message is the
   string `coach.py:174-177` already builds: the question plus a `[Conversation context]`
@@ -254,7 +283,11 @@ event before each tool call keeps a slow turn well inside the orphan guard.
   one of those silently.
 - **`get_plan` takes a plan id, not a user id.** `get_plan_id(user_id)` first. Easiest thing
   to get wrong; it silently returns an empty list and the coach says "you have no plan".
-- **Strip model-supplied `user_id` and `plan_id` from args** before dispatch.
+- **Filter args against the schema before dispatch.** Only pass through the keys the tool's
+  schema declares and drop the rest. The API does not enforce `input_schema`, so extra or
+  misspelled keys can arrive. Identity needs no special case: every tool is
+  `fn(user_id, **args)` with `user_id` supplied positionally by us and absent from every
+  schema, so the filter already excludes it.
 - **Inject `location` into `get_weather` when the model omits it**, as `coach.py:237` does
   today. The city arrives on the request and the model has no way to know it. Without the
   injection `get_weather` falls back to its own default, a single `LOCATION` env var for the
@@ -268,10 +301,18 @@ event before each tool call keeps a slow turn well inside the orphan guard.
 - **`update_preferences` needs a real `enum` in its schema** for the five field names. It
   upserts straight into the column (`db/preferences.py:22`) with no validation of its own, so
   today the only thing constraining `field` is prose in the planner prompt.
-- **Cache identical read calls within one loop run**, keyed on name plus sorted args.
-- **Truncate tool results.** They live in the messages array and are resent every turn,
-  unlike today where a large `query_data` payload is sent once. Compute anything derived
-  from the full result (`_planned_total`, `build_query_data_extra`) *before* truncating.
+- **Cache identical read calls within one loop run.** A dict local to the run, keyed on tool
+  name plus sorted args, discarded when the turn ends. Nothing to do with prompt caching.
+- **Two copies of every tool result: full and short.** The full one goes into `calls` for
+  `final_output`, so `_planned_total`, `build_query_data_extra` and the answer itself all see
+  everything, exactly as today. The short one goes into the loop's messages array, which is
+  resent in full on every turn, so a large `query_data` payload would otherwise be billed
+  three or four times instead of once.
+
+  Shorten by capping rows, not characters. A blind `result[:2000]` chops mid-JSON and hands
+  the model something it cannot read; keeping the first N rows and appending "… 40 more rows"
+  keeps the structure valid. Nothing is lost from the answer, because the loop's copy only
+  has to be good enough for the model to decide what to call next.
 - **Bound the loop** and pass no tools on the final turn, so the model must produce an
   answer rather than a tool call there is no budget to run.
 - **Do not generate the answer twice.** Once writes are done, `final_output` streams the
@@ -312,8 +353,9 @@ event before each tool call keeps a slow turn well inside the orphan guard.
 1. Ship with `COACH_TOOL_LOOP` unset. Planner path stays live and is still the default.
 2. Enable on the EC2 box. Watch `planner_decided` / `tool_call` log volume and
    `llm_call` token counts for a week or two.
-3. **Delete the planner.** Remove `build_planner_system`, `TOOL_METADATA`, `planner()`,
-   the flag, and the dead branch in `orchestrate`. Drop the planner-path tests.
+3. **Delete the planner.** Remove `build_planner_system`, `TOOL_METADATA`, the flag, and the
+   dead branch in `orchestrate`, and delete `services/planner.py` outright: it is 22 lines
+   holding one function whose only caller is `orchestrate`. Drop the planner-path tests.
 
 Step 3 is a step, not an intention. A flag that never comes out means carrying two decision
 mechanisms and testing both forever.
