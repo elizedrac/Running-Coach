@@ -193,7 +193,9 @@ calls: list[tuple[str, Any]]   # (tool_name, result), in call order
 - One block per call, not per name, in the order they ran.
 - `_planned_total` receives a single call's rows, so it can drop the nested-list flattening
   that only ever existed to cope with the merge.
-- Both paths build the list, so the planner path behind the flag keeps working unchanged.
+- Both paths build the list. The planner path needs a small edit where it fills the dict
+  today, since `final_output` now accepts only the one shape. Its behaviour does not change,
+  only how it hands results over.
 
 Two things to keep an eye on while writing it: with two `get_plan` calls there are now two
 `[plan/planned_total]` blocks, so the label needs to name its date range for the
