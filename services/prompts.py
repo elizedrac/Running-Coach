@@ -92,6 +92,404 @@ Return ONLY valid JSON — no extra text, no markdown fences:
 tools must be an empty list [] when path is not "tools"."""
 
 
+# ── Coach tool loop ───────────────────────────────────────────────────────────
+#
+# COACH_TOOLS replaces the TOOL_METADATA list that build_planner_system renders. Two
+# differences from that list, both because the model now calls these itself rather than
+# naming them in a JSON blob:
+#
+#   1. Descriptions are prescriptive about WHEN to call and what not to guess, rather than
+#      just describing what a tool does. Ordering rules appear both here and in
+#      build_coach_loop_system — the model reads descriptions while scanning the tool list
+#      and the system prompt while deciding what to do, and a rule in only one gets missed.
+#   2. Only static guidance lives here. This is a module constant, so anything derived from
+#      today's date (the weekday table, "this week", default windows) is in the builder
+#      below. That also keeps the cached prefix stable.
+#
+# The last five tools do not execute inside the loop. The dispatcher records the call,
+# returns a short string saying so, and the write runs afterwards in orchestrate with its
+# locks and ordering intact. Their descriptions say so, so the model does not wait on a
+# result that is never coming or call them twice.
+#
+# user_id is not in any schema. Every tool is fn(user_id, **args) and we supply it
+# positionally, so the model neither sees it nor can spoof it. get_weather's location is
+# injected the same way.
+COACH_TOOLS = [
+    {
+        "name": "get_plan",
+        "description": (
+            "Retrieve the athlete's SCHEDULED training plan — what they are supposed to run, "
+            "as opposed to what they actually recorded (that is query_data). Defaults to the "
+            "current week. Call alongside query_data for 'should I run today' or any recovery "
+            "question: one says what is scheduled, the other what was done, and either alone "
+            "gives the wrong answer. Call this BEFORE update_plan, always — you cannot decide "
+            "what to change without seeing what is there."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "start_date": {"type": "string", "description": "YYYY-MM-DD. Omit for the current week."},
+                "end_date": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD. Omit for the current week. For a single day set equal to start_date.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "query_data",
+        "description": (
+            "Query the athlete's RECORDED Garmin history — past workouts, health metrics, "
+            "trends (improving/declining/stable), training load (ACWR), recovery readiness "
+            "(body battery). Use for anything about what they actually did or recorded. Call "
+            "it more than once with different query_intent values when a question needs "
+            "different slices; issue those calls together in one turn rather than one at a time."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query_intent": {"type": "string", "description": "What to fetch, in plain language"},
+                "start_date": {"type": "string", "description": "YYYY-MM-DD"},
+                "end_date": {"type": "string", "description": "YYYY-MM-DD"},
+                "prev_start": {
+                    "type": "string",
+                    "description": "YYYY-MM-DD. Start of the comparison window, for trend or week-over-week questions.",
+                },
+                "prev_end": {"type": "string", "description": "YYYY-MM-DD. End of the comparison window."},
+            },
+            "required": ["query_intent"],
+        },
+    },
+    {
+        "name": "get_race",
+        "description": (
+            "Get the athlete's own race: type, date, goal time, distance. Use for race prep, "
+            "strategy or taper questions, and BEFORE get_course_details or get_race_info, so "
+            "you pass their real race and location rather than a guess. A guessed string is "
+            "cached for a year under the wrong key."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_preferences",
+        "description": (
+            "Retrieve saved training preferences — days per week, preferred days, average and "
+            "max weekly mileage, time-based vs mileage-based training, and athlete notes. The "
+            "notes carry injuries, constraints and things the athlete asked to be remembered. "
+            "Call BEFORE advising on scheduling, volume or workout swaps: advice written "
+            "before reading the notes has to be walked back. Read-only — to change a "
+            "preference use update_preferences."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_weather",
+        "description": (
+            "Weather for the athlete's own location, from now through the next 12 hours. Use "
+            "for weather conditions or 'is it a good day to run' questions. Today only: there "
+            "is no forecast for later days and no way to ask about another city."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {
+                    "type": "string",
+                    "description": (
+                        "YYYY-MM-DD. Only today is supported. Pass the date the athlete asked about anyway, so "
+                        "the tool can tell you it is out of range rather than you reporting today's weather as "
+                        "though it were theirs."
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "pacing_calculator",
+        "description": (
+            "Calculate target paces — easy, long run, tempo, interval, race pace, training "
+            "zones. Use for ANY question about what pace to run. Call it even with no numbers "
+            "in hand: missing args are filled from the athlete's saved race or asked for. Do "
+            "NOT use when the athlete is asking to change their plan — that is update_plan.\n"
+            "A distance other than their saved race usually means a training question, not a "
+            "second race. Answer from their saved race's zones rather than asking for another "
+            "goal time. Only ask if they have said they intend to race that distance."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "goal_time": {
+                    "type": "string",
+                    "description": (
+                        "HH:MM:SS or MM:SS. HARD RULE: include this ONLY if an actual clock time appears in the "
+                        "athlete's words or the conversation ('sub 25' → '25:00', 'sub 3:10' → '3:10:00', 'under "
+                        "50 minutes' → '50:00'). If no time appears, OMIT it — never estimate, round or substitute "
+                        "a typical time. 'pace for sub 5k' contains no time; 5k is the distance."
+                    ),
+                },
+                "distance": {"type": "number", "description": "Race distance in MILES, not kilometres"},
+                "race_type": {
+                    "type": "string",
+                    "description": (
+                        "Used to derive distance when distance is unknown. One of: "
+                        f"{', '.join(RACE_DISTANCES_KNOWLEDGE.keys())}"
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "get_course_details",
+        "description": (
+            "Elevation profile and terrain for a race course, via web search. Call get_race "
+            "first unless the athlete named a different race themselves."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "location": {
+                    "type": "string",
+                    "description": "City fully spelled out, e.g. 'New York City' not 'NYC'",
+                },
+                "race": {
+                    "type": "string",
+                    "description": "Race type fully spelled out, e.g. 'marathon' not an abbreviation",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "Location + race/distance + the specific aspect asked about",
+                },
+            },
+            "required": ["location", "race", "query"],
+        },
+    },
+    {
+        "name": "get_race_info",
+        "description": (
+            "Time-sensitive race logistics via web search — registration dates and process, "
+            "entry fees, lottery odds, qualifying standards, corral assignment, race-day start "
+            "time and location. NOT for course terrain (get_course_details), general race-day "
+            "prep advice (race_prep_info), or the athlete's own race goal (get_race). Call "
+            "get_race first unless the athlete named a different race themselves."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "race": {
+                    "type": "string",
+                    "description": "Race type fully spelled out, e.g. 'marathon', 'half marathon', '10k'",
+                },
+                "location": {
+                    "type": "string",
+                    "description": "City fully spelled out, e.g. 'New York City' not 'NYC'",
+                },
+                "info_type": {
+                    "type": "string",
+                    "enum": ["registration", "race_day"],
+                    "description": (
+                        "'registration' for entry, qualifying, lottery, corral, fee or timeline questions. "
+                        "'race_day' for start time and location."
+                    ),
+                },
+                "query": {
+                    "type": "string",
+                    "description": "The specific aspect asked, e.g. 'qualifying standards for 2026'",
+                },
+            },
+            "required": ["race", "location", "info_type", "query"],
+        },
+    },
+    # ── Declared here, executed after the loop ────────────────────────────────
+    {
+        "name": "update_plan",
+        "description": (
+            "Modify the plan for days within ±7 days of today. Declaring this records the "
+            "change; it is applied after you finish, so you get no result back — do not wait "
+            "for one and do not call it twice. Read the plan with get_plan before declaring it.\n"
+            "Use when the athlete explicitly asks to change or add something, is sick, hurt or "
+            "feeling off, affirms a change you previously recommended, or wants the plan "
+            "reconciled with actual activities ('update plan based on my run', 'sync plan' — "
+            "these mean reconcile against activities, NOT a Garmin device sync). Reworking a "
+            "SINGLE week is in scope as long as the days fall within ±7 days; do not tell the "
+            "athlete to regenerate. Do NOT use for whole-plan restructuring across many weeks, "
+            "or changes beyond ±7 days.\n"
+            "CRITICAL: advice-seeking phrasing ('should I...', 'can I...', 'what if...') is NOT "
+            "a change request. Only act when the athlete explicitly says to make the change.\n"
+            "CONFIRMATION GATE: if the change would clear days the athlete did NOT name "
+            "(illness, injury, 'feeling off', anything emptying multiple days or a whole week), "
+            "do NOT declare this tool. You have already read the plan — list the specific days "
+            "that would be cleared and ask. Declare it only once they have affirmed, or when "
+            "they named the day themselves ('skip my run today')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "intent": {
+                    "type": "string",
+                    "description": (
+                        "What changes, plus the specific resolved ISO date (YYYY-MM-DD). If the athlete says 'that "
+                        "one', 'it', 'revert' or 'I meant X', resolve the date from the most recent plan change in "
+                        "context — never leave it ambiguous. On an undo or revert, also state the exact values to "
+                        "restore, read from earlier in this conversation. Notes especially: the plan records no "
+                        "history for a note, and the day's 'Was:' line covers only workout type, miles and pace. "
+                        "Read the day's 'Was:' note and any plan listing you already gave BEFORE asking the athlete "
+                        "anything — between them they usually hold the old values. Only if neither shows what the "
+                        "day held, do not declare this tool: say you cannot tell what it said before and ask, "
+                        "rather than writing a replacement."
+                    ),
+                },
+                "include_activities": {
+                    "type": "boolean",
+                    "description": (
+                        "True only to reconcile against actual Garmin activities, e.g. 'update plan based on my run'. "
+                        "On a correction ('I meant Thursday'), declare immediately with the corrected date, no "
+                        "confirmation needed."
+                    ),
+                },
+            },
+            "required": ["intent"],
+        },
+    },
+    {
+        "name": "update_preferences",
+        "description": (
+            "Change one saved training preference when the athlete explicitly asks to. "
+            "Declaring this records the change; it is applied after you finish, so you get no "
+            "result back. For questions about what a preference currently IS, use "
+            "get_preferences instead."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "field": {
+                    "type": "string",
+                    "enum": ["days_per_week", "preferred_days", "avg_miles", "max_miles", "time_based"],
+                    "description": "Which preference to change",
+                },
+                "value": {
+                    "description": (
+                        "int for days_per_week, list of day names for preferred_days, float for avg_miles and "
+                        "max_miles, bool for time_based"
+                    ),
+                },
+            },
+            "required": ["field", "value"],
+        },
+    },
+    {
+        "name": "update_settings",
+        "description": (
+            "Change an app setting — currently just the colour theme. Declaring this records "
+            "the change; it is applied after you finish, so you get no result back. Use for "
+            "explicit theme requests ('switch to dark mode') and for vague dissatisfaction "
+            "('I don't like my theme', 'can you change the colours') even with no target "
+            "named — the system will ask which one. Do NOT use for training preferences "
+            "(update_preferences) or for questions about what themes exist (just answer those)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "action_intent": {
+                    "type": "string",
+                    "description": "What the athlete wants changed, in plain language, e.g. 'switch to dark mode'",
+                },
+            },
+            "required": ["action_intent"],
+        },
+    },
+    {
+        "name": "garmin_sync",
+        "description": (
+            "Pull the latest Garmin activity and health data into the database. ONLY when the "
+            "athlete explicitly asks to sync Garmin data. NEVER for 'sync plan' requests — that "
+            "is update_plan with include_activities=true. Declaring this records the sync; it "
+            "runs after you finish and takes several minutes, so you get no result back. Never "
+            "invent dates: if the athlete did not state a range, declare it with no args and "
+            "the system will ask them."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "day_iso_start": {"type": "string", "description": "YYYY-MM-DD, only if the athlete stated it"},
+                "day_iso_end": {"type": "string", "description": "YYYY-MM-DD, only if the athlete stated it"},
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "race_prep_info",
+        "description": (
+            "Attaches race-day preparation reference material — nutrition, morning routine, "
+            "warm-up, gear — to the answer that gets written after you finish. It returns no "
+            "data to you, so call it once for explicit race-day execution questions and carry "
+            "on; there is nothing to read back."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+]
+
+DEFERRED_TOOLS = {"update_plan", "update_preferences", "update_settings", "garmin_sync", "race_prep_info"}
+
+
+def build_coach_loop_system(local_today: str = None) -> str:
+    """System prompt for the tool loop. A builder, not a constant, because the date rules
+    below have to resolve to real dates — a model left to compute "last Sunday" itself gets
+    it wrong often enough to matter.
+
+    Everything static lives in COACH_TOOLS instead, so the cached prefix stays stable.
+    """
+    from datetime import timedelta
+
+    today_dt = date.fromisoformat(local_today) if local_today else date.today()
+    today = today_dt.isoformat()
+    this_week_monday = today_dt - timedelta(days=today_dt.weekday())
+    last_sunday = this_week_monday - timedelta(days=1)
+    last_week_monday = last_sunday - timedelta(days=6)
+    seven_days_ago = today_dt - timedelta(days=6)
+    day_names = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+    week_day_map = "\n".join(
+        f"- {day_names[i]} = {(this_week_monday + timedelta(days=i)).isoformat()}" for i in range(7)
+    )
+    return f"""You are the research phase of a personal AI running coach. Your job is to gather what the coach needs to answer, and to decide what should be changed — not to write the answer. A separate call writes the reply to the athlete once you are done, so keep your own text to a sentence at most; nobody reads it.
+
+Users often type terse fragments without punctuation ("long run pace", "weather tomorrow"). Treat any fragment naming a topic as a question about that topic, never as small talk.
+
+If the conversation shows you just asked about the athlete's plan or data, or offered to check something, and they reply with a short affirmation ("yes", "sure", "go ahead", "can you check", "please do", "yeah"), call the relevant tool. Do not answer that as though nothing was pending.
+
+How to work:
+- Call the tools you need, read what comes back, then call more if the results point somewhere. Stop calling tools once you have enough.
+- Call independent tools in the SAME turn. Several tool calls in one turn cost one round trip; one per turn costs several.
+- Read before you write. Call the read tools first and only declare a change once you have seen the data it is based on.
+- If no tool is needed at all, call nothing and stop. General coaching questions with no personal data in them are answered without tools.
+- Never mention tools, tool names or internal steps. The athlete does not know they exist.
+
+Tool order that matters:
+- Call get_race BEFORE get_course_details or get_race_info, so you pass the athlete's real race and location instead of guessing. A guessed string gets cached under the wrong key for a year.
+- Call get_preferences BEFORE advising on scheduling, volume or workout swaps. The athlete notes carry injuries and constraints, and advice written without them has to be walked back.
+- For "should I run today" or any recovery question, call get_plan AND query_data before deciding anything. Scheduled and actual are different questions.
+- Call get_plan before declaring update_plan, every time.
+
+Changes are applied after you finish, so update_plan, update_preferences, update_settings and garmin_sync return nothing to you. Declare each at most once, and do not wait on a result.
+
+Today's date: {today}
+
+Date interpretation rules (use these exact dates, do not compute your own):
+- Day name (e.g. "Thursday") → date:
+{week_day_map}
+- "this week" / "weekly mileage" = {this_week_monday.isoformat()} to {today}. EXCEPTION: if today is Monday and the athlete uses past-tense or review language ("how did it go", "recap", "how was", "did I hit"), use last week ({last_week_monday.isoformat()} to {last_sunday.isoformat()}) instead — they are reviewing the week that just ended.
+- "last week" / "this past week" = {last_week_monday.isoformat()} to {last_sunday.isoformat()}
+- "last Sunday" = {last_sunday.isoformat()}
+- "last 7 days" = {seven_days_ago.isoformat()} to {today}
+- "yesterday" = {(today_dt - timedelta(days=1)).isoformat()}
+- "this month" = 1st of the current month to {today}
+
+query_data windows: default to the last 14 days, and no more than 31 for a trend. For "this week" questions always set prev_start={last_week_monday.isoformat()} and prev_end={last_sunday.isoformat()}, so the comparison is week over week rather than the default 30-day shift, which finds no data.
+
+get_plan defaults to {this_week_monday.isoformat()} to {(this_week_monday + timedelta(days=6)).isoformat()} when you omit the dates."""
+
+
 BASE_COACH = """You are an experienced, encouraging running coach. Never include bracket-prefixed log lines or system-style output (e.g. [Updating plan], [update_plan_day], [coach]) in your responses — these are internal and must never appear in user-facing messages. Never use ~~strikethrough~~ formatting in responses. \
 Each message begins with a [Plan status] line that tells you definitively whether the user has an active training plan. Treat this as ground truth — do not second-guess it or ask the user if they have a plan. If Plan status says they do NOT have a plan, never reference plan data or suggest plan-based actions. \
 If the user asks to create a training plan, tell them to go to the Training Plan tab and click "+ Create Training Plan". If they ask to delete or clear their entire training plan, tell them to go to the Training Plan tab and click "Delete plan" (small link at the bottom-right of the plan). Do not attempt to create or delete the entire plan through chat. Removing or skipping individual days or workouts is handled through update_plan. \

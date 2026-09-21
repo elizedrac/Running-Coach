@@ -1,4 +1,6 @@
-# Orchestrator. ask(question, user_id): single-shot planner + dispatch (no_tools / sql / tools).
+# Orchestrator. orchestrate() picks how the coach decides what to call — the single-shot
+# planner, or the tool loop behind COACH_TOOL_LOOP — then runs any writes and streams the
+# answer. Tool dispatch (call_tool, TOOL_REGISTRY) is shared by both paths.
 import json
 import os
 import time
@@ -11,6 +13,7 @@ from db.plan import get_plan_days as get_plan
 from db.preferences import get_preferences, update_preferences
 from db.race import get_race
 from models.planner import History
+from services.coach_loop import coach_loop
 from services.course_details import get_course_details
 from services.final import final_output
 from services.garmin import garmin_sync, run_locked_sync
@@ -26,6 +29,11 @@ from services.weather import get_weather
 from services.write_selector import execute_write
 
 logger = get_logger(__name__)
+
+# Read once at import: this is a deploy-time switch, flipped by editing .env and
+# restarting, not per request. Unset keeps the single-shot planner, which stays the
+# default until the loop has run on the box for a release.
+USE_TOOL_LOOP = bool(os.getenv("COACH_TOOL_LOOP"))
 
 RACE_DISTANCES_KNOWLEDGE = json.loads(
     Path(__file__).parent.parent.joinpath("knowledge/race_distances.json").read_text()
@@ -143,6 +151,53 @@ def call_tool(name: str, args: dict, user_id: str, location: str = "New York"):
     return fn(user_id, **args)
 
 
+# Write execution order. Preference writes run before update_plan, which self-fetches
+# prefs and would otherwise read stale values. garmin_sync goes first because everything
+# else may want the data it pulls.
+_WRITE_ORDER = {"garmin_sync": 0, "update_preferences": 1, "update_plan": 2, "update_settings": 3}
+
+
+def _execute_writes(declared, user_id, calls, cancelled, on_progress):
+    """Run the writes the loop declared but never executed.
+
+    The loop chooses these with the data in front of it; this runs them with the locks,
+    ordering and per-day validation that were always here. Appends each result to `calls`
+    so final_output reports what happened, and yields the same UI events orchestrate has
+    always yielded.
+    """
+    for name, args in sorted(declared, key=lambda d: _WRITE_ORDER.get(d[0], 9)):
+        if cancelled():
+            break
+        try:
+            if name == "garmin_sync":
+                yield ("status", "Please wait a few minutes, syncing Garmin data... ")
+                start, end = args.get("day_iso_start"), args.get("day_iso_end")
+                days_total = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1 if start and end else 0
+
+                def _on_day(days_done, total=days_total):
+                    if on_progress:
+                        on_progress(days_done, total)
+
+                # Direct call (not call_tool) so per-day progress and mid-sync cancel are
+                # wired through to the streamed response. Uses the web sync's
+                # lock/status/cancel so runs can't overlap.
+                result = run_locked_sync(user_id, **args, on_day=_on_day, should_cancel=cancelled)
+            else:
+                result = call_tool(name, args, user_id)
+            logger.info("write_executed", extra={"tool": name})
+        except Exception as e:
+            logger.error("tool_failed", extra={"tool": name}, exc_info=True)
+            result = f"Error running {name}: {e}"
+
+        calls.append((name, result))
+
+        # Partial counts too — some days were written, so the UI must refresh
+        if name == "update_plan" and isinstance(result, dict) and result.get("status") in ("success", "partial"):
+            yield ("plan_updated", None)
+        if name == "update_settings" and isinstance(result, dict) and result.get("status") == "success":
+            yield ("theme_updated", result.get("theme"))
+
+
 def orchestrate(
     user_query,
     user_id,
@@ -175,95 +230,123 @@ def orchestrate(
         context = f"{hist.summary}\n{recent_context}".strip()
         planner_prompt += f"\n\n[Conversation context]\n{context}"
     min_date = get_user_min_date(user_id)
-    planner_response = planner(planner_prompt, min_date=min_date, local_today=today)
 
-    logger.info(
-        "planner_decided",
-        extra={"path": planner_response.path, "tools": [t.name for t in planner_response.tools]},
-    )
-    # Reasoning restates the user's question, so the full body stays at DEBUG.
-    logger.debug("planner_response", extra={"raw": planner_response.model_dump_json()})
+    # (tool_name, result) in call order. A list rather than a dict keyed by name so a tool
+    # called twice keeps both results separate — see final_output.
+    calls = []
 
-    path = planner_response.path
-    tool_results = {}
+    if USE_TOOL_LOOP:
+        calls, declared = yield from coach_loop(
+            planner_prompt,
+            user_id,
+            location=location,
+            today=today,
+            should_cancel=cancelled,
+        )
 
-    if path == "tools":
-        # Preference writes run first so update_plan (which self-fetches prefs) never sees stale values
-        planner_response.tools.sort(key=lambda t: t.name != "update_preferences")
-        # garmin sync has priority
-        if "garmin_sync" in [tool.name for tool in planner_response.tools]:
-            tool = next(tool for tool in planner_response.tools if tool.name == "garmin_sync")
-            if "day_iso_start" not in tool.args:  # back up check
-                direct = "To sync your Garmin data I'll need a date range — which dates would you like me to pull? For example: 'sync from May 10 to May 17'. You can also use the Garmin Sync button at the top of the page."
-                hist.recent.append({"role": "user", "content": user_query})
-                hist.recent.append({"role": "assistant", "content": direct})
-                yield ("chunk", direct)
-                yield ("done", hist)
-                return
+        # Declared without a date range. Deterministic, already well worded, and it saves a
+        # model call — same message and same early return the planner path uses.
+        if any(name == "garmin_sync" and "day_iso_start" not in args for name, args in declared):
+            direct = "To sync your Garmin data I'll need a date range — which dates would you like me to pull? For example: 'sync from May 10 to May 17'. You can also use the Garmin Sync button at the top of the page."
+            hist.recent.append({"role": "user", "content": user_query})
+            hist.recent.append({"role": "assistant", "content": direct})
+            yield ("chunk", direct)
+            yield ("done", hist)
+            return
 
-            yield ("status", "Please wait a few minutes, syncing Garmin data... ")
-            try:
-                start, end = tool.args.get("day_iso_start"), tool.args.get("day_iso_end")
-                days_total = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1 if start and end else 0
+        # race_prep_info executes nothing. Its only job is to be present in `calls`, which
+        # is what tells final_output to attach the race-prep reference material. It is a
+        # flag, so it goes in once however many times the model asked for it — a second
+        # entry only repeats its guidance text in the answer prompt.
+        writes = [(name, args) for name, args in declared if name != "race_prep_info"]
+        if any(name == "race_prep_info" for name, _ in declared):
+            calls.append(("race_prep_info", ""))
 
-                def _on_day(days_done):
-                    if on_progress:
-                        on_progress(days_done, days_total)
+        yield from _execute_writes(writes, user_id, calls, cancelled, on_progress)
+    else:
+        planner_response = planner(planner_prompt, min_date=min_date, local_today=today)
 
-                # Direct call (not call_tool) so per-day progress and mid-sync
-                # cancel are wired through to the streamed response. Uses the
-                # web sync's lock/status/cancel so runs can't overlap.
-                tool_results["garmin_sync"] = run_locked_sync(
-                    user_id, **tool.args, on_day=_on_day, should_cancel=cancelled
-                )
-            except Exception as e:
-                logger.error("tool_failed", extra={"tool": "garmin_sync"}, exc_info=True)
-                tool_results["garmin_sync"] = f"Error running garmin_sync: {e}"
+        logger.info(
+            "planner_decided",
+            extra={"path": planner_response.path, "tools": [t.name for t in planner_response.tools]},
+        )
+        # Reasoning restates the user's question, so the full body stays at DEBUG.
+        logger.debug("planner_response", extra={"raw": planner_response.model_dump_json()})
 
-        for tool in planner_response.tools:
-            if cancelled():
-                break
-            name = tool.name.strip()
-            if name not in TOOL_REGISTRY:
-                logger.warning("tool_unknown", extra={"tool": name})
-                continue
-            if name != "garmin_sync":
+        if planner_response.path == "tools":
+            # Preference writes run first so update_plan (which self-fetches prefs) never sees stale values
+            planner_response.tools.sort(key=lambda t: t.name != "update_preferences")
+            # garmin sync has priority
+            if "garmin_sync" in [tool.name for tool in planner_response.tools]:
+                tool = next(tool for tool in planner_response.tools if tool.name == "garmin_sync")
+                if "day_iso_start" not in tool.args:  # back up check
+                    direct = "To sync your Garmin data I'll need a date range — which dates would you like me to pull? For example: 'sync from May 10 to May 17'. You can also use the Garmin Sync button at the top of the page."
+                    hist.recent.append({"role": "user", "content": user_query})
+                    hist.recent.append({"role": "assistant", "content": direct})
+                    yield ("chunk", direct)
+                    yield ("done", hist)
+                    return
+
+                yield ("status", "Please wait a few minutes, syncing Garmin data... ")
                 try:
-                    if name == "get_plan":
-                        input_id = get_plan_id(user_id)
-                    else:
-                        input_id = user_id
-                    if name == "get_weather" and "location" not in tool.args:
-                        tool.args["location"] = location
-                    tool_started = time.monotonic()
-                    result = call_tool(name, tool.args, input_id)
-                    logger.info(
-                        "tool_call",
-                        extra={"tool": name, "duration_ms": round((time.monotonic() - tool_started) * 1000)},
-                    )
-                    # Results carry health data, so the body is DEBUG only.
-                    logger.debug("tool_result", extra={"tool": name, "result": str(result)[:500]})
-                    if name in tool_results:
-                        existing = tool_results[name]
-                        tool_results[name] = existing if isinstance(existing, list) else [existing]
-                        tool_results[name].append(result)
-                    else:
-                        tool_results[name] = result
-                    # Partial counts too — some days were written, so the UI must refresh
-                    if name == "update_plan" and isinstance(result, dict) and result.get("status") in (
-                        "success",
-                        "partial",
-                    ):
-                        yield ("plan_updated", None)
-                    if name == "update_settings" and isinstance(result, dict) and result.get("status") == "success":
-                        yield ("theme_updated", result.get("theme"))
-                except Exception as e:
-                    logger.error("tool_failed", extra={"tool": name}, exc_info=True)
-                    tool_results[name] = f"Error running {name}: {e}"
-        if not tool_results:
-            planner_response.path = "no_tools"
+                    start, end = tool.args.get("day_iso_start"), tool.args.get("day_iso_end")
+                    days_total = (date.fromisoformat(end) - date.fromisoformat(start)).days + 1 if start and end else 0
 
-    logger.debug("tool_results", extra={"tools": list(tool_results.keys())})
+                    def _on_day(days_done):
+                        if on_progress:
+                            on_progress(days_done, days_total)
+
+                    # Direct call (not call_tool) so per-day progress and mid-sync
+                    # cancel are wired through to the streamed response. Uses the
+                    # web sync's lock/status/cancel so runs can't overlap.
+                    result = run_locked_sync(user_id, **tool.args, on_day=_on_day, should_cancel=cancelled)
+                    calls.append(("garmin_sync", result))
+                except Exception as e:
+                    logger.error("tool_failed", extra={"tool": "garmin_sync"}, exc_info=True)
+                    calls.append(("garmin_sync", f"Error running garmin_sync: {e}"))
+
+            for tool in planner_response.tools:
+                if cancelled():
+                    break
+                name = tool.name.strip()
+                if name not in TOOL_REGISTRY:
+                    logger.warning("tool_unknown", extra={"tool": name})
+                    continue
+                if name != "garmin_sync":
+                    try:
+                        if name == "get_plan":
+                            input_id = get_plan_id(user_id)
+                        else:
+                            input_id = user_id
+                        if name == "get_weather" and "location" not in tool.args:
+                            tool.args["location"] = location
+                        tool_started = time.monotonic()
+                        result = call_tool(name, tool.args, input_id)
+                        logger.info(
+                            "tool_call",
+                            extra={"tool": name, "duration_ms": round((time.monotonic() - tool_started) * 1000)},
+                        )
+                        # Results carry health data, so the body is DEBUG only.
+                        logger.debug("tool_result", extra={"tool": name, "result": str(result)[:500]})
+                        calls.append((name, result))
+                        # Partial counts too — some days were written, so the UI must refresh
+                        if (
+                            name == "update_plan"
+                            and isinstance(result, dict)
+                            and result.get("status")
+                            in (
+                                "success",
+                                "partial",
+                            )
+                        ):
+                            yield ("plan_updated", None)
+                        if name == "update_settings" and isinstance(result, dict) and result.get("status") == "success":
+                            yield ("theme_updated", result.get("theme"))
+                    except Exception as e:
+                        logger.error("tool_failed", extra={"tool": name}, exc_info=True)
+                        calls.append((name, f"Error running {name}: {e}"))
+
+    logger.debug("tool_results", extra={"tools": [name for name, _ in calls]})
 
     recent_turns = "\n".join(f"{m['role']}: {m['content']}" for m in hist.recent[-4:])
     full_history = "\n".join(p for p in [hist.summary, recent_turns] if p)
@@ -282,7 +365,7 @@ def orchestrate(
 
     full_response = []
     was_cancelled = False
-    for chunk in final_output(prompt, planner_response, tool_results, user_id, min_date=min_date, has_plan=has_plan):
+    for chunk in final_output(prompt, calls, user_id, min_date=min_date, has_plan=has_plan):
         if cancelled():
             was_cancelled = True
             break

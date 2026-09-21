@@ -13,6 +13,7 @@
 7. [LLM Strategy](#llm-strategy)
 8. [Tool Suite](#tool-suite)
 9. [LLM Flow](#llm-flow)
+9a. [Coach Tool Loop (behind `COACH_TOOL_LOOP`)](#coach-tool-loop-behind-coach_tool_loop) — transitional, off by default
 10. [Caching Strategy](#caching-strategy)
 11. [ML Model](#ml-model)
 12. [Guardrails & Validation](#guardrails--validation)
@@ -86,7 +87,8 @@ runcoach/
 │   ├── llm.py                     # call_llm() (blocking) + stream_llm() (generator) with retry + prompt caching
 │   ├── memory.py                  # compress_history() — Haiku call that summarises conversation to plain text
 │   ├── end.py                     # detect_end() + generate_followups() — end-of-conversation detection and follow-up chips
-│   ├── planner.py                 # Planner LLM call + PlannerOutput validation
+│   ├── planner.py                 # Planner LLM call + PlannerOutput validation (default path)
+│   ├── coach_loop.py              # Native tool_use decision loop behind COACH_TOOL_LOOP — dispatches reads, records writes
 │   ├── sql_selector.py            # Haiku call that picks query functions from REGISTRY; called internally by query_data tool
 │   ├── trend_analysis.py          # 14 per-metric trend functions + compute_body_battery (3-day weighted) + compute_load
 │   ├── final.py                   # Final LLM call (Sonnet) — generator, yields chunks via stream_llm
@@ -102,7 +104,7 @@ runcoach/
 │   ├── auth.py                    # get_current_user() FastAPI dependency — validates Bearer JWT via Supabase, returns user_id
 │   ├── pacing.py                  # pacing_calculator() — Riegel equivalent marathon pace → Daniels-style zones + GPS-adjusted pace + VO2-derived easy pace
 │   ├── course_details.py          # get_course_details() — RAG over course_chunks.json (word overlap + Voyage embedding similarity) + web search fallback
-│   └── prompts.py                 # All prompt strings: BASE_COACH, build_planner_system(), SQL_SELECTOR_SYSTEM, TOOL_SNIPPETS, TOOL_METADATA, UPDATE_PLAN_SYSTEM, CREATE_PLAN_SYSTEM, PLAN_CHECKER_SYSTEM. Single source of truth.
+│   └── prompts.py                 # All prompt strings: BASE_COACH, build_planner_system(), COACH_TOOLS + build_coach_loop_system() (tool loop), SQL_SELECTOR_SYSTEM, TOOL_SNIPPETS, TOOL_METADATA, UPDATE_PLAN_SYSTEM, CREATE_PLAN_SYSTEM, PLAN_CHECKER_SYSTEM. Single source of truth.
 │
 ├── services/ml/
 │   ├── features.py                # Feature extraction from Supabase
@@ -136,6 +138,7 @@ runcoach/
 │
 ├── tests/
 │   ├── test_deterministic.py      # All deterministic logic (plan constraints etc) + orchestrate()/update_plan() flow tests with LLM boundaries mocked
+│   ├── test_coach_loop.py         # Tool loop: dispatch, arg filtering, deferred writes, write ordering, final_output's calls list
 │   └── test_race_info.py          # get_candidates/set_cached, word-overlap + embedding similarity, get_race_info cache hit/miss paths
 │
 └── .github/
@@ -454,6 +457,8 @@ FOLLOW_UP = "..."                    # follow-up question generation
 
 **Prompt caching** — implemented via `cache_system=True` flag on `call_llm()`. Enabled on all static system prompts: `BASE_COACH` (final LLM), `SQL_SELECTOR_SYSTEM` (Haiku), and the course details extraction prompt. The planner system prompt is dynamic (injects today's date) and is not cached. Minimum 1024 tokens for cache eligibility.
 
+The tool loop caches unconditionally (`call_llm_with_tools`). Its system prompt is dynamic too, but it is resent on every turn rather than once, so a same-day cache hit pays for itself. The cache prefix runs tools → system → messages, so marking the system block also covers the `COACH_TOOLS` array behind it.
+
 ### Routing Logic
 
 ```
@@ -692,6 +697,8 @@ User question
 
 The planner runs **once**, outputs a JSON plan listing every tool to call (with args and order), and Python executes the plan deterministically against the `services/sql_selector.py` REGISTRY. There is no agentic loop and no back-and-forth between the model and the tool layer.
 
+> This is the default path and what runs in production. With `COACH_TOOL_LOOP` set, the decision phase is a native `tool_use` loop instead — see [Coach Tool Loop](#coach-tool-loop-behind-coach_tool_loop). One thing below is already shared by both: tool results reach `final_output` as a `calls` list, not the `tool_results` dict.
+
 ```python
 # models/planner.py
 from typing import Literal
@@ -769,7 +776,9 @@ Return ONLY valid JSON:
 | Loop with model | None (single shot) | Yes (extra API calls, harder to bound cost) |
 | Fits this codebase | Aligns with REGISTRY + deterministic ethos | Designed for exploratory agentic flows |
 
-**Exception — Plan Creation**: `create_plan()` in `services/plan.py` uses native `tool_use` with Claude Opus 4-7 in a multi-turn agentic loop (up to 10 iterations). This is intentional: plan creation requires the model to gather context (pacing zones, training history, course details) before writing the full plan, and the guardrails step may force a revision loop. The JSON-plan approach can't support this kind of back-and-forth; native tool_use is the right fit here. All other coach interactions remain JSON-plan based.
+**Exception — Plan Creation**: `create_plan()` in `services/plan.py` uses native `tool_use` with Claude Opus 4-7 in a multi-turn agentic loop (up to 10 iterations). This is intentional: plan creation requires the model to gather context (pacing zones, training history, course details) before writing the full plan, and the guardrails step may force a revision loop. The JSON-plan approach can't support this kind of back-and-forth; native tool_use is the right fit here.
+
+**Being revisited.** The table's first three rows turned out to be assumptions rather than facts. The API does **not** validate args against `input_schema`, so the JSON plan's validation advantage was `PlannerOutput` checking a path literal and that args was a dict — real validation has to happen at dispatch either way. Deterministic ordering and injected logic survive natively, because writes are declared in the loop and executed outside it. What the JSON plan cannot do is let the model see a result before choosing what to do next, which is where both production bugs come from. See [Coach Tool Loop](#coach-tool-loop-behind-coach_tool_loop).
 
 ### LLM Call Budget
 
@@ -781,6 +790,104 @@ Return ONLY valid JSON:
 ### Future: Orchestrator (V2+)
 
 An orchestrator only makes sense when there are multiple **separate deployed services** to coordinate — e.g. a nutrition app, a calendar app, a recovery app each with their own databases and APIs. At that point this entire app becomes one tool the orchestrator calls. Not needed now.
+
+---
+
+## Coach Tool Loop (behind `COACH_TOOL_LOOP`)
+
+> Transitional. This section describes the second decision path, which is **off by default**. Everything above still describes what runs in production with the flag unset. When the flag is removed this section replaces [Coach Service (single-shot planner)](#coach-service-single-shot-planner-deterministic-chaining) and the [Why JSON Plan](#why-json-plan-not-anthropics-tool_use-api) rationale rather than sitting beside them. Implementation plan and rollout steps: `COACH_LOOP_PLAN.md`.
+
+### Why
+
+The planner decides everything in one shot, before any tool has run, so it picks tools and args having read nothing:
+
+- **Writes are decided blind.** "I'm sick" makes the planner choose `update_plan` without ever seeing which days it is about to clear. The confirmation gate in `TOOL_METADATA["update_plan"]` papers over this by telling the planner to call `get_plan` *instead*, spending a whole turn working around the fact that the decision came before the data.
+- **Args are guessed.** `get_course_details` and `get_race_info` need a race and a location, inferred from conversation text. Those strings are the `search_cache` partition key with a 365-day TTL, so "NYC" instead of "New York City" splits the cache and the wrong key sticks for a year.
+
+### Shape
+
+```
+orchestrate
+│
+├── coach_loop()                          services/coach_loop.py
+│   ├── model calls READ tools → dispatcher runs them → results go back
+│   └── exits by declaring WRITE tools, or by having nothing to write
+│
+├── _execute_writes()                     services/coach.py — locks, ordering, validation
+│
+└── final_output(calls)                   services/final.py — streams the answer
+```
+
+`coach_loop` is a generator, driven by `result = yield from coach_loop(...)`, so status events reach the browser and the return value comes back from the same call. It yields a friendly phrase per read tool (never a raw tool name — `BASE_COACH` forbids exposing internal names). Bounded at `MAX_TURNS = 6`, with the last turn sent without tools so the model must stop.
+
+### Two safety properties
+
+1. **No write executes inside the loop.** Write tools are in the schema array so the model can declare them with args chosen *after* reading, but the dispatcher records the declaration, returns a short note, and runs nothing. Every lock, ordering rule and per-day validation stays in `_execute_writes`. Args are recorded, not trusted: the API does not enforce `input_schema`, so validation happens at dispatch.
+2. **`final_output` builds the same prompt.** Its input changed shape (below) but every `TOOL_SNIPPETS` entry and knowledge block stays exactly where it was.
+
+### Tool inventory
+
+The split is not read vs write. It is whether the result feeds the loop's reasoning or is handled after the loop ends.
+
+| Class | Tools | Behaviour |
+|---|---|---|
+| Runs in the loop | `get_plan`, `query_data`, `get_race`, `get_preferences`, `get_weather`, `pacing_calculator`, `get_course_details`, `get_race_info` | Executed immediately, result returned to the model |
+| Declared, handled after | `update_plan`, `update_preferences`, `update_settings`, `garmin_sync`, `race_prep_info` | Recorded; dispatcher returns a note and runs nothing |
+
+`race_prep_info` executes nothing at all, ever. Its only job is to be present in `calls` so `final_output` attaches `RACE_PREP_KNOWLEDGE`. It is attached once however many times the model declares it.
+
+### Tool results are a list, not a dict
+
+This is the one change that also affects the planner path, and it is already live on both.
+
+```python
+calls: list[tuple[str, Any]]   # (tool_name, result), in call order
+```
+
+`tool_results` was a dict keyed by tool name, so a second call to the same tool overwrote the first. The workaround merged them into a list of lists, which `_planned_total` then flattened and summed — so asking for this week and next week reported a two-week total as one week's mileage. With a list there is no key to collide on: `final_output` emits one block per call, `_planned_total` is scoped to a single call and names its date range, and `[plan/race_meta]` and `[race_prep_knowledge]` are guarded against a double fetch.
+
+An empty list replaces the `no_tools` path enum, and also `coach.py`'s old flip to `no_tools` when every tool failed.
+
+### Ordering
+
+Correctness constraints stay in Python, in `_WRITE_ORDER`: `garmin_sync` first, then `update_preferences` before `update_plan` (which self-fetches preferences and would otherwise read stale values), then `update_settings`. Read ordering becomes a prompt concern, stated **twice** — in `build_coach_loop_system` and in the constrained tool's own description, because the model reads descriptions while scanning the tool list and the system prompt while deciding:
+
+- `get_race` before `get_course_details` / `get_race_info` (the cache-poisoning fix)
+- `get_preferences` before advising on scheduling, volume or workout swaps
+- `get_plan` and `query_data` together for "should I run today" and recovery questions
+
+### The confirmation gate becomes real
+
+Today's gate tells the planner *not* to call `update_plan` and to call `get_plan` instead, so a later turn can ask. In the loop the model has already read the plan, so the rule is what it always wanted to be: **if the change would clear days the athlete did not name, do not declare the write — list the days and ask.** `update_plan_day`'s per-change validation stays untouched as the backstop.
+
+### Prompts
+
+| Piece | Where it lives |
+|---|---|
+| `COACH_TOOLS` | 13 schemas in `services/prompts.py`. Static, so it caches. Absorbs `TOOL_METADATA` plus the planner's "Args contracts" |
+| `build_coach_loop_system(local_today)` | A builder, since it needs resolved dates: the weekday table, date interpretation rules, ordering rules, the short-affirmation rule, "never mention tools" |
+| `DEFERRED_TOOLS` | The 5 names the dispatcher records instead of running |
+| `TOOL_SNIPPETS`, `BASE_COACH` | Unchanged. `final_output` still builds the same prompt |
+
+Date-derived guidance cannot live in `COACH_TOOLS` (a module constant), which is why the split falls where it does — and it keeps the cached prefix stable.
+
+### Cost control
+
+- **`call_llm_with_tools`** (`services/llm.py`) — `call_llm`'s retry behaviour, returning the whole `Message` so the caller can read `stop_reason` and the `tool_use` blocks. The system block is always cached: the prefix runs tools → system → messages, so marking system covers the tool schemas, and the loop resends that prefix every turn.
+- **Two copies of every tool result.** The full one goes into `calls` for `final_output`; a row-capped copy (`MAX_RESULT_ROWS = 40`) goes into the loop's messages, which are resent each turn. Capping is by rows, not characters — a blind slice chops mid-JSON. It also caps rows nested one level inside a dict, because `query_data` returns `{"health_data": {"data": [...]}}` and is the largest result in the system.
+- **Read cache** keyed on tool name plus sorted args, local to one run. Dedupes across turns, not within a turn, since parallel blocks all miss before any writes.
+
+### Call budget
+
+| Question type | Planner path | Loop path |
+|---|---|---|
+| No tools needed | 2 | 2 — one loop turn, then final |
+| One round of tools | 2 | 3 |
+| Model iterates on what it read | not possible | 4+, bounded at `MAX_TURNS + 1` |
+
+### Unchanged
+
+`services/chat_stream.py`, the SSE routes, the Redis stream and the frontend, provided the loop keeps yielding the existing event tuples (`status`, `chunk`, `done`, `plan_updated`, `theme_updated`). `SILENCE_AFTER_STATUS` is 300s against `SILENCE_AFTER_CHUNK`'s 60s, so a status event before each tool call keeps a slow turn well inside the orphan guard. `create_plan` keeps its own Opus loop.
 
 ---
 

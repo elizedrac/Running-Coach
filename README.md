@@ -67,6 +67,9 @@ GARMIN_EMAIL=          # cron sync fallback credentials
 GARMIN_PASSWORD=
 AXIOM_TOKEN=           # ingest token for the log shipper (app.axiom.co)
 AXIOM_DATASET=         # runcoach on EC2, runcoach-local on your machine
+COACH_TOOL_LOOP=       # optional; any value switches the coach's decision phase from the
+                       # single-shot planner to the tool loop. Unset = planner. Read at
+                       # import, so changing it needs a restart. See DESIGN.md.
 ```
 
 ## UI Themes

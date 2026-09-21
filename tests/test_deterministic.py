@@ -3140,13 +3140,24 @@ def test_planned_total_returns_none_when_there_are_no_days():
     assert _planned_total("Error running get_plan: boom") is None
 
 
-def test_planned_total_flattens_repeated_get_plan_calls():
-    """Two get_plan calls in one turn are merged into a list of lists by coach.py."""
+def test_planned_total_is_scoped_to_one_call():
+    """Two get_plan calls used to be merged into one list and summed together, so asking
+    for this week and next week reported a two-week total as one week's mileage. Each call
+    now gets its own total, and only rows from that call."""
+    week_one = [{"plan_date": "2026-09-21", "workout_type": "EASY", "target_miles": 5.0}]
+    week_two = [{"plan_date": "2026-09-28", "workout_type": "LONG", "target_miles": 12.0}]
+    assert _planned_total(week_one).startswith("5.0 mi scheduled across the 1 returned days")
+    assert _planned_total(week_two).startswith("12.0 mi scheduled across the 1 returned days")
+
+
+def test_planned_total_names_its_date_range():
+    """Two get_plan calls produce two [plan/planned_total] blocks, so each has to say which
+    days it covers or the coach cannot tell the weeks apart."""
     days = [
-        [{"workout_type": "EASY", "target_miles": 5.0}],
-        [{"workout_type": "LONG", "target_miles": 12.0}],
+        {"plan_date": "2026-09-21", "target_miles": 5.0},
+        {"plan_date": "2026-09-27", "target_miles": 12.0},
     ]
-    assert _planned_total(days).startswith("17.0 mi scheduled across the 2 returned days")
+    assert "(2026-09-21 to 2026-09-27)" in _planned_total(days)
 
 
 # ── Orphaned job status on boot ───────────────────────────────

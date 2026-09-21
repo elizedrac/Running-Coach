@@ -3,7 +3,6 @@ from pathlib import Path
 
 from db.plan import get_current_plan
 from db.user_info import get_user_info
-from models.planner import PlannerOutput
 from services.llm import stream_llm
 from services.prompts import BASE_COACH, HEALTH_METRICS_KNOWLEDGE, TOOL_SNIPPETS, build_query_data_extra
 
@@ -18,38 +17,43 @@ def _planned_total(days) -> str | None:
     Planned targets only. A part-done week has two defensible totals (scheduled vs
     logged-so-far plus remaining) and blending them silently is the failure this exists
     to stop, so the label says which one this is.
+
+    Scoped to one call. Two get_plan calls produce two of these blocks, so each one names
+    its own date range — otherwise "that total is authoritative" in TOOL_SNIPPETS["get_plan"]
+    has two totals to choose from and no way to tell which week is which.
     """
     if not isinstance(days, list):
         return None
-    rows = []
-    for entry in days:
-        # Two get_plan calls in one turn arrive nested — see the tool_results merge in coach.py
-        if isinstance(entry, list):
-            rows.extend(entry)
-        else:
-            rows.append(entry)
-    rows = [r for r in rows if isinstance(r, dict)]
+    rows = [r for r in days if isinstance(r, dict)]
     if not rows:
         return None
     total = sum(r.get("target_miles") or 0 for r in rows)
-    return f"{total:.1f} mi scheduled across the {len(rows)} returned days (planned targets only, not what was actually run)"
+    dates = sorted(r["plan_date"] for r in rows if r.get("plan_date"))
+    span = f" ({dates[0]} to {dates[-1]})" if dates else ""
+    return (
+        f"{total:.1f} mi scheduled across the {len(rows)} returned days{span} "
+        "(planned targets only, not what was actually run)"
+    )
 
 
 def final_output(
     user_query: str,
-    planner_decision: PlannerOutput,
-    tool_results: dict = None,
+    calls: list = None,
     user_id: str = None,
     min_date: str = "2020-01-01",
     has_plan: bool = False,
 ):
-    tool_results = tool_results or {}
+    """`calls` is [(tool_name, result), ...] in the order the tools ran. One block per
+    call rather than per name, so a tool called twice reports both results separately
+    instead of one merged blob.
+    """
+    calls = calls or []
     system_prompt = BASE_COACH  # static — cacheable
 
     plan_status = "The user HAS an active training plan." if has_plan else "The user does NOT have a training plan yet."
     user_prompt = f"[Plan status: {plan_status}]\n\nUser question: {user_query}"
 
-    if planner_decision.path == "tools":
+    if calls:
         knowledge = ""
         # Tracked separately rather than by testing `knowledge` itself: get_plan and
         # race_prep_info append to the same string, so a tool list naming either before
@@ -57,34 +61,39 @@ def final_output(
         # "should I run today" calls get_plan alongside query_data, so whether the coach
         # got HRV and sleep reference ranges came down to planner tool order.
         health_added = False
-        tools = planner_decision.tools
-        for tool in tools:
-            snippet = TOOL_SNIPPETS.get(tool.name, "").replace("{min_date}", min_date)
-            result = tool_results.get(tool.name, "")
-            if tool.name == "query_data":
+        # The blocks below are static reference text, so one copy is all the answer needs.
+        # Per-call data still repeats — that is the point of the list.
+        race_meta_added = False
+        race_prep_added = False
+        for tool_name, result in calls:
+            snippet = TOOL_SNIPPETS.get(tool_name, "").replace("{min_date}", min_date)
+            if tool_name == "query_data":
                 extra = build_query_data_extra(result)
                 if extra:
                     snippet += "\n\n" + extra
             if snippet or result:
-                user_prompt += f"\n\n[{tool.name}]"
+                user_prompt += f"\n\n[{tool_name}]"
                 if snippet:
                     user_prompt += f"\nGuidance: {snippet}"
                 if result:
                     user_prompt += f"\nData: {result}"
 
-            if tool.name == "query_data" and not health_added:
+            if tool_name == "query_data" and not health_added:
                 knowledge += f"\n\n[health_data_knowledge]\n{HEALTH_METRICS_KNOWLEDGE}"
                 health_added = True
 
-            if tool.name == "get_plan":
-                plan_details = get_current_plan(user_id)
-                knowledge += f"\n\n[plan/race_meta]\n{plan_details}"
+            if tool_name == "get_plan":
+                if not race_meta_added:
+                    plan_details = get_current_plan(user_id)
+                    knowledge += f"\n\n[plan/race_meta]\n{plan_details}"
+                    race_meta_added = True
                 planned_total = _planned_total(result)
                 if planned_total:
                     knowledge += f"\n\n[plan/planned_total]\n{planned_total}"
 
-            if tool.name == "race_prep_info":
+            if tool_name == "race_prep_info" and not race_prep_added:
                 knowledge += f"\n\n[race_prep_knowledge]\n{RACE_PREP_KNOWLEDGE}"
+                race_prep_added = True
 
         user_prompt += knowledge
 

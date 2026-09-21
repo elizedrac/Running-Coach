@@ -76,6 +76,55 @@ def call_llm(
     raise RuntimeError(f"call_llm failed after {MAX_RETRIES} retries")
 
 
+def call_llm_with_tools(
+    system_prompt: str,
+    messages: list,
+    tools: list = None,
+    model: str = DEFAULT_MODEL,
+    max_tokens: int = 2048,
+):
+    """One turn of a tool loop, with call_llm's retry behaviour.
+
+    Returns the whole Message rather than its text: the caller needs `stop_reason` and the
+    `tool_use` blocks, and `content[0].text` is empty on a tool_use stop.
+
+    `messages` is owned by the caller, which appends the assistant turn and the tool results
+    each pass. `tools=None` omits the key entirely, which is how a loop forces an answer on
+    its last turn instead of a call it has no budget to run.
+
+    The system block is always cached. The cache prefix runs tools, then system, then
+    messages, so marking system covers the tool schemas too — and unlike a single-shot call,
+    a loop resends that whole prefix on every turn.
+    """
+    system = [{"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}]
+    kwargs = {"tools": tools} if tools else {}
+    for attempt in range(MAX_RETRIES):
+        started = time.monotonic()
+        try:
+            message = client.messages.create(
+                model=model,
+                system=system,
+                messages=messages,
+                max_tokens=max_tokens,
+                **kwargs,
+            )
+            _log_usage("llm_tool_call", model, message.usage, started, stop_reason=message.stop_reason)
+            return message
+
+        except anthropic.RateLimitError as e:
+            _backoff(attempt, e, model)
+        except anthropic.APIStatusError as e:
+            if e.status_code < 500:
+                logger.error("llm_client_error", extra={"model": model, "status": e.status_code}, exc_info=True)
+                raise
+            _backoff(attempt, e, model)
+        except anthropic.APIConnectionError as e:
+            _backoff(attempt, e, model)
+
+    logger.error("llm_exhausted_retries", extra={"model": model, "retries": MAX_RETRIES})
+    raise RuntimeError(f"call_llm_with_tools failed after {MAX_RETRIES} retries")
+
+
 def stream_llm(
     system_prompt: str,
     user_prompt: str,
