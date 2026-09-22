@@ -14,7 +14,7 @@ RACE_DISTANCES_KNOWLEDGE = json.loads(
 TOOL_METADATA = {
     "garmin_sync": "Sync latest Garmin activity and health data into the DB. ONLY call if the user explicitly asks to sync Garmin data. NEVER call for 'sync plan' requests — that is update_plan with include_activities=true, not this.",
     "query_data": "Query the user's RECORDED Garmin history — past workouts, health metrics, trends (improving/declining/stable), training load (ACWR), recovery readiness (body battery). Use for any question about what the user actually did or recorded, not what's scheduled.",
-    "get_plan": "Retrieve the user's SCHEDULED training plan (separate from recorded activity data). Use for questions about upcoming/scheduled workouts; defaults to the current week. Call alongside query_data for 'should I run today' or recovery questions so the coach knows what's scheduled.",
+    "get_plan": "Retrieve the user's SCHEDULED training plan (separate from recorded activity data). Use for questions about upcoming/scheduled workouts; defaults to the current week. Call alongside query_data for 'should I run today' or recovery questions so the coach knows what's scheduled. Any answer that would tell the user to ease off, skip, or adjust a workout needs this — without it the coach can only say 'if you have a workout planned', which reads as though it never checked.",
     "pacing_calculator": "Calculate target training/race paces. Use for ANY question about what pace to run — easy, long run, tempo, interval, race pace, training zones. Call it even if the user provides no numbers: goal_time and distance are auto-filled from their saved race when missing. Do NOT use if the user is explicitly asking to change/update their plan (that's update_plan).",
     "get_race": "Get the user's race details (type, date, goal time, distance). Use for race prep, strategy, or taper questions.",
     "race_prep_info": "Retrieve race-day prep knowledge (nutrition, morning routine, warm-up, gear). Use only for explicit race-day execution questions.",
@@ -122,8 +122,11 @@ COACH_TOOLS = [
             "as opposed to what they actually recorded (that is query_data). Defaults to the "
             "current week. Call alongside query_data for 'should I run today' or any recovery "
             "question: one says what is scheduled, the other what was done, and either alone "
-            "gives the wrong answer. Call this BEFORE update_plan, always — you cannot decide "
-            "what to change without seeing what is there."
+            "gives the wrong answer. Any answer that tells the athlete to ease off, skip or "
+            "adjust a workout needs this first — without it the best you can manage is 'if "
+            "you have a workout planned', which reads as though you never checked. Call this "
+            "BEFORE update_plan, always — you cannot decide what to change without seeing "
+            "what is there."
         ),
         "input_schema": {
             "type": "object",
@@ -468,7 +471,7 @@ How to work:
 Tool order that matters:
 - Call get_race BEFORE get_course_details or get_race_info, so you pass the athlete's real race and location instead of guessing. A guessed string gets cached under the wrong key for a year.
 - Call get_preferences BEFORE advising on scheduling, volume or workout swaps. The athlete notes carry injuries and constraints, and advice written without them has to be walked back.
-- For "should I run today" or any recovery question, call get_plan AND query_data before deciding anything. Scheduled and actual are different questions.
+- Never advise on today's or tomorrow's training without calling get_plan. If the answer would tell them to take it easy, skip it, go gentle, or mentions a scheduled workout at all, you need the plan in front of you — writing "if you have a workout planned" means you failed to read it. This covers "why do I feel awful" and any recovery question, not just "should I run today", and it means get_plan AND query_data: scheduled and actual are different questions.
 - Call get_plan before declaring update_plan, every time.
 
 Changes are applied after you finish, so update_plan, update_preferences, update_settings and garmin_sync return nothing to you. Declare each at most once, and do not wait on a result.
