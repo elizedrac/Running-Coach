@@ -75,10 +75,18 @@ def _windows(start_date: str, end_date: str, prev_start=None, prev_end=None) -> 
     return prev_start.isoformat(), prev_end.isoformat()
 
 
-def _build(metric, current, prev_rows, previous, higher_is_better):
-    result = {"metric": metric, "current": round(current, 2)}
+def _build(metric, current, prev_rows, previous, higher_is_better, start_date, end_date, prev_start, prev_end):
+    """Every trend carries the window it was measured over.
+
+    Without it, two query_data calls in one turn return two `total_miles` blocks that
+    look identical, and the coach reported a 14-day total as the last 7 days' mileage —
+    then invented an explanation when challenged. A number the model cannot attribute to
+    a date range is a number it will misattribute.
+    """
+    result = {"metric": metric, "window": f"{start_date} to {end_date}", "current": round(current, 2)}
     if prev_rows:
         result["previous"] = round(previous, 2)
+        result["previous_window"] = f"{prev_start} to {prev_end}"
         result["trend"] = _direction(current, previous, higher_is_better)
     return result
 
@@ -93,7 +101,9 @@ def miles_trend(user_id: str, start_date: str, end_date: str, prev_start=None, p
     prev = []
     if prev_start and prev_end:
         prev = get_activities(user_id, prev_start, prev_end)
-    return _build("total_miles", _sum(curr, "miles"), prev, _sum(prev, "miles"), True)
+    return _build(
+        "total_miles", _sum(curr, "miles"), prev, _sum(prev, "miles"), True, start_date, end_date, prev_start, prev_end
+    )
 
 
 def pace_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -109,6 +119,10 @@ def pace_trend(user_id: str, start_date: str, end_date: str, prev_start=None, pr
         prev,
         _avg(prev, "average_pace", _pace_to_seconds),
         False,
+        start_date,
+        end_date,
+        prev_start,
+        prev_end,
     )
 
 
@@ -119,7 +133,9 @@ def hr_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev
     prev = []
     if prev_start and prev_end:
         prev = get_activities(user_id, prev_start, prev_end)
-    return _build("avg_hr", _avg(curr, "avg_hr"), prev, _avg(prev, "avg_hr"), None)
+    return _build(
+        "avg_hr", _avg(curr, "avg_hr"), prev, _avg(prev, "avg_hr"), None, start_date, end_date, prev_start, prev_end
+    )
 
 
 def total_calories_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -129,7 +145,17 @@ def total_calories_trend(user_id: str, start_date: str, end_date: str, prev_star
     prev = []
     if prev_start and prev_end:
         prev = get_activities(user_id, prev_start, prev_end)
-    return _build("total_calories", _sum(curr, "calories_burned"), prev, _sum(prev, "calories_burned"), None)
+    return _build(
+        "total_calories",
+        _sum(curr, "calories_burned"),
+        prev,
+        _sum(prev, "calories_burned"),
+        None,
+        start_date,
+        end_date,
+        prev_start,
+        prev_end,
+    )
 
 
 def avg_calories_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -139,7 +165,17 @@ def avg_calories_trend(user_id: str, start_date: str, end_date: str, prev_start=
     prev = []
     if prev_start and prev_end:
         prev = get_activities(user_id, prev_start, prev_end)
-    return _build("avg_calories_per_activity", _avg(curr, "calories_burned"), prev, _avg(prev, "calories_burned"), None)
+    return _build(
+        "avg_calories_per_activity",
+        _avg(curr, "calories_burned"),
+        prev,
+        _avg(prev, "calories_burned"),
+        None,
+        start_date,
+        end_date,
+        prev_start,
+        prev_end,
+    )
 
 
 def activity_count_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -149,7 +185,7 @@ def activity_count_trend(user_id: str, start_date: str, end_date: str, prev_star
     prev = []
     if prev_start and prev_end:
         prev = get_activities(user_id, prev_start, prev_end)
-    return _build("total_activities", len(curr), prev, len(prev), True)
+    return _build("total_activities", len(curr), prev, len(prev), True, start_date, end_date, prev_start, prev_end)
 
 
 def total_time_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -165,6 +201,10 @@ def total_time_trend(user_id: str, start_date: str, end_date: str, prev_start=No
         prev,
         _sum(prev, "total_time", _time_to_hours),
         True,
+        start_date,
+        end_date,
+        prev_start,
+        prev_end,
     )
 
 
@@ -178,7 +218,9 @@ def hrv_trend(user_id: str, start_date: str, end_date: str, prev_start=None, pre
     prev = []
     if prev_start and prev_end:
         prev = get_health_history(user_id, prev_start, prev_end)
-    return _build("avg_hrv", _avg(curr, "hrv"), prev, _avg(prev, "hrv"), True)
+    return _build(
+        "avg_hrv", _avg(curr, "hrv"), prev, _avg(prev, "hrv"), True, start_date, end_date, prev_start, prev_end
+    )
 
 
 def rhr_trend(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -188,7 +230,9 @@ def rhr_trend(user_id: str, start_date: str, end_date: str, prev_start=None, pre
     prev = []
     if prev_start and prev_end:
         prev = get_health_history(user_id, prev_start, prev_end)
-    return _build("avg_rhr", _avg(curr, "rhr"), prev, _avg(prev, "rhr"), False)
+    return _build(
+        "avg_rhr", _avg(curr, "rhr"), prev, _avg(prev, "rhr"), False, start_date, end_date, prev_start, prev_end
+    )
 
 
 def average_sleep(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -198,7 +242,17 @@ def average_sleep(user_id: str, start_date: str, end_date: str, prev_start=None,
     prev = []
     if prev_start and prev_end:
         prev = get_health_history(user_id, prev_start, prev_end)
-    return _build("avg_sleep_score", _avg(curr, "sleep_score"), prev, _avg(prev, "sleep_score"), True)
+    return _build(
+        "avg_sleep_score",
+        _avg(curr, "sleep_score"),
+        prev,
+        _avg(prev, "sleep_score"),
+        True,
+        start_date,
+        end_date,
+        prev_start,
+        prev_end,
+    )
 
 
 def total_sleep(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -214,6 +268,10 @@ def total_sleep(user_id: str, start_date: str, end_date: str, prev_start=None, p
         prev,
         _avg(prev, "total_sleep", _time_to_hours),
         True,
+        start_date,
+        end_date,
+        prev_start,
+        prev_end,
     )
 
 
@@ -224,7 +282,17 @@ def stress_trend(user_id: str, start_date: str, end_date: str, prev_start=None, 
     prev = []
     if prev_start and prev_end:
         prev = get_health_history(user_id, prev_start, prev_end)
-    return _build("avg_stress", _avg(curr, "stress"), prev, _avg(prev, "stress"), False)
+    return _build(
+        "avg_stress",
+        _avg(curr, "stress"),
+        prev,
+        _avg(prev, "stress"),
+        False,
+        start_date,
+        end_date,
+        prev_start,
+        prev_end,
+    )
 
 
 def average_steps(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -234,7 +302,17 @@ def average_steps(user_id: str, start_date: str, end_date: str, prev_start=None,
     prev = []
     if prev_start and prev_end:
         prev = get_health_history(user_id, prev_start, prev_end)
-    return _build("avg_steps", _avg(curr, "total_steps"), prev, _avg(prev, "total_steps"), True)
+    return _build(
+        "avg_steps",
+        _avg(curr, "total_steps"),
+        prev,
+        _avg(prev, "total_steps"),
+        True,
+        start_date,
+        end_date,
+        prev_start,
+        prev_end,
+    )
 
 
 def total_steps(user_id: str, start_date: str, end_date: str, prev_start=None, prev_end=None) -> dict:
@@ -244,7 +322,17 @@ def total_steps(user_id: str, start_date: str, end_date: str, prev_start=None, p
     prev = []
     if prev_start and prev_end:
         prev = get_health_history(user_id, prev_start, prev_end)
-    return _build("total_steps", _sum(curr, "total_steps"), prev, _sum(prev, "total_steps"), True)
+    return _build(
+        "total_steps",
+        _sum(curr, "total_steps"),
+        prev,
+        _sum(prev, "total_steps"),
+        True,
+        start_date,
+        end_date,
+        prev_start,
+        prev_end,
+    )
 
 
 # ── training load and body battery ──────────────────────────────────────────────────────────
@@ -382,4 +470,13 @@ def compute_load(user_id: str) -> dict:
 
     acwr = acute_load / chronic_load if chronic_load > 0 else None
 
-    return {"acute_load": acute_load, "chronic_load": chronic_load, "acwr": acwr}
+    # Unitless scores, not miles. Said out loud because the coach reported one as mileage
+    # and then, challenged, claimed a mileage figure had been this score all along.
+    return {
+        "acute_load": acute_load,
+        "acute_window": f"{seven_days_ago} to {today_str}",
+        "chronic_load": chronic_load,
+        "chronic_window": f"{twenty_eight_days_ago} to {today_str} (averaged to a week)",
+        "acwr": acwr,
+        "units": "load scores are unitless training-stress values derived from duration and heart rate — never miles",
+    }

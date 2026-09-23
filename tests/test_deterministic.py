@@ -291,6 +291,26 @@ def test_windows_explicit_prev_falls_back_when_before_min_date():
 
 
 @patch("services.trend_analysis.get_activities")
+def test_trend_results_name_the_window_they_cover(mock_get):
+    """Two query_data calls in one turn return two total_miles blocks that otherwise look
+    identical. The coach reported a longer window's total as the last 7 days' mileage, then
+    invented an explanation when challenged. A number with no date range gets misattributed."""
+    mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
+    result = miles_trend("user1", "2026-05-07", "2026-05-13", prev_start="2026-04-30", prev_end="2026-05-06")
+    assert result["window"] == "2026-05-07 to 2026-05-13"
+    assert result["previous_window"] == "2026-04-30 to 2026-05-06"
+
+
+@patch("services.trend_analysis.get_activities")
+def test_trend_omits_the_comparison_window_when_there_is_no_comparison(mock_get):
+    """previous_window without a previous would imply a comparison that was never made."""
+    mock_get.side_effect = [CURR_ACTIVITIES, []]
+    result = miles_trend("user1", "2026-05-07", "2026-05-13")
+    assert "window" in result
+    assert "previous_window" not in result
+
+
+@patch("services.trend_analysis.get_activities")
 def test_miles_trend_with_explicit_prev(mock_get):
     # explicit prev window → those exact dates queried, no 30-day shift
     mock_get.side_effect = [CURR_ACTIVITIES, PREV_ACTIVITIES]
@@ -1149,6 +1169,17 @@ def test_compute_load_returns_expected_keys(mock_get):
     mock_get.return_value = []
     result = compute_load("user1")
     assert {"acute_load", "chronic_load", "acwr"} <= set(result)
+
+
+@patch("services.trend_analysis.get_activities")
+def test_compute_load_labels_its_windows_and_says_it_is_not_mileage(mock_get):
+    """The coach called a load score mileage, then claimed a mileage figure had been this
+    score all along. Both windows and the unit have to travel with the numbers."""
+    mock_get.return_value = []
+    result = compute_load("user1")
+    assert " to " in result["acute_window"]
+    assert " to " in result["chronic_window"]
+    assert "never miles" in result["units"]
 
 
 @patch("services.trend_analysis.get_activities")
