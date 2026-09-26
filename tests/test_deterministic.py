@@ -123,6 +123,10 @@ def test_cache_separate_query_types():
 # ── get_weather tests ─────────────────────────────────────────────────────────
 
 _FAKE_WEATHER_API_RESPONSE = {
+    # localtime is the city's clock, and get_weather cuts the window against it rather than
+    # the server's. Without this key the fixture's hours all sort before today and the
+    # assertions below pass against an empty list.
+    "location": {"localtime": "2026-05-15 09:30"},
     "forecast": {
         "forecastday": [
             {
@@ -147,6 +151,23 @@ _MOCK_WEATHER_RESP = MagicMock()
 _MOCK_WEATHER_RESP.json.return_value = _FAKE_WEATHER_API_RESPONSE
 
 WEATHER_KEYS = {"temperature", "feels_like", "wind_speed", "wind_direction", "humidity", "chance_of_rain"}
+
+
+@patch("services.weather.requests.get", return_value=_MOCK_WEATHER_RESP)
+def test_get_weather_rows_say_what_hour_they_are(mock_get):
+    """Unlabelled rows left the coach offering "the best window is hour 6 from now", which it
+    then converted to the wrong clock time and could not correct when told the real one."""
+    result = get_weather("test_user")
+    assert [h["time"] for h in result] == [f"{h:02d}:00" for h in range(9, 21)]
+
+
+@patch("services.weather.requests.get", return_value=_MOCK_WEATHER_RESP)
+def test_get_weather_window_starts_at_the_city_clock_not_the_server(mock_get):
+    """The container runs UTC. Against an EDT athlete at 12:55pm the old cutoff returned 4pm
+    onwards and the coach read the first row as "now", recommending a 10pm long run."""
+    result = get_weather("test_user")
+    assert result[0]["time"] == "09:00"  # localtime is 09:30, so the current hour leads
+    assert len(result) == 12
 
 
 @patch("services.weather.requests.get", return_value=_MOCK_WEATHER_RESP)
