@@ -8,8 +8,7 @@ from datetime import date, timedelta
 from pathlib import Path
 
 from db.health_history import get_user_min_date
-from db.plan import get_current_plan, get_plan_id
-from db.plan import get_plan_days as get_plan
+from db.plan import get_current_plan, get_intervals_for_days, get_plan_days, get_plan_id
 from db.preferences import get_preferences, update_preferences
 from db.race import get_race
 from models.planner import History
@@ -57,6 +56,28 @@ def _update_settings(user_id: str, action_intent: str = ""):
     return execute_write(user_id, action_intent)
 
 
+def _get_plan(plan_id: str, week_number=None, start_date=None, end_date=None):
+    """Plan days with their intervals attached.
+
+    plan_days holds one summary pace per day; the actual reps live in plan_intervals,
+    which the coach never fetched. Asked to convert Tuesday's reps to mph it quoted the
+    day's 6:22 summary instead of the 7:07 the reps are actually set to, and when told to
+    read the intervals it had none to read, so it defended the wrong number.
+
+    Nested under each day rather than appended to the list, so a week stays seven rows
+    for the loop's row cap and the interval rows cannot be mistaken for days.
+    """
+    days = get_plan_days(plan_id, week_number, start_date, end_date)
+    if not days:
+        return days
+    intervals = get_intervals_for_days([d["id"] for d in days if d.get("id")])
+    for day in days:
+        rows = intervals.get(day.get("id"))
+        if rows:
+            day["intervals"] = rows
+    return days
+
+
 TOOL_REGISTRY = {
     "get_weather": get_weather,
     "garmin_sync": garmin_sync,
@@ -66,7 +87,7 @@ TOOL_REGISTRY = {
     "get_race_info": get_race_info,
     "get_preferences": get_preferences,
     "update_preferences": update_preferences,
-    "get_plan": get_plan,
+    "get_plan": _get_plan,
     "update_plan": run_locked_plan_update,
     "get_race": get_race,
     "race_prep_info": lambda user_id, **kwargs: None,

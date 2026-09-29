@@ -85,6 +85,29 @@ def get_plan_intervals(day_id):
         return []
 
 
+def get_intervals_for_days(day_ids: list) -> dict:
+    """Intervals for several days at once, grouped by day_id.
+
+    One query rather than one per day. The coach reads a week at a time, and seven
+    round trips to render one answer is the kind of thing that pushes a turn past the
+    orphan guard.
+    """
+    if not day_ids:
+        return {}
+    client = get_supabase_client()
+    try:
+        response = client.table("plan_intervals").select("*").in_("day_id", day_ids).execute()
+    except Exception:
+        logger.error("intervals_batch_query_failed", exc_info=True)
+        return {}
+    grouped = {}
+    for row in response.data:
+        grouped.setdefault(row["day_id"], []).append(row)
+    for rows in grouped.values():
+        rows.sort(key=lambda r: r.get("interval_num") or 0)
+    return grouped
+
+
 def save_plan_intervals(day_id, intervals: list) -> dict:
     # No intervals is a valid end state (the caller cleared them), not a failure.
     if not intervals:

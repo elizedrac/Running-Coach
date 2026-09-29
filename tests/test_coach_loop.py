@@ -490,3 +490,50 @@ def test_race_prep_info_is_attached_once_however_often_it_is_declared():
     turns = [_turn(_block("race_prep_info", id="a"), _block("race_prep_info", id="b")), _answer()]
     _, captured = _run_orchestrate_loop(turns)
     assert [name for name, _ in captured["calls"]] == ["race_prep_info"]
+
+
+# ── get_plan returns the reps, not just the day ───────────────────────────────
+
+
+def test_get_plan_attaches_intervals_to_their_day():
+    """plan_days holds one summary pace per day; the reps live in plan_intervals, which the
+    coach never fetched. Asked to convert Tuesday's reps it quoted the day's 6:22 summary
+    instead of the 7:07 the reps are set to, and when told to read the intervals it had
+    none, so it defended the wrong number."""
+    from services.coach import _get_plan
+
+    days = [{"id": "d1", "plan_date": "2026-09-29", "workout_type": "INTERVAL", "target_pace": "6:22"}]
+    reps = {"d1": [{"interval_num": 2, "interval_type": "WORK", "target_pace": "7:07"}]}
+    with (
+        patch("services.coach.get_plan_days", return_value=days),
+        patch("services.coach.get_intervals_for_days", return_value=reps) as batch,
+    ):
+        result = _get_plan("PLAN-ID", start_date="2026-09-29", end_date="2026-09-29")
+
+    assert result[0]["intervals"][0]["target_pace"] == "7:07"
+    batch.assert_called_once_with(["d1"])  # one query for the week, not one per day
+
+
+def test_get_plan_leaves_days_without_intervals_alone():
+    """An empty intervals key on an easy run would read as a workout with no reps defined."""
+    days = [{"id": "d1", "plan_date": "2026-09-28", "workout_type": "EASY"}]
+    from services.coach import _get_plan
+
+    with (
+        patch("services.coach.get_plan_days", return_value=days),
+        patch("services.coach.get_intervals_for_days", return_value={}),
+    ):
+        result = _get_plan("PLAN-ID")
+
+    assert "intervals" not in result[0]
+
+
+def test_get_plan_with_no_days_does_not_query_intervals():
+    from services.coach import _get_plan
+
+    with (
+        patch("services.coach.get_plan_days", return_value=[]),
+        patch("services.coach.get_intervals_for_days") as batch,
+    ):
+        assert _get_plan("PLAN-ID") == []
+    batch.assert_not_called()
